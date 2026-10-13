@@ -8,7 +8,7 @@ mod rotate;
 mod rectangle;
 mod select;
 
-use glam::{DVec3, Vec2};
+use glam::{DAffine3, DVec3, Vec2};
 use sketchcraft_doc::Document;
 use sketchcraft_view::OrbitCamera;
 
@@ -224,9 +224,19 @@ pub(crate) fn parse_array(typed: &str) -> Option<Array> {
     (count >= 1).then_some(Array { count, divide })
 }
 
-/// Outline an entity, e.g. what a tool would pick up.
-pub(crate) fn highlight_entity(model: &sketchcraft_doc::Model, entity: sketchcraft_doc::Entity, overlay: &mut Overlay) {
-    use sketchcraft_doc::Entity;
+/// What's under the cursor, as an entity of the container being edited: an edge or face of
+/// its own, or the group or component the picked geometry belongs to. `None` for nothing, or
+/// for geometry outside the group being edited.
+pub(crate) fn pick_resolved(doc: &Document, screen: pick::Screen<'_>, cursor: Vec2) -> Option<sketchcraft_doc::Entity> {
+    let view = doc.view();
+    pick::pick_entity(view.model(), screen, cursor).and_then(|e| view.resolve(e))
+}
+
+/// Outline an entity of the container being edited, e.g. what a tool would pick up. Groups and
+/// components get all their edges outlined.
+pub(crate) fn highlight_entity(view: &sketchcraft_doc::View, entity: sketchcraft_doc::Entity, overlay: &mut Overlay) {
+    use sketchcraft_doc::{Entity, Owner};
+    let model = view.model();
     match entity {
         Entity::Edge(id) => {
             if let Some(edge) = model.edge(id) {
@@ -238,6 +248,42 @@ pub(crate) fn highlight_entity(model: &sketchcraft_doc::Model, entity: sketchcra
                 overlay.highlight.push(model.edge_points(edge));
             }
         }
+        Entity::Instance(instance) => {
+            for (id, edge) in model.edges() {
+                if view.owner(Entity::Edge(id)) == Owner::Instance(instance) {
+                    overlay.highlight.push(model.edge_points(edge));
+                }
+            }
+        }
+    }
+}
+
+impl Overlay {
+    /// Map every point from the edited container's coordinates to the world.
+    fn into_world(mut self, t: &DAffine3) -> Self {
+        let p = |v: DVec3| t.transform_point3(v);
+        let n = |v: DVec3| t.transform_vector3(v).normalize();
+        for segment in self.lines.iter_mut().chain(self.highlight.iter_mut()) {
+            *segment = segment.map(p);
+        }
+        if let Some(snap) = &mut self.snap {
+            snap.point = p(snap.point);
+            snap.normal = n(snap.normal);
+        }
+        if let Some(guide) = &mut self.guide {
+            guide.from = p(guide.from);
+            guide.to = p(guide.to);
+        }
+        if let Some(protractor) = &mut self.protractor {
+            protractor.center = p(protractor.center);
+            protractor.normal = n(protractor.normal);
+            protractor.from = protractor.from.map(p);
+            protractor.to = protractor.to.map(p);
+        }
+        for (grip, _) in &mut self.grips {
+            *grip = p(*grip);
+        }
+        self
     }
 }
 
@@ -376,7 +422,7 @@ impl Tools {
             _ => {}
         }
 
-        let screen = Screen { camera, size };
+        let screen = Screen::in_context(camera, size, doc.context_transform());
         if self.active == ToolId::Move
             && let Some(result) = self.grip_pointer(event, doc, screen)
         {
@@ -423,10 +469,7 @@ impl Tools {
                 self.typed.clear();
                 self.push_pull.click(doc, screen, pos, count)
             }
-            (ToolId::PushPull, PointerEvent::DragStart { origin }) => {
-                self.push_pull.drag_start(doc, screen, origin);
-                Ok(())
-            }
+            (ToolId::PushPull, PointerEvent::DragStart { origin }) => self.push_pull.drag_start(doc, screen, origin),
             (ToolId::PushPull, PointerEvent::DragEnd { pos, .. }) => self.push_pull.drag_end(doc, screen, pos),
             (ToolId::Move, PointerEvent::Move(pos) | PointerEvent::Drag { pos, .. }) => {
                 self.move_tool.hover(doc, screen, pos);
@@ -513,14 +556,51 @@ impl Tools {
         }
     }
 
-    /// Esc: clear typing, else cancel the operation in progress, else drop the selection.
+    /// Esc: clear typing, else cancel the operation in progress, else drop the selection, else
+    /// close the group being edited.
     pub fn escape(&mut self, doc: &mut Document) {
+        let busy = self.select.is_busy()
+            || self.rectangle.is_busy()
+            || self.push_pull.is_busy()
+            || self.move_tool.is_busy()
+            || self.rotate.is_busy();
         if self.is_typing() {
             self.typed.clear();
-        } else if self.select.is_busy() || self.rectangle.is_busy() || self.push_pull.is_busy() || self.move_tool.is_busy() || self.rotate.is_busy() {
+        } else if busy {
             self.cancel();
         } else if self.active == ToolId::Select && !doc.selection().is_empty() {
             doc.selection_mut().clear();
+        } else if doc.exit() {
+            self.cancel();
+        }
+    }
+
+    /// Whether Push/Pull makes each new board (a solid pulled from a free-standing face) a group.
+    pub fn auto_group(&self) -> bool {
+        self.push_pull.auto_group
+    }
+
+    pub fn set_auto_group(&mut self, on: bool) {
+        self.push_pull.auto_group = on;
+    }
+
+    /// Make the selection a group or component (Ctrl+G / G).
+    pub fn make_group(&mut self, doc: &mut Document, kind: sketchcraft_doc::DefinitionKind) {
+        self.cancel();
+        let noun = match kind {
+            sketchcraft_doc::DefinitionKind::Group => "group",
+            sketchcraft_doc::DefinitionKind::Component => "component",
+        };
+        if doc.group_selection(kind).is_none() {
+            self.message = Some(format!("Select something to make a {noun}."));
+        }
+    }
+
+    /// Explode the selected groups and components back into loose geometry.
+    pub fn explode(&mut self, doc: &mut Document) {
+        self.cancel();
+        if !doc.explode_selection() {
+            self.message = Some("Select a group or component to explode.".into());
         }
     }
 
@@ -569,6 +649,7 @@ impl Tools {
         }
     }
 
+    /// What to draw over the viewport, in world coordinates.
     pub fn overlay(&self, doc: &Document) -> Overlay {
         let mut overlay = Overlay::default();
         match self.active {
@@ -580,7 +661,7 @@ impl Tools {
             ToolId::Rotate => self.rotate.overlay(doc, &mut overlay),
             _ => {}
         }
-        overlay
+        overlay.into_world(&doc.context_transform())
     }
 }
 
@@ -663,6 +744,30 @@ mod tests {
         tools.enter(&mut doc);
         let (lo, hi) = doc.model().bounds().unwrap();
         assert!((hi - lo).x > 3.5 && (hi - lo).x < 4.0, "45° footprint {}", hi - lo);
+    }
+
+    #[test]
+    fn select_click_picks_a_group_and_double_click_opens_it() {
+        use sketchcraft_view::StandardView;
+        let mut doc = Document::default();
+        let face = doc.edit(|m| m.add_rectangle(DVec3::ZERO, DVec3::X * 1.5, DVec3::Y * 3.5, DVec3::Z)).unwrap();
+        let group = doc.push_pull(face, 10.0, true).unwrap().unwrap();
+        let mut camera = OrbitCamera { target: glam::Vec3::new(0.75, 1.75, 5.0), distance: 40.0, ..Default::default() };
+        camera.set_view(StandardView::Iso);
+        let size = Vec2::new(1000.0, 800.0);
+        let side = camera.project(glam::Vec3::new(0.75, 0.0, 5.0), size).unwrap();
+        let mut tools = Tools::default();
+        let mods = Modifiers::default();
+        tools.pointer(PointerEvent::Click { pos: side, count: 1, mods }, &mut doc, &mut camera, size);
+        assert!(doc.selection().contains(sketchcraft_doc::Entity::Instance(group)));
+        tools.pointer(PointerEvent::Click { pos: side, count: 2, mods }, &mut doc, &mut camera, size);
+        assert_eq!(doc.path(), &[group]);
+        // Inside, the same spot is the board's own face.
+        tools.pointer(PointerEvent::Click { pos: side, count: 1, mods }, &mut doc, &mut camera, size);
+        assert!(matches!(doc.selection().iter().next(), Some(sketchcraft_doc::Entity::Face(_))));
+        // Clicking empty space closes the group.
+        tools.pointer(PointerEvent::Click { pos: Vec2::new(5.0, 5.0), count: 1, mods }, &mut doc, &mut camera, size);
+        assert!(doc.path().is_empty());
     }
 
     #[test]

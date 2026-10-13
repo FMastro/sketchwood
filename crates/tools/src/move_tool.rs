@@ -10,12 +10,12 @@
 
 use std::collections::BTreeSet;
 
-use glam::{DVec3, Vec2};
+use glam::{DAffine3, DVec3, Vec2};
 use sketchcraft_doc::units::{format_length, parse_length, parse_lengths};
 use sketchcraft_doc::{Document, EPS, Entity, Model, VertexId};
 
-use crate::pick::{Screen, Snap, closest_on_line, pick_entity, snap_feature};
-use crate::{Array, Axis, Guide, Overlay, Protractor, highlight_entity, parse_array};
+use crate::pick::{Screen, Snap, closest_on_line, snap_feature};
+use crate::{Array, Axis, Guide, Overlay, Protractor, highlight_entity, parse_array, pick_resolved};
 
 /// How close, in points, the cursor must come to an axis line to lock onto it.
 const AXIS_RADIUS: f32 = 14.0;
@@ -67,7 +67,6 @@ struct Op {
 #[derive(Clone)]
 struct Done {
     entities: Vec<Entity>,
-    vertices: BTreeSet<VertexId>,
     offset: DVec3,
     copy: Option<Array>,
     model_version: u64,
@@ -96,7 +95,7 @@ impl MoveTool {
     }
 
     pub fn hover(&mut self, doc: &Document, screen: Screen<'_>, cursor: Vec2) {
-        let model = doc.model();
+        let view = doc.view();
         if self.op.is_none() {
             // Grips can sit off the geometry; keep them while the cursor is on one.
             if let Some(grips) = &mut self.grips {
@@ -106,20 +105,21 @@ impl MoveTool {
                     return;
                 }
             }
-            self.hover = if doc.selection().is_empty() { pick_entity(model, screen, cursor) } else { None };
-            self.snap = crate::pick::snap(model, screen, cursor, None);
+            self.hover = if doc.selection().is_empty() { pick_resolved(doc, screen, cursor) } else { None };
+            self.snap = crate::pick::snap(view.model(), screen, cursor, None);
             let target: Vec<Entity> = match self.hover {
+                Some(Entity::Instance(id)) => vec![Entity::Instance(id)],
                 // Loose geometry: grips go around the whole connected piece, like a board.
-                Some(entity) => model.connected(entity).into_iter().collect(),
+                Some(entity) => doc.model().connected(entity).into_iter().collect(),
                 None => doc.selection().iter().collect(),
             };
-            self.grips = grips_for(model, screen, target);
+            self.grips = grips_for(doc, screen, target);
             if let Some(grips) = &mut self.grips {
                 grips.hovered = grip_at(grips, screen, cursor);
             }
             return;
         }
-        let (target, axis, snap) = self.target(model, screen, cursor);
+        let (target, axis, snap) = self.target(view.model(), screen, cursor);
         self.snap = snap;
         if let Some(op) = &mut self.op {
             op.offset = target - op.base;
@@ -223,11 +223,12 @@ impl MoveTool {
     }
 
     pub fn overlay(&self, doc: &Document, overlay: &mut Overlay) {
-        let model = doc.model();
+        let view = doc.view();
+        let model = view.model();
         overlay.snap = self.snap;
         let Some(op) = &self.op else {
             if let Some(entity) = self.hover {
-                highlight_entity(model, entity, overlay);
+                highlight_entity(view, entity, overlay);
             }
             if let Some(grips) = &self.grips {
                 for (f, face) in grips.faces.iter().enumerate() {
@@ -262,7 +263,7 @@ impl MoveTool {
     fn start(&mut self, doc: &Document, screen: Screen<'_>, cursor: Vec2, dragging: bool) -> Result<(), String> {
         let model = doc.model();
         let entities: Vec<Entity> = if doc.selection().is_empty() {
-            match pick_entity(model, screen, cursor) {
+            match pick_resolved(doc, screen, cursor) {
                 // A face moves with its edges.
                 Some(Entity::Face(id)) => std::iter::once(Entity::Face(id))
                     .chain(model.face_edges(id).into_iter().map(Entity::Edge))
@@ -273,10 +274,10 @@ impl MoveTool {
         } else {
             doc.selection().iter().collect()
         };
-        let Some(base) = crate::pick::snap(model, screen, cursor, None).map(|s| s.point) else {
+        let Some(base) = crate::pick::snap(doc.view().model(), screen, cursor, None).map(|s| s.point) else {
             return Ok(());
         };
-        let vertices = model.entity_vertices(entities.iter().copied());
+        let vertices = doc.view().vertices_of(&entities);
         self.last = None;
         self.hover = None;
         self.op = Some(Op { entities, vertices, base, offset: DVec3::ZERO, axis: self.lock, dragging });
@@ -316,7 +317,7 @@ impl MoveTool {
         }
         let free = ray
             .hit_plane(base, DVec3::Z)
-            .or_else(|| ray.hit_plane(base, -screen.camera.forward().as_dvec3()))
+            .or_else(|| ray.hit_plane(base, -screen.forward()))
             .unwrap_or(base + op.offset);
         (free, None, None)
     }
@@ -329,7 +330,6 @@ impl MoveTool {
         }
         let done = Done {
             entities: op.entities.clone(),
-            vertices: op.vertices.clone(),
             offset,
             copy: self.copy.then_some(Array { count: 1, divide: false }),
             model_version: 0,
@@ -359,24 +359,17 @@ impl MoveTool {
 
     /// Move or copy as one undo step; on failure the document is untouched.
     fn apply(&mut self, doc: &mut Document, mut done: Done) -> Result<(), String> {
-        let mut trial = doc.model().clone();
-        let copies = match done.copy {
-            None => {
-                trial.move_vertices(&done.vertices, done.offset).map_err(|e| e.to_string())?;
-                None
-            }
+        let translate = |offset: DVec3| DAffine3::from_translation(offset);
+        let transforms: Vec<DAffine3> = match done.copy {
+            None => vec![translate(done.offset)],
             Some(Array { count, divide }) => {
                 let step = if divide { done.offset / f64::from(count) } else { done.offset };
-                let mut all = Vec::new();
-                for i in 1..=count {
-                    all.extend(trial.copy_entities(&done.entities, step * f64::from(i)));
-                }
-                Some(all)
+                (1..=count).map(|i| translate(step * f64::from(i))).collect()
             }
         };
-        doc.edit(|model| *model = trial);
+        let copies = doc.transform_entities(&done.entities, &transforms, done.copy.is_some()).map_err(|e| e.to_string())?;
         // SketchUp selects what was copied.
-        if let Some(copies) = copies {
+        if done.copy.is_some() {
             let selection = doc.selection_mut();
             selection.clear();
             selection.extend(copies);
@@ -398,18 +391,29 @@ pub struct GripRotation {
 
 /// Grips for the bounding box of `entities`: on each box face that faces the camera, four
 /// grips halfway between the face's center and its sides. Flat boxes keep only their two big
-/// faces (one of them visible).
-fn grips_for(model: &Model, screen: Screen<'_>, entities: Vec<Entity>) -> Option<Grips> {
+/// faces (one of them visible). A single group or component gets a box along its own axes, so
+/// a rotated board's grips stay on its faces.
+fn grips_for(doc: &Document, screen: Screen<'_>, entities: Vec<Entity>) -> Option<Grips> {
     if entities.is_empty() {
         return None;
     }
-    let vertices = model.entity_vertices(entities.iter().copied());
+    let view = doc.view();
+    let vertices = view.vertices_of(&entities);
+    // The box's frame: the instance's placement for a single instance, else the model axes.
+    let frame = match entities[..] {
+        [Entity::Instance(id)] => doc.container().instance(id)?.transform,
+        _ => DAffine3::IDENTITY,
+    };
+    let to_box = frame.inverse();
     let (lo, hi) = vertices
         .iter()
-        .map(|&v| model.vertex(v))
+        .map(|&v| to_box.transform_point3(view.model().vertex(v)))
         .fold((DVec3::INFINITY, DVec3::NEG_INFINITY), |(lo, hi), p| (lo.min(p), hi.max(p)));
+    if !lo.is_finite() {
+        return None;
+    }
     let (center, half) = ((lo + hi) * 0.5, (hi - lo) * 0.5);
-    let eye = screen.eye();
+    let eye = to_box.transform_point3(screen.eye());
     let mut faces = Vec::new();
     for axis in Axis::ALL {
         let n = axis.dir();
@@ -435,7 +439,11 @@ fn grips_for(model: &Model, screen: Screen<'_>, entities: Vec<Entity>) -> Option
                 face_center + v * hv * 0.5,
                 face_center - v * hv * 0.5,
             ];
-            faces.push(GripFace { center: face_center, normal, grips });
+            faces.push(GripFace {
+                center: frame.transform_point3(face_center),
+                normal: frame.transform_vector3(normal).normalize(),
+                grips: grips.map(|g| frame.transform_point3(g)),
+            });
         }
     }
     Some(Grips { entities, vertices, faces, hovered: None })
@@ -510,7 +518,7 @@ mod tests {
     #[test]
     fn move_along_red_by_typing() {
         let (mut doc, camera) = setup();
-        let screen = Screen { camera: &camera, size: SIZE };
+        let screen = Screen::new(&camera, SIZE);
         let mut tool = MoveTool::default();
         tool.click(&mut doc, screen, at(screen, DVec3::ZERO)).unwrap();
         tool.hover(&doc, screen, at(screen, DVec3::X * 20.0));
@@ -523,7 +531,7 @@ mod tests {
     #[test]
     fn arrow_key_lock_moves_straight_up() {
         let (mut doc, camera) = setup();
-        let screen = Screen { camera: &camera, size: SIZE };
+        let screen = Screen::new(&camera, SIZE);
         let mut tool = MoveTool::default();
         tool.lock_axis(Axis::Z);
         tool.click(&mut doc, screen, at(screen, DVec3::ZERO)).unwrap();
@@ -536,7 +544,7 @@ mod tests {
     #[test]
     fn vector_entry_moves_exactly() {
         let (mut doc, camera) = setup();
-        let screen = Screen { camera: &camera, size: SIZE };
+        let screen = Screen::new(&camera, SIZE);
         let mut tool = MoveTool::default();
         tool.click(&mut doc, screen, at(screen, DVec3::ZERO)).unwrap();
         tool.enter(&mut doc, "<3,4,5>").unwrap();
@@ -551,7 +559,7 @@ mod tests {
     #[test]
     fn ctrl_copy_then_array_makes_a_row_of_studs() {
         let (mut doc, camera) = setup();
-        let screen = Screen { camera: &camera, size: SIZE };
+        let screen = Screen::new(&camera, SIZE);
         let mut tool = MoveTool::default();
         tool.toggle_copy();
         tool.click(&mut doc, screen, at(screen, DVec3::ZERO)).unwrap();
@@ -572,7 +580,7 @@ mod tests {
     #[test]
     fn divide_spreads_copies_evenly() {
         let (mut doc, camera) = setup();
-        let screen = Screen { camera: &camera, size: SIZE };
+        let screen = Screen::new(&camera, SIZE);
         let mut tool = MoveTool::default();
         tool.toggle_copy();
         tool.click(&mut doc, screen, at(screen, DVec3::ZERO)).unwrap();
@@ -595,7 +603,7 @@ mod tests {
     fn nothing_selected_moves_the_face_under_the_cursor() {
         let (mut doc, camera) = setup();
         doc.selection_mut().clear();
-        let screen = Screen { camera: &camera, size: SIZE };
+        let screen = Screen::new(&camera, SIZE);
         let mut tool = MoveTool::default();
         // The board's long left face (x = 0), big enough on screen to hit away from its edges.
         let side = DVec3::new(0.0, 1.75, 48.0);
@@ -612,7 +620,7 @@ mod tests {
     #[test]
     fn bending_move_is_refused_and_tool_stays_ready() {
         let (mut doc, camera) = setup();
-        let screen = Screen { camera: &camera, size: SIZE };
+        let screen = Screen::new(&camera, SIZE);
         let corner = doc
             .model()
             .edges()

@@ -6,7 +6,10 @@
 
 use std::collections::BTreeSet;
 
-use glam::{DVec2, DVec3};
+use glam::{DAffine3, DVec2, DVec3};
+
+use crate::arena::Arena;
+use crate::scene::InstanceId;
 
 /// Points closer than this, in inches, are the same point.
 pub const EPS: f64 = 1e-6;
@@ -23,11 +26,13 @@ pub struct EdgeId(u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct FaceId(u32);
 
-/// Anything the user can select.
+/// Anything the user can select. Edges and faces belong to a [`Model`]; instances (groups and
+/// components) to the [`crate::Container`] around it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Entity {
     Edge(EdgeId),
     Face(FaceId),
+    Instance(InstanceId),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -66,43 +71,6 @@ impl Face {
     }
 }
 
-/// Slot storage with stable ids. Ids are never reused, so they stay valid in undo snapshots.
-#[derive(Clone, Debug)]
-struct Arena<T>(Vec<Option<T>>);
-
-impl<T> Default for Arena<T> {
-    fn default() -> Self {
-        Self(Vec::new())
-    }
-}
-
-impl<T> Arena<T> {
-    fn insert(&mut self, item: T) -> u32 {
-        self.0.push(Some(item));
-        (self.0.len() - 1) as u32
-    }
-
-    fn get(&self, id: u32) -> Option<&T> {
-        self.0.get(id as usize)?.as_ref()
-    }
-
-    fn get_mut(&mut self, id: u32) -> Option<&mut T> {
-        self.0.get_mut(id as usize)?.as_mut()
-    }
-
-    fn remove(&mut self, id: u32) -> Option<T> {
-        self.0.get_mut(id as usize)?.take()
-    }
-
-    fn iter(&self) -> impl Iterator<Item = (u32, &T)> {
-        self.0.iter().enumerate().filter_map(|(i, t)| Some((i as u32, t.as_ref()?)))
-    }
-
-    fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> {
-        self.0.iter_mut().flatten()
-    }
-}
-
 #[derive(Clone, Debug, Default)]
 pub struct Model {
     vertices: Arena<DVec3>,
@@ -131,6 +99,7 @@ impl Model {
         match entity {
             Entity::Edge(id) => self.edge(id).is_some(),
             Entity::Face(id) => self.face(id).is_some(),
+            Entity::Instance(_) => false,
         }
     }
 
@@ -162,6 +131,32 @@ impl Model {
 
     pub fn bounds(&self) -> Option<(DVec3, DVec3)> {
         self.vertices().map(|(_, p)| (p, p)).reduce(|(lo, hi), (p, _)| (lo.min(p), hi.max(p)))
+    }
+
+    /// The ids the next vertex, edge and face will get. Everything added later has ids at or
+    /// above these.
+    pub(crate) fn next_ids(&self) -> (VertexId, EdgeId, FaceId) {
+        (VertexId(self.vertices.next_id()), EdgeId(self.edges.next_id()), FaceId(self.faces.next_id()))
+    }
+
+    /// Copy all of `other`'s geometry in, mapped through `transform` (a rigid motion), without
+    /// merging it with anything already here.
+    pub(crate) fn append(&mut self, other: &Model, transform: &DAffine3) {
+        let mut vertex_map = std::collections::HashMap::new();
+        for (id, p) in other.vertices() {
+            vertex_map.insert(id, VertexId(self.vertices.insert(transform.transform_point3(p))));
+        }
+        let map = |ids: &[VertexId]| -> Vec<VertexId> { ids.iter().map(|v| vertex_map[v]).collect() };
+        for (_, edge) in other.edges() {
+            self.edges.insert(Edge { a: vertex_map[&edge.a], b: vertex_map[&edge.b] });
+        }
+        for (_, face) in other.faces() {
+            self.faces.insert(Face {
+                outer: map(&face.outer),
+                holes: face.holes.iter().map(|h| map(h)).collect(),
+                normal: transform.transform_vector3(face.normal).normalize(),
+            });
+        }
     }
 
     /// The vertex at `point`, creating it if none is within [`EPS`].
@@ -305,6 +300,8 @@ impl Model {
     pub fn erase(&mut self, entities: impl IntoIterator<Item = Entity>) {
         for entity in entities {
             match entity {
+                // Instances live in the container, not the model.
+                Entity::Instance(_) => {}
                 Entity::Face(id) => {
                     self.faces.remove(id.0);
                 }
@@ -351,6 +348,7 @@ impl Model {
         let mut reached: BTreeSet<VertexId> = match start {
             Entity::Edge(id) => self.edge(id).map(|e| [e.a, e.b].into()).unwrap_or_default(),
             Entity::Face(id) => self.face(id).map(|f| f.outer[..1].iter().copied().collect()).unwrap_or_default(),
+            Entity::Instance(_) => BTreeSet::new(),
         };
         loop {
             let before = reached.len();

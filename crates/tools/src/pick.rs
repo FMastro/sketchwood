@@ -1,6 +1,6 @@
 //! Turning cursor positions into model entities and snapped points.
 
-use glam::{DVec3, Vec2};
+use glam::{DAffine3, DVec3, Vec2};
 use sketchcraft_doc::{EdgeId, Entity, FaceId, Model, VertexId};
 use sketchcraft_view::OrbitCamera;
 
@@ -9,25 +9,46 @@ pub const SNAP_RADIUS: f32 = 12.0;
 /// How close, in points, the cursor must be to pick an edge.
 pub const EDGE_RADIUS: f32 = 6.0;
 
-/// The camera and viewport size: everything needed to map between screen and model.
+/// The camera and viewport size: everything needed to map between screen and model. Points are
+/// in the coordinates of the container being edited (a group's own axes when inside one).
 #[derive(Clone, Copy)]
 pub struct Screen<'a> {
     pub camera: &'a OrbitCamera,
     pub size: Vec2,
+    to_world: DAffine3,
+    to_local: DAffine3,
 }
 
-impl Screen<'_> {
+impl<'a> Screen<'a> {
+    /// At the top level, where model coordinates are world coordinates.
+    pub fn new(camera: &'a OrbitCamera, size: Vec2) -> Self {
+        Self::in_context(camera, size, DAffine3::IDENTITY)
+    }
+
+    /// Inside a group whose coordinates map to the world through `to_world`.
+    pub fn in_context(camera: &'a OrbitCamera, size: Vec2, to_world: DAffine3) -> Self {
+        Self { camera, size, to_world, to_local: to_world.inverse() }
+    }
+
     pub fn project(&self, point: DVec3) -> Option<Vec2> {
-        self.camera.project(point.as_vec3(), self.size)
+        self.camera.project(self.to_world.transform_point3(point).as_vec3(), self.size)
     }
 
     pub fn ray(&self, cursor: Vec2) -> Ray {
         let (origin, dir) = self.camera.ray(cursor, self.size);
-        Ray { origin: origin.as_dvec3(), dir: dir.as_dvec3().normalize() }
+        Ray {
+            origin: self.to_local.transform_point3(origin.as_dvec3()),
+            dir: self.to_local.transform_vector3(dir.as_dvec3()).normalize(),
+        }
     }
 
     pub fn eye(&self) -> DVec3 {
-        self.camera.eye().as_dvec3()
+        self.to_local.transform_point3(self.camera.eye().as_dvec3())
+    }
+
+    /// The camera's viewing direction.
+    pub fn forward(&self) -> DVec3 {
+        self.to_local.transform_vector3(self.camera.forward().as_dvec3()).normalize()
     }
 }
 
@@ -284,7 +305,7 @@ mod tests {
     fn picks_face_in_the_middle_and_edge_near_the_border() {
         let model = square();
         let camera = top_camera();
-        let screen = Screen { camera: &camera, size: SIZE };
+        let screen = Screen::new(&camera, SIZE);
         let center = screen.project(DVec3::new(5.0, 5.0, 0.0)).unwrap();
         assert!(matches!(pick_entity(&model, screen, center), Some(Entity::Face(_))));
         let on_edge = screen.project(DVec3::new(5.0, 0.0, 0.0)).unwrap() + Vec2::new(0.0, 3.0);
@@ -297,7 +318,7 @@ mod tests {
     fn snaps_to_nearby_endpoint() {
         let model = square();
         let camera = top_camera();
-        let screen = Screen { camera: &camera, size: SIZE };
+        let screen = Screen::new(&camera, SIZE);
         let near_corner = screen.project(DVec3::new(10.0, 10.0, 0.0)).unwrap() + Vec2::new(4.0, -4.0);
         let snap = snap(&model, screen, near_corner, None).unwrap();
         assert_eq!(snap.kind, SnapKind::Endpoint);
@@ -308,7 +329,7 @@ mod tests {
     fn snaps_to_midpoint_then_on_edge() {
         let model = square();
         let camera = top_camera();
-        let screen = Screen { camera: &camera, size: SIZE };
+        let screen = Screen::new(&camera, SIZE);
         // Near the bottom edge's midpoint (5, 0).
         let near_mid = screen.project(DVec3::new(5.0, 0.0, 0.0)).unwrap() + Vec2::new(5.0, 3.0);
         let mid = snap(&model, screen, near_mid, None).unwrap();
@@ -326,7 +347,7 @@ mod tests {
         let mut model = Model::default();
         model.add_rectangle(DVec3::ZERO, DVec3::X * 0.25, DVec3::Y * 10.0, DVec3::Z);
         let camera = top_camera();
-        let screen = Screen { camera: &camera, size: SIZE };
+        let screen = Screen::new(&camera, SIZE);
         // The short edge's midpoint and endpoints are all within the snap radius.
         let cursor = screen.project(DVec3::new(0.05, 0.0, 0.0)).unwrap();
         assert_eq!(snap(&model, screen, cursor, None).unwrap().kind, SnapKind::Endpoint);
@@ -336,7 +357,7 @@ mod tests {
     fn excluded_geometry_is_not_snapped() {
         let model = square();
         let camera = top_camera();
-        let screen = Screen { camera: &camera, size: SIZE };
+        let screen = Screen::new(&camera, SIZE);
         let near_mid = screen.project(DVec3::new(5.0, 0.0, 0.0)).unwrap();
         assert_eq!(snap_feature(&model, screen, near_mid, |_| true), None);
     }
@@ -345,7 +366,7 @@ mod tests {
     fn falls_back_to_face_then_ground() {
         let model = square();
         let camera = top_camera();
-        let screen = Screen { camera: &camera, size: SIZE };
+        let screen = Screen::new(&camera, SIZE);
         let on_face = screen.project(DVec3::new(4.0, 6.0, 0.0)).unwrap();
         assert_eq!(snap(&model, screen, on_face, None).unwrap().kind, SnapKind::OnFace);
         let off_face = screen.project(DVec3::new(-5.0, 6.0, 0.0)).unwrap();

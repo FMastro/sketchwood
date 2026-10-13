@@ -1,0 +1,495 @@
+//! Groups and components, SketchUp style.
+//!
+//! A [`Definition`] holds geometry (and nested instances) in its own local coordinates. An
+//! [`Instance`] places a definition with a transform. A group is a definition with one instance;
+//! a component's definition is shared, so editing it changes every instance. Copying a group
+//! shares its definition until one copy is edited, which then gets its own (as in SketchUp).
+//!
+//! The top level of a drawing and the inside of every definition are both a [`Container`]:
+//! loose geometry plus instances. A [`Path`] of instance ids from the root names the container
+//! being edited.
+
+use std::collections::BTreeSet;
+
+use glam::{DAffine3, DVec3};
+
+use crate::arena::Arena;
+use crate::{EdgeId, Entity, FaceId, Model, VertexId};
+
+/// An instance within one [`Container`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct InstanceId(pub(crate) u32);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct DefinitionId(u32);
+
+/// Instances from the root down to the container being edited; empty for the top level.
+pub type Path = [InstanceId];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DefinitionKind {
+    Group,
+    Component,
+}
+
+#[derive(Clone, Debug)]
+pub struct Definition {
+    pub name: String,
+    pub kind: DefinitionKind,
+    pub container: Container,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Instance {
+    pub definition: DefinitionId,
+    /// Definition coordinates → container coordinates. Rigid (rotation and translation).
+    pub transform: DAffine3,
+}
+
+/// Loose geometry plus placed instances.
+#[derive(Clone, Debug, Default)]
+pub struct Container {
+    pub model: Model,
+    instances: Arena<Instance>,
+}
+
+impl Container {
+    pub fn instance(&self, id: InstanceId) -> Option<&Instance> {
+        self.instances.get(id.0)
+    }
+
+    pub fn instance_mut(&mut self, id: InstanceId) -> Option<&mut Instance> {
+        self.instances.get_mut(id.0)
+    }
+
+    pub fn instances(&self) -> impl Iterator<Item = (InstanceId, &Instance)> {
+        self.instances.iter().map(|(i, inst)| (InstanceId(i), inst))
+    }
+
+    pub fn add_instance(&mut self, instance: Instance) -> InstanceId {
+        InstanceId(self.instances.insert(instance))
+    }
+
+    pub fn remove_instance(&mut self, id: InstanceId) -> Option<Instance> {
+        self.instances.remove(id.0)
+    }
+
+    pub fn contains(&self, entity: Entity) -> bool {
+        match entity {
+            Entity::Instance(id) => self.instance(id).is_some(),
+            other => self.model.contains(other),
+        }
+    }
+}
+
+/// Everything in a drawing: the top-level container and all definitions.
+#[derive(Clone, Debug, Default)]
+pub struct Scene {
+    pub root: Container,
+    definitions: Arena<Definition>,
+    /// Counters for default names, like SketchUp's "Group#1", "Component#1".
+    next_group: u32,
+    next_component: u32,
+}
+
+impl Scene {
+    pub fn definition(&self, id: DefinitionId) -> Option<&Definition> {
+        self.definitions.get(id.0)
+    }
+
+    pub fn definition_mut(&mut self, id: DefinitionId) -> Option<&mut Definition> {
+        self.definitions.get_mut(id.0)
+    }
+
+    pub fn definitions(&self) -> impl Iterator<Item = (DefinitionId, &Definition)> {
+        self.definitions.iter().map(|(i, d)| (DefinitionId(i), d))
+    }
+
+    /// How many instances of `definition` exist anywhere.
+    pub fn instance_count(&self, definition: DefinitionId) -> usize {
+        std::iter::once(&self.root)
+            .chain(self.definitions.iter().map(|(_, d)| &d.container))
+            .flat_map(|c| c.instances())
+            .filter(|(_, inst)| inst.definition == definition)
+            .count()
+    }
+
+    /// The container at `path`, if every step exists.
+    pub fn container(&self, path: &Path) -> Option<&Container> {
+        let mut container = &self.root;
+        for &id in path {
+            container = &self.definition(container.instance(id)?.definition)?.container;
+        }
+        Some(container)
+    }
+
+    pub fn container_mut(&mut self, path: &Path) -> Option<&mut Container> {
+        let mut definition = None;
+        let mut container = &self.root;
+        for &id in path {
+            let def = container.instance(id)?.definition;
+            container = &self.definition(def)?.container;
+            definition = Some(def);
+        }
+        match definition {
+            None => Some(&mut self.root),
+            Some(def) => self.definition_mut(def).map(|d| &mut d.container),
+        }
+    }
+
+    /// The transform from the container at `path` to the root (world) coordinates.
+    pub fn transform(&self, path: &Path) -> DAffine3 {
+        let mut transform = DAffine3::IDENTITY;
+        let mut container = &self.root;
+        for &id in path {
+            let Some(instance) = container.instance(id) else { break };
+            transform *= instance.transform;
+            let Some(definition) = self.definition(instance.definition) else { break };
+            container = &definition.container;
+        }
+        transform
+    }
+
+    /// Group (or componentize) `entities` of the container at `path`: their geometry and
+    /// instances move into a new definition, replaced by one instance of it. The definition's
+    /// origin is the corner of their bounding box. Returns the new instance, or `None` if
+    /// there's nothing to group.
+    pub fn group(&mut self, path: &Path, entities: &[Entity], kind: DefinitionKind) -> Option<InstanceId> {
+        let container = self.container(path)?;
+        let model = &container.model;
+        let faces: Vec<FaceId> = entities.iter().filter_map(|e| if let Entity::Face(f) = e { Some(*f) } else { None }).collect();
+        let mut edges: BTreeSet<EdgeId> =
+            entities.iter().filter_map(|e| if let Entity::Edge(id) = e { Some(*id) } else { None }).collect();
+        // Faces take their edges along.
+        edges.extend(faces.iter().flat_map(|&f| model.face_edges(f)));
+        let instances: Vec<InstanceId> =
+            entities.iter().filter_map(|e| if let Entity::Instance(i) = e { Some(*i) } else { None }).collect();
+
+        // The origin: the bounding box's minimum corner, over geometry and instance boxes.
+        let mut points: Vec<DVec3> = model.entity_vertices(edges.iter().map(|&e| Entity::Edge(e))).iter().map(|&v| model.vertex(v)).collect();
+        for &id in &instances {
+            if let Some(inst) = container.instance(id) {
+                points.extend(self.instance_box_corners(inst));
+            }
+        }
+        let origin = points.iter().copied().reduce(DVec3::min)?;
+        let to_local = DAffine3::from_translation(-origin);
+
+        // Build the definition's contents in local coordinates.
+        let mut inside = Container::default();
+        for &f in &faces {
+            let Some(face) = model.face(f) else { continue };
+            let local = |ids: &[VertexId]| -> Vec<DVec3> { ids.iter().map(|&v| model.vertex(v) - origin).collect() };
+            let holes: Vec<Vec<DVec3>> = face.holes.iter().map(|h| local(h)).collect();
+            inside.model.add_face_with_holes(&local(&face.outer), &holes);
+        }
+        for &e in &edges {
+            let Some(edge) = model.edge(e) else { continue };
+            let (a, b) = (inside.model.add_vertex(model.vertex(edge.a) - origin), inside.model.add_vertex(model.vertex(edge.b) - origin));
+            inside.model.add_edge(a, b);
+        }
+        for &id in &instances {
+            if let Some(&inst) = container.instance(id) {
+                inside.add_instance(Instance { transform: to_local * inst.transform, ..inst });
+            }
+        }
+
+        let name = match kind {
+            DefinitionKind::Group => {
+                self.next_group += 1;
+                format!("Group#{}", self.next_group)
+            }
+            DefinitionKind::Component => {
+                self.next_component += 1;
+                format!("Component#{}", self.next_component)
+            }
+        };
+        let definition = DefinitionId(self.definitions.insert(Definition { name, kind, container: inside }));
+
+        // Take the originals out: faces, then edges no remaining face needs.
+        let container = self.container_mut(path)?;
+        container.model.erase(faces.iter().map(|&f| Entity::Face(f)));
+        let still_used: BTreeSet<EdgeId> = container.model.faces().flat_map(|(f, _)| container.model.face_edges(f)).collect();
+        let loose: Vec<Entity> = edges.iter().filter(|e| !still_used.contains(e)).map(|&e| Entity::Edge(e)).collect();
+        container.model.erase(loose);
+        for &id in &instances {
+            container.remove_instance(id);
+        }
+        Some(container.add_instance(Instance { definition, transform: DAffine3::from_translation(origin) }))
+    }
+
+    /// Replace `instance` (in the container at `path`) with its definition's contents, placed
+    /// where the instance was. Returns what was added.
+    pub fn explode(&mut self, path: &Path, instance: InstanceId) -> Vec<Entity> {
+        let Some(container) = self.container(path) else { return Vec::new() };
+        let Some(&inst) = container.instance(instance) else { return Vec::new() };
+        let Some(definition) = self.definition(inst.definition).cloned() else { return Vec::new() };
+        let Some(container) = self.container_mut(path) else { return Vec::new() };
+        container.remove_instance(instance);
+        let place = |p: DVec3| inst.transform.transform_point3(p);
+        let everything: Vec<Entity> = definition.container.model.entities().collect();
+        let mut added = container.model.copy_entities_with_from(&definition.container.model, &everything, place);
+        for (_, nested) in definition.container.instances() {
+            let id = container.add_instance(Instance { transform: inst.transform * nested.transform, ..*nested });
+            added.push(Entity::Instance(id));
+        }
+        added
+    }
+
+    /// A group's definition shared with copies gets its own before editing, so the edit
+    /// changes only this copy (SketchUp's behavior). Components stay shared.
+    pub fn make_unique_if_group(&mut self, path: &Path, instance: InstanceId) {
+        let Some(container) = self.container(path) else { return };
+        let Some(inst) = container.instance(instance) else { return };
+        let definition = inst.definition;
+        let Some(def) = self.definition(definition) else { return };
+        if def.kind != DefinitionKind::Group || self.instance_count(definition) < 2 {
+            return;
+        }
+        let copy = def.clone();
+        let new = DefinitionId(self.definitions.insert(copy));
+        if let Some(inst) = self.container_mut(path).and_then(|c| c.instance_mut(instance)) {
+            inst.definition = new;
+        }
+    }
+
+    /// The eight corners of an instance's bounding box, in its container's coordinates.
+    pub fn instance_box_corners(&self, instance: &Instance) -> Vec<DVec3> {
+        let Some((lo, hi)) = self.definition_bounds(instance.definition) else { return Vec::new() };
+        (0..8)
+            .map(|i| {
+                let corner = DVec3::new(
+                    if i & 1 == 0 { lo.x } else { hi.x },
+                    if i & 2 == 0 { lo.y } else { hi.y },
+                    if i & 4 == 0 { lo.z } else { hi.z },
+                );
+                instance.transform.transform_point3(corner)
+            })
+            .collect()
+    }
+
+    /// A definition's bounding box in its own coordinates, nested instances included.
+    pub fn definition_bounds(&self, definition: DefinitionId) -> Option<(DVec3, DVec3)> {
+        let def = self.definition(definition)?;
+        let mut points: Vec<DVec3> = def.container.model.vertices().map(|(_, p)| p).collect();
+        for (_, inst) in def.container.instances() {
+            points.extend(self.instance_box_corners(inst));
+        }
+        let lo = points.iter().copied().reduce(DVec3::min)?;
+        let hi = points.iter().copied().reduce(DVec3::max)?;
+        Some((lo, hi))
+    }
+
+    /// Bounds of everything, in world coordinates.
+    pub fn bounds(&self) -> Option<(DVec3, DVec3)> {
+        let mut points: Vec<DVec3> = self.root.model.vertices().map(|(_, p)| p).collect();
+        for (_, inst) in self.root.instances() {
+            points.extend(self.instance_box_corners(inst));
+        }
+        let lo = points.iter().copied().reduce(DVec3::min)?;
+        let hi = points.iter().copied().reduce(DVec3::max)?;
+        Some((lo, hi))
+    }
+}
+
+/// Who owns a piece of geometry in a [`View`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Owner {
+    /// Geometry of the container being edited, with the same ids as its model.
+    Active,
+    /// Inside this instance of the container being edited.
+    Instance(InstanceId),
+    /// Outside the container being edited (its parents and their other instances).
+    Outside,
+}
+
+/// Every piece of geometry in the drawing flattened into one [`Model`], in the coordinates of
+/// the container being edited. Picking, snapping and drawing all work on this. The edited
+/// container's own geometry keeps its ids, so picks on it can be used to edit it directly.
+#[derive(Clone, Debug, Default)]
+pub struct View {
+    model: Model,
+    /// Where each owner's appended geometry starts: (first vertex, first edge, first face).
+    segments: Vec<((VertexId, EdgeId, FaceId), Owner)>,
+}
+
+impl View {
+    pub fn build(scene: &Scene, path: &Path) -> Self {
+        let Some(active) = scene.container(path) else { return Self::default() };
+        let mut view = Self { model: active.model.clone(), segments: Vec::new() };
+        for (id, inst) in active.instances() {
+            view.append_instance(scene, inst, &DAffine3::IDENTITY, Owner::Instance(id));
+        }
+        // Everything outside, brought into the edited container's coordinates.
+        let to_local = scene.transform(path).inverse();
+        for depth in 0..path.len() {
+            let Some(container) = scene.container(&path[..depth]) else { break };
+            let transform = to_local * scene.transform(&path[..depth]);
+            view.append_model(&container.model, &transform, Owner::Outside);
+            for (id, inst) in container.instances() {
+                if id != path[depth] {
+                    view.append_instance(scene, inst, &transform, Owner::Outside);
+                }
+            }
+        }
+        view
+    }
+
+    fn append_model(&mut self, model: &Model, transform: &DAffine3, owner: Owner) {
+        self.segments.push((self.model.next_ids(), owner));
+        self.model.append(model, transform);
+    }
+
+    fn append_instance(&mut self, scene: &Scene, instance: &Instance, parent: &DAffine3, owner: Owner) {
+        let Some(definition) = scene.definition(instance.definition) else { return };
+        let transform = *parent * instance.transform;
+        self.append_model(&definition.container.model, &transform, owner);
+        for (_, nested) in definition.container.instances() {
+            self.append_instance(scene, nested, &transform, owner);
+        }
+    }
+
+    pub fn model(&self) -> &Model {
+        &self.model
+    }
+
+    fn owner_where(&self, is_past: impl Fn(&(VertexId, EdgeId, FaceId)) -> bool) -> Owner {
+        self.segments.iter().rev().find(|(start, _)| is_past(start)).map_or(Owner::Active, |(_, owner)| *owner)
+    }
+
+    pub fn vertex_owner(&self, id: VertexId) -> Owner {
+        self.owner_where(|start| id >= start.0)
+    }
+
+    pub fn owner(&self, entity: Entity) -> Owner {
+        match entity {
+            Entity::Edge(id) => self.owner_where(|start| id >= start.1),
+            Entity::Face(id) => self.owner_where(|start| id >= start.2),
+            Entity::Instance(id) => Owner::Instance(id),
+        }
+    }
+
+    /// What picking `entity` (of this view) selects in the edited container: the entity itself,
+    /// the instance it's inside, or nothing for geometry outside.
+    pub fn resolve(&self, entity: Entity) -> Option<Entity> {
+        match self.owner(entity) {
+            Owner::Active => Some(entity),
+            Owner::Instance(id) => Some(Entity::Instance(id)),
+            Owner::Outside => None,
+        }
+    }
+
+    /// The view's vertices belonging to `entities` of the edited container (instances bring all
+    /// their geometry).
+    pub fn vertices_of(&self, entities: &[Entity]) -> BTreeSet<VertexId> {
+        let instances: BTreeSet<InstanceId> =
+            entities.iter().filter_map(|e| if let Entity::Instance(i) = e { Some(*i) } else { None }).collect();
+        let mut vertices = self.model.entity_vertices(entities.iter().copied().filter(|e| self.owner(*e) == Owner::Active));
+        vertices.extend(
+            self.model.vertices().map(|(v, _)| v).filter(|&v| matches!(self.vertex_owner(v), Owner::Instance(i) if instances.contains(&i))),
+        );
+        vertices
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An 8' 2x4 at `at` as loose geometry in `container`.
+    fn board(container: &mut Container, at: DVec3) -> Vec<Entity> {
+        let face = container.model.add_rectangle(at, DVec3::X * 1.5, DVec3::Y * 3.5, DVec3::Z).unwrap();
+        container.model.push_pull(face, 96.0).unwrap();
+        container.model.connected(Entity::Face(face)).into_iter().collect()
+    }
+
+    #[test]
+    fn grouping_moves_geometry_into_a_definition() {
+        let mut scene = Scene::default();
+        let entities = board(&mut scene.root, DVec3::new(10.0, 5.0, 0.0));
+        let group = scene.group(&[], &entities, DefinitionKind::Group).unwrap();
+        assert!(scene.root.model.is_empty());
+        let inst = *scene.root.instance(group).unwrap();
+        assert_eq!(inst.transform.translation, DVec3::new(10.0, 5.0, 0.0));
+        let def = scene.definition(inst.definition).unwrap();
+        assert_eq!(def.name, "Group#1");
+        assert_eq!(def.container.model.faces().count(), 6);
+        assert_eq!(scene.definition_bounds(inst.definition), Some((DVec3::ZERO, DVec3::new(1.5, 3.5, 96.0))));
+        assert_eq!(scene.bounds(), Some((DVec3::new(10.0, 5.0, 0.0), DVec3::new(11.5, 8.5, 96.0))));
+    }
+
+    #[test]
+    fn view_flattens_instances_and_resolves_picks_to_them() {
+        let mut scene = Scene::default();
+        let a = board(&mut scene.root, DVec3::ZERO);
+        let group = scene.group(&[], &a, DefinitionKind::Group).unwrap();
+        board(&mut scene.root, DVec3::new(20.0, 0.0, 0.0));
+        let view = View::build(&scene, &[]);
+        assert_eq!(view.model().faces().count(), 12);
+        // Loose geometry keeps its ids; the group's resolves to the instance.
+        let loose_face = scene.root.model.faces().next().unwrap().0;
+        assert_eq!(view.resolve(Entity::Face(loose_face)), Some(Entity::Face(loose_face)));
+        let grouped = view.model().faces().map(|(id, _)| Entity::Face(id)).find(|&e| view.owner(e) != Owner::Active).unwrap();
+        assert_eq!(view.resolve(grouped), Some(Entity::Instance(group)));
+        assert_eq!(view.vertices_of(&[Entity::Instance(group)]).len(), 8);
+    }
+
+    #[test]
+    fn editing_inside_sees_the_outside_in_local_coordinates() {
+        let mut scene = Scene::default();
+        let a = board(&mut scene.root, DVec3::new(10.0, 0.0, 0.0));
+        let group = scene.group(&[], &a, DefinitionKind::Group).unwrap();
+        board(&mut scene.root, DVec3::new(20.0, 0.0, 0.0));
+        let view = View::build(&scene, &[group]);
+        // The group's own geometry is active, at local coordinates.
+        let active: Vec<_> = view.model().vertices().filter(|(v, _)| view.vertex_owner(*v) == Owner::Active).collect();
+        assert_eq!(active.len(), 8);
+        assert!(active.iter().all(|(_, p)| p.x <= 1.5));
+        // The loose board outside is 10" further along, relative to the group.
+        let outside_min_x = view
+            .model()
+            .vertices()
+            .filter(|(v, _)| view.vertex_owner(*v) == Owner::Outside)
+            .map(|(_, p)| p.x)
+            .fold(f64::INFINITY, f64::min);
+        assert_eq!(outside_min_x, 10.0);
+    }
+
+    #[test]
+    fn copying_a_group_shares_until_edited_components_stay_shared() {
+        let mut scene = Scene::default();
+        let a = board(&mut scene.root, DVec3::ZERO);
+        let group = scene.group(&[], &a, DefinitionKind::Group).unwrap();
+        let inst = *scene.root.instance(group).unwrap();
+        let copy = scene.root.add_instance(Instance { transform: DAffine3::from_translation(DVec3::X * 16.0), ..inst });
+        assert_eq!(scene.instance_count(inst.definition), 2);
+        scene.make_unique_if_group(&[], copy);
+        assert_ne!(scene.root.instance(copy).unwrap().definition, inst.definition);
+
+        let b = board(&mut scene.root, DVec3::new(0.0, 20.0, 0.0));
+        let leg = scene.group(&[], &b, DefinitionKind::Component).unwrap();
+        let leg_inst = *scene.root.instance(leg).unwrap();
+        let other = scene.root.add_instance(Instance { transform: DAffine3::from_translation(DVec3::X * 16.0), ..leg_inst });
+        scene.make_unique_if_group(&[], other);
+        assert_eq!(scene.root.instance(other).unwrap().definition, leg_inst.definition);
+    }
+
+    #[test]
+    fn grouping_a_group_nests_it_and_explode_restores() {
+        let mut scene = Scene::default();
+        let a = board(&mut scene.root, DVec3::new(5.0, 0.0, 0.0));
+        let inner = scene.group(&[], &a, DefinitionKind::Group).unwrap();
+        let outer = scene.group(&[], &[Entity::Instance(inner)], DefinitionKind::Group).unwrap();
+        assert_eq!(scene.root.instances().count(), 1);
+        assert_eq!(scene.bounds(), Some((DVec3::new(5.0, 0.0, 0.0), DVec3::new(6.5, 3.5, 96.0))));
+        let added = scene.explode(&[], outer);
+        assert_eq!(added, vec![Entity::Instance(added_instance(&added))]);
+        let exploded = scene.explode(&[], added_instance(&added));
+        assert_eq!(exploded.iter().filter(|e| matches!(e, Entity::Face(_))).count(), 6);
+        assert_eq!(scene.bounds(), Some((DVec3::new(5.0, 0.0, 0.0), DVec3::new(6.5, 3.5, 96.0))));
+    }
+
+    fn added_instance(added: &[Entity]) -> InstanceId {
+        added.iter().find_map(|e| if let Entity::Instance(i) = e { Some(*i) } else { None }).unwrap()
+    }
+}

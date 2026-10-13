@@ -2,6 +2,7 @@
 
 mod icons;
 mod keys;
+mod outliner;
 mod viewport;
 
 use eframe::egui;
@@ -106,6 +107,10 @@ impl eframe::App for SketchCraftApp {
                 });
             });
         });
+
+        egui::Panel::left("outliner")
+            .default_size(200.0)
+            .show(ui, |ui| outliner::show(ui, &mut self.doc, &mut self.tools));
 
         egui::CentralPanel::no_frame()
             .show(ui, |ui| self.viewport.show(ui, frame, &mut self.doc, &mut self.tools));

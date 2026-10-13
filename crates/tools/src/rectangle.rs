@@ -52,7 +52,8 @@ impl RectangleTool {
 
     pub fn hover(&mut self, doc: &Document, screen: Screen<'_>, cursor: Vec2) {
         let plane = self.sizing.as_ref().map(|s| (s.frame.corner, s.frame.normal));
-        self.hover = snap(doc.model(), screen, cursor, plane);
+        // Snap to anything in the drawing, including other groups.
+        self.hover = snap(doc.view().model(), screen, cursor, plane);
         if let (Some(sizing), Some(hover)) = (self.sizing.as_mut(), self.hover) {
             let d = hover.point - sizing.frame.corner;
             sizing.extents = (d.dot(sizing.frame.u), d.dot(sizing.frame.v));
@@ -221,7 +222,7 @@ mod tests {
     fn click_click_draws_on_the_ground() {
         let mut doc = Document::default();
         let camera = camera();
-        let screen = Screen { camera: &camera, size: SIZE };
+        let screen = Screen::new(&camera, SIZE);
         let mut tool = RectangleTool::default();
         tool.click(&mut doc, screen, at(screen, 1.0, 1.0)).unwrap();
         tool.hover(&doc, screen, at(screen, 3.0, 4.0));
@@ -235,7 +236,7 @@ mod tests {
     fn typed_size_while_sizing_makes_an_exact_two_by_four() {
         let mut doc = Document::default();
         let camera = camera();
-        let screen = Screen { camera: &camera, size: SIZE };
+        let screen = Screen::new(&camera, SIZE);
         let mut tool = RectangleTool::default();
         tool.click(&mut doc, screen, at(screen, 0.0, 0.0)).unwrap();
         // Mouse toward -X, +Y: the width should extend toward -X.
@@ -252,7 +253,7 @@ mod tests {
     fn typing_after_drawing_resizes_the_last_rectangle_in_one_undo_step() {
         let mut doc = Document::default();
         let camera = camera();
-        let screen = Screen { camera: &camera, size: SIZE };
+        let screen = Screen::new(&camera, SIZE);
         let mut tool = RectangleTool::default();
         tool.click(&mut doc, screen, at(screen, 0.0, 0.0)).unwrap();
         tool.click(&mut doc, screen, at(screen, 2.0, 3.0)).unwrap();
@@ -267,7 +268,7 @@ mod tests {
     fn partial_entry_keeps_the_other_dimension() {
         let mut doc = Document::default();
         let camera = camera();
-        let screen = Screen { camera: &camera, size: SIZE };
+        let screen = Screen::new(&camera, SIZE);
         let mut tool = RectangleTool::default();
         tool.click(&mut doc, screen, at(screen, 0.0, 0.0)).unwrap();
         tool.click(&mut doc, screen, at(screen, 2.0, 3.0)).unwrap();
@@ -280,7 +281,7 @@ mod tests {
     fn press_drag_release_draws() {
         let mut doc = Document::default();
         let camera = camera();
-        let screen = Screen { camera: &camera, size: SIZE };
+        let screen = Screen::new(&camera, SIZE);
         let mut tool = RectangleTool::default();
         tool.drag_start(&doc, screen, at(screen, 0.0, 0.0));
         tool.hover(&doc, screen, at(screen, 2.0, 2.0));
@@ -292,7 +293,7 @@ mod tests {
     fn enter_during_drag_then_release_draws_once() {
         let mut doc = Document::default();
         let camera = camera();
-        let screen = Screen { camera: &camera, size: SIZE };
+        let screen = Screen::new(&camera, SIZE);
         let mut tool = RectangleTool::default();
         tool.drag_start(&doc, screen, at(screen, 0.0, 0.0));
         tool.hover(&doc, screen, at(screen, 2.0, 2.0));
@@ -307,7 +308,7 @@ mod tests {
         let mut doc = Document::default();
         doc.edit(|m| m.add_rectangle(DVec3::ZERO, DVec3::X * 1.5, DVec3::Y * 3.5, DVec3::Z));
         let camera = camera();
-        let screen = Screen { camera: &camera, size: SIZE };
+        let screen = Screen::new(&camera, SIZE);
         let mut tool = RectangleTool::default();
         // A second board alongside: snap to the first board's corner, then type its size.
         tool.click(&mut doc, screen, at(screen, 1.5, 0.0) + Vec2::new(3.0, 2.0)).unwrap();
@@ -328,7 +329,7 @@ mod tests {
     fn bad_input_reports_an_error_and_keeps_sizing() {
         let mut doc = Document::default();
         let camera = camera();
-        let screen = Screen { camera: &camera, size: SIZE };
+        let screen = Screen::new(&camera, SIZE);
         let mut tool = RectangleTool::default();
         tool.click(&mut doc, screen, at(screen, 0.0, 0.0)).unwrap();
         assert!(tool.enter(&mut doc, "abc").is_err());

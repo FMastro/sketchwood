@@ -2,8 +2,10 @@
 //! (everything connected), and window (drag right) or crossing (drag left) selection.
 //! Ctrl adds, Shift toggles, Ctrl+Shift removes.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use glam::{DVec3, Vec2};
-use sketchcraft_doc::{Document, Entity, Model};
+use sketchcraft_doc::{Document, Entity, Model, Owner, View};
 
 use crate::pick::{Screen, pick_entity, segment_distance};
 use crate::{Modifiers, Overlay, SelectionWindow};
@@ -23,17 +25,35 @@ impl SelectTool {
     }
 
     pub fn click(&mut self, doc: &mut Document, screen: Screen<'_>, cursor: Vec2, count: u8, mods: Modifiers) {
+        let view = doc.view();
+        let hit = pick_entity(view.model(), screen, cursor);
+        let Some(entity) = hit.and_then(|e| view.resolve(e)) else {
+            // Clicking empty space, or geometry outside the group being edited, closes it
+            // (SketchUp). At the top level it just clears the selection.
+            if !doc.path().is_empty() && mods == Modifiers::default() {
+                doc.exit();
+                doc.selection_mut().clear();
+            } else {
+                apply(doc, Vec::new(), mods);
+            }
+            return;
+        };
         let model = doc.model();
-        let picked: Vec<Entity> = match pick_entity(model, screen, cursor) {
-            None => Vec::new(),
-            Some(entity) if count >= 3 => model.connected(entity).into_iter().collect(),
-            Some(Entity::Face(id)) if count == 2 => {
+        let picked: Vec<Entity> = match entity {
+            // Double-clicking a group or component opens it for editing.
+            Entity::Instance(id) if count >= 2 => {
+                doc.enter(id);
+                return;
+            }
+            Entity::Instance(_) => vec![entity],
+            _ if count >= 3 => model.connected(entity).into_iter().collect(),
+            Entity::Face(id) if count == 2 => {
                 std::iter::once(Entity::Face(id)).chain(model.face_edges(id).into_iter().map(Entity::Edge)).collect()
             }
-            Some(Entity::Edge(id)) if count == 2 => {
+            Entity::Edge(id) if count == 2 => {
                 std::iter::once(Entity::Edge(id)).chain(model.edge_faces(id).into_iter().map(Entity::Face)).collect()
             }
-            Some(entity) => vec![entity],
+            _ => vec![entity],
         };
         apply(doc, picked, mods);
     }
@@ -51,7 +71,7 @@ impl SelectTool {
     pub fn drag_end(&mut self, doc: &mut Document, screen: Screen<'_>, cursor: Vec2, mods: Modifiers) {
         let Some((start, _)) = self.window.take() else { return };
         let crossing = cursor.x < start.x;
-        let picked = in_window(doc.model(), screen, start.min(cursor), start.max(cursor), crossing);
+        let picked = in_window(doc.view(), screen, start.min(cursor), start.max(cursor), crossing);
         apply(doc, picked, mods);
     }
 
@@ -75,8 +95,33 @@ fn apply(doc: &mut Document, picked: Vec<Entity>, mods: Modifiers) {
     }
 }
 
-/// Window selection takes entities entirely inside; crossing takes anything touching.
-fn in_window(model: &Model, screen: Screen<'_>, min: Vec2, max: Vec2, crossing: bool) -> Vec<Entity> {
+/// Window selection takes entities entirely inside; crossing takes anything touching. A group
+/// or component counts as one entity: inside if all of it is, touched if any of it is.
+fn in_window(view: &View, screen: Screen<'_>, min: Vec2, max: Vec2, crossing: bool) -> Vec<Entity> {
+    let mut picked = BTreeSet::new();
+    // Per instance: (any part hit, every part hit).
+    let mut instances: BTreeMap<Entity, (bool, bool)> = BTreeMap::new();
+    for (entity, hit) in hits(view.model(), screen, min, max, crossing) {
+        match view.owner(entity) {
+            Owner::Active => {
+                if hit {
+                    picked.insert(entity);
+                }
+            }
+            Owner::Instance(id) => {
+                let state = instances.entry(Entity::Instance(id)).or_insert((false, true));
+                state.0 |= hit;
+                state.1 &= hit;
+            }
+            Owner::Outside => {}
+        }
+    }
+    picked.extend(instances.into_iter().filter(|(_, (any, all))| if crossing { *any } else { *all }).map(|(e, _)| e));
+    picked.into_iter().collect()
+}
+
+/// Every edge and face of `model`, and whether the window (or crossing) rectangle takes it.
+fn hits(model: &Model, screen: Screen<'_>, min: Vec2, max: Vec2, crossing: bool) -> Vec<(Entity, bool)> {
     let inside = |p: Vec2| p.cmpge(min).all() && p.cmple(max).all();
     let project_all = |points: &[DVec3]| -> Option<Vec<Vec2>> { points.iter().map(|&p| screen.project(p)).collect() };
     let touches = |polygon: &[Vec2], closed: bool| {
@@ -86,15 +131,18 @@ fn in_window(model: &Model, screen: Screen<'_>, min: Vec2, max: Vec2, crossing: 
             || (closed && contains((min + max) * 0.5, polygon))
     };
 
-    let edges = model.edges().filter_map(|(id, edge)| {
-        let points = project_all(&model.edge_points(edge))?;
-        let hit = if crossing { touches(&points, false) } else { points.iter().all(|&p| inside(p)) };
-        hit.then_some(Entity::Edge(id))
+    // Geometry behind the camera can't be in the window.
+    let edges = model.edges().map(|(id, edge)| {
+        let hit = project_all(&model.edge_points(edge)).is_some_and(|points| {
+            if crossing { touches(&points, false) } else { points.iter().all(|&p| inside(p)) }
+        });
+        (Entity::Edge(id), hit)
     });
-    let faces = model.faces().filter_map(|(id, face)| {
-        let points = project_all(&model.loop_points(&face.outer))?;
-        let hit = if crossing { touches(&points, true) } else { points.iter().all(|&p| inside(p)) };
-        hit.then_some(Entity::Face(id))
+    let faces = model.faces().map(|(id, face)| {
+        let hit = project_all(&model.loop_points(&face.outer)).is_some_and(|points| {
+            if crossing { touches(&points, true) } else { points.iter().all(|&p| inside(p)) }
+        });
+        (Entity::Face(id), hit)
     });
     edges.chain(faces).collect()
 }
@@ -152,7 +200,7 @@ mod tests {
     #[test]
     fn click_selects_one_and_double_click_adds_bounding_edges() {
         let (mut doc, camera) = setup();
-        let screen = Screen { camera: &camera, size: SIZE };
+        let screen = Screen::new(&camera, SIZE);
         let mut tool = SelectTool::default();
         tool.click(&mut doc, screen, at(screen, 0.75, 1.75), 1, Modifiers::default());
         assert_eq!(doc.selection().len(), 1);
@@ -163,7 +211,7 @@ mod tests {
     #[test]
     fn clicking_empty_space_clears() {
         let (mut doc, camera) = setup();
-        let screen = Screen { camera: &camera, size: SIZE };
+        let screen = Screen::new(&camera, SIZE);
         let mut tool = SelectTool::default();
         doc.select_all();
         tool.click(&mut doc, screen, at(screen, 5.0, 20.0), 1, Modifiers::default());
@@ -173,7 +221,7 @@ mod tests {
     #[test]
     fn modifiers_add_toggle_and_remove() {
         let (mut doc, camera) = setup();
-        let screen = Screen { camera: &camera, size: SIZE };
+        let screen = Screen::new(&camera, SIZE);
         let mut tool = SelectTool::default();
         let (a, b) = (at(screen, 0.75, 1.75), at(screen, 10.75, 1.75));
         tool.click(&mut doc, screen, a, 1, Modifiers::default());
@@ -188,7 +236,7 @@ mod tests {
     #[test]
     fn window_takes_only_whats_fully_inside() {
         let (mut doc, camera) = setup();
-        let screen = Screen { camera: &camera, size: SIZE };
+        let screen = Screen::new(&camera, SIZE);
         let mut tool = SelectTool::default();
         // Left to right around the first board only.
         tool.drag_start(at(screen, -1.0, -1.0));
@@ -199,7 +247,7 @@ mod tests {
     #[test]
     fn crossing_takes_anything_touched() {
         let (mut doc, camera) = setup();
-        let screen = Screen { camera: &camera, size: SIZE };
+        let screen = Screen::new(&camera, SIZE);
         let mut tool = SelectTool::default();
         // Right to left over just the middle of the first board.
         tool.drag_start(at(screen, 1.0, 2.0));

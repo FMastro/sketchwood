@@ -10,8 +10,9 @@ goes through Trimble's official SketchUp C SDK.
 
 ## Layout
 - `crates/view`: camera/view math. Pure `glam`, no GPU/UI deps, unit-tested.
-- `crates/doc`: `Model` (vertices/edges/faces with holes, f64 inches), `Document`
-  (selection, snapshot undo/redo, version counters), `units` (Measurements-box parsing and
+- `crates/doc`: `Model` (vertices/edges/faces with holes, f64 inches), `Scene` (groups and
+  components: definitions + instances), `View` (whole drawing flattened for picking/drawing),
+  `Document` (scene + editing path, selection, snapshot undo/redo, version counters), `units` (Measurements-box parsing and
   fractional-inch formatting).
 - `crates/tools`: toolkit-independent tools (`Tools`, `ToolId` with SketchUp shortcuts),
   picking and endpoint snapping (`pick`), Select and Rectangle state machines. The UI sends
@@ -62,9 +63,11 @@ add it there; when you finish an item, remove it.
 5. Midpoint and on-edge snapping (done): `pick::snap_feature`, priority endpoint > midpoint > on-edge
 6. Rotate (done): protractor tool (Q) + Move rotation grips on bounding-box faces; 15° snap,
    typed angles, Ctrl-tap copy, `3x` / `/3` rotational arrays
-7. Groups and components (shared definitions), outliner (next). Plan: tools keep working on
-   loose geometry, but Push/Pull auto-groups a new solid made from a free face (setting, on by
-   default) so boards behave as parts, like SketchUp best practice and OpenCutList expect.
+7. Groups and components (done): `doc::scene` (Scene, Container, Definition, Instance, View),
+   editing path (double-click in, Esc / click outside out), G / Ctrl+G, explode, Outliner panel.
+   Push/Pull auto-groups a board pulled from a free face (setting, on by default). Tools work
+   in the edited container's coordinates via `Screen::in_context`; picking/snapping/drawing use
+   the flattened `View` (edited geometry keeps its ids; picks resolve to instances).
 8. Tags (SketchUp's renamed Layers)
 9. Materials, with fields for OpenCutList-style cut lists (type, thickness, grain)
 10. Native save/load; OBJ/glTF export. Later: `.skp` import via the C SDK, cut lists.

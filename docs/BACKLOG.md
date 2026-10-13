@@ -22,9 +22,20 @@ each section. Remove items when they're done (mention them in the commit).
 - Rectangle: square and golden-ratio diagonal hints; drawing rectangles off the axes.
 - Snapping only considers screen distance; no "sticky" preference for the last inference.
 
+## Groups and components
+- No dashed bounding box around the group being edited (SketchUp draws one).
+- Selected groups are tinted; SketchUp instead draws their bounding box in blue.
+- No renaming in the Outliner, no nested tree (only the current level is listed), no
+  "make unique" command for components, no component browser to place more instances.
+- Push/Pull and Move stretching don't reach into groups from outside; open the group first
+  (same as SketchUp, but a "scale this board's length" shortcut would help woodworking).
+- Undo snapshots copy every definition; fine now, heavy for big furniture assemblies.
+- Copies of a group share a definition until opened (SketchUp's behavior); opening one gives
+  it its own copy, which isn't an undo step by itself.
+
 ## Rotate / grips
-- Grips appear around loose connected geometry; SketchUp shows them only on groups and
-  components. Once groups exist, decide whether loose geometry keeps them.
+- Grips also appear around loose connected geometry (SketchUp shows them only on groups and
+  components). Kept for now since it helps; revisit if it gets in the way.
 - Grips on thin boards crowd together; consider hiding grips on faces that are tiny on screen.
 - The protractor doesn't auto-orient to edges (SketchUp aligns to the hovered edge's plane)
   or flip when looking at it edge-on.

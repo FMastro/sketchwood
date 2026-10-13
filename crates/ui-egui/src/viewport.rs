@@ -48,7 +48,7 @@ impl Viewport {
         self.navigate(ui, &response, rect, size);
         self.feed_tools(ui, &response, rect, size, doc, tools);
         if self.zoom_extents_pending && size.x > 1.0 && size.y > 1.0 {
-            match doc.model().bounds() {
+            match doc.bounds() {
                 Some((min, max)) => self.camera.zoom_extents(min.as_vec3(), max.as_vec3(), size),
                 None => self.camera = OrbitCamera::default(),
             }
@@ -58,7 +58,7 @@ impl Viewport {
         let Some(render_state) = frame.wgpu_render_state() else { return };
         if self.scene_version != Some(doc.version()) {
             let mut scene = Scene::reference();
-            scene.add_model(doc.model(), doc.selection());
+            scene.add_view(doc.view(), doc.selection(), &doc.context_transform());
             self.renderer.set_scene(&render_state.device, &scene);
             self.scene_version = Some(doc.version());
         }

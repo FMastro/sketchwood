@@ -11,11 +11,11 @@
 
 use std::collections::BTreeSet;
 
-use glam::{DVec3, Vec2};
+use glam::{DAffine3, DVec3, Vec2};
 use sketchcraft_doc::{Document, EPS, Entity, Model, VertexId, rotation};
 
-use crate::pick::{Screen, Snap, hit_face, pick_entity, snap, snap_feature};
-use crate::{Array, Axis, Overlay, Protractor, highlight_entity, parse_array};
+use crate::pick::{Screen, Snap, hit_face, snap, snap_feature};
+use crate::{Array, Axis, Overlay, Protractor, highlight_entity, parse_array, pick_resolved};
 
 /// Angles snap to multiples of this when within [`ANGLE_SNAP_TOLERANCE`].
 const ANGLE_STEP: f64 = 15.0;
@@ -52,7 +52,6 @@ enum Stage {
 #[derive(Clone)]
 struct Done {
     entities: Vec<Entity>,
-    vertices: BTreeSet<VertexId>,
     center: DVec3,
     normal: DVec3,
     angle: f64,
@@ -104,9 +103,9 @@ impl RotateTool {
     }
 
     pub fn hover(&mut self, doc: &Document, screen: Screen<'_>, cursor: Vec2) {
-        let model = doc.model();
+        let model = doc.view().model();
         let Some(op) = &mut self.op else {
-            self.hover = if doc.selection().is_empty() { pick_entity(model, screen, cursor) } else { None };
+            self.hover = if doc.selection().is_empty() { pick_resolved(doc, screen, cursor) } else { None };
             self.snap = snap(model, screen, cursor, None);
             self.preview = self.snap.map(|s| (s.point, self.lock.map_or_else(|| surface_normal(model, screen, cursor), Axis::dir)));
             return;
@@ -219,11 +218,11 @@ impl RotateTool {
     }
 
     pub fn overlay(&self, doc: &Document, overlay: &mut Overlay) {
-        let model = doc.model();
+        let model = doc.view().model();
         overlay.snap = self.snap;
         let Some(op) = &self.op else {
             if let Some(entity) = self.hover {
-                highlight_entity(model, entity, overlay);
+                highlight_entity(doc.view(), entity, overlay);
             }
             overlay.protractor =
                 self.preview.map(|(center, normal)| Protractor { center, normal, from: None, to: None });
@@ -255,7 +254,7 @@ impl RotateTool {
     fn start(&mut self, doc: &Document, screen: Screen<'_>, cursor: Vec2) -> Result<(), String> {
         let model = doc.model();
         let entities: Vec<Entity> = if doc.selection().is_empty() {
-            match pick_entity(model, screen, cursor) {
+            match pick_resolved(doc, screen, cursor) {
                 Some(Entity::Face(id)) => std::iter::once(Entity::Face(id))
                     .chain(model.face_edges(id).into_iter().map(Entity::Edge))
                     .collect(),
@@ -266,8 +265,8 @@ impl RotateTool {
             doc.selection().iter().collect()
         };
         let Some(center) = self.snap.map(|s| s.point) else { return Ok(()) };
-        let normal = self.lock.map_or_else(|| surface_normal(model, screen, cursor), Axis::dir);
-        let vertices = model.entity_vertices(entities.iter().copied());
+        let normal = self.lock.map_or_else(|| surface_normal(doc.view().model(), screen, cursor), Axis::dir);
+        let vertices = doc.view().vertices_of(&entities);
         self.last = None;
         self.hover = None;
         self.preview = None;
@@ -282,7 +281,6 @@ impl RotateTool {
         }
         let done = Done {
             entities: op.entities.clone(),
-            vertices: op.vertices.clone(),
             center: op.center,
             normal: op.normal,
             angle,
@@ -312,24 +310,21 @@ impl RotateTool {
 
     /// Rotate or copy as one undo step; on failure the document is untouched.
     fn apply(&mut self, doc: &mut Document, mut done: Done) -> Result<(), String> {
-        let mut trial = doc.model().clone();
         let radians = done.angle.to_radians();
-        let copies = match done.copy {
-            None => {
-                trial.rotate_vertices(&done.vertices, done.center, done.normal, radians).map_err(|e| e.to_string())?;
-                None
-            }
+        let turn = |angle: f64| {
+            DAffine3::from_translation(done.center)
+                * DAffine3::from_axis_angle(done.normal.normalize(), angle)
+                * DAffine3::from_translation(-done.center)
+        };
+        let transforms: Vec<DAffine3> = match done.copy {
+            None => vec![turn(radians)],
             Some(Array { count, divide }) => {
                 let step = if divide { radians / f64::from(count) } else { radians };
-                let mut all = Vec::new();
-                for i in 1..=count {
-                    all.extend(trial.copy_entities_with(&done.entities, rotation(done.center, done.normal, step * f64::from(i))));
-                }
-                Some(all)
+                (1..=count).map(|i| turn(step * f64::from(i))).collect()
             }
         };
-        doc.edit(|model| *model = trial);
-        if let Some(copies) = copies {
+        let copies = doc.transform_entities(&done.entities, &transforms, done.copy.is_some()).map_err(|e| e.to_string())?;
+        if done.copy.is_some() {
             let selection = doc.selection_mut();
             selection.clear();
             selection.extend(copies);
@@ -403,7 +398,7 @@ mod tests {
     #[test]
     fn quarter_turn_by_clicking_snaps_to_ninety() {
         let (mut doc, camera) = setup();
-        let screen = Screen { camera: &camera, size: SIZE };
+        let screen = Screen::new(&camera, SIZE);
         let mut tool = RotateTool::default();
         // Slightly off 90°: within the 15° snap tolerance.
         turn_toward(&mut tool, &mut doc, screen, -0.2, 6.0);
@@ -417,7 +412,7 @@ mod tests {
     #[test]
     fn typed_angle_follows_the_mouse_and_can_be_retyped() {
         let (mut doc, camera) = setup();
-        let screen = Screen { camera: &camera, size: SIZE };
+        let screen = Screen::new(&camera, SIZE);
         let mut tool = RotateTool::default();
         // Mouse clockwise (toward -Y): typed 90 turns clockwise.
         turn_toward(&mut tool, &mut doc, screen, 4.0, -3.0);
@@ -435,7 +430,7 @@ mod tests {
     #[test]
     fn rotated_copy_array_goes_around() {
         let (mut doc, camera) = setup();
-        let screen = Screen { camera: &camera, size: SIZE };
+        let screen = Screen::new(&camera, SIZE);
         let mut tool = RotateTool::default();
         tool.toggle_copy();
         turn_toward(&mut tool, &mut doc, screen, 0.0, 6.0);
@@ -453,7 +448,7 @@ mod tests {
         let (mut doc, _) = setup();
         let mut camera = OrbitCamera { target: glam::Vec3::new(10.0, 0.0, 5.0), distance: 80.0, ..Default::default() };
         camera.set_view(StandardView::Right);
-        let screen = Screen { camera: &camera, size: SIZE };
+        let screen = Screen::new(&camera, SIZE);
         let mut tool = RotateTool::default();
         tool.lock_axis(Axis::X);
         let side = |y: f64, z: f64| screen.project(DVec3::new(10.0, y, z)).unwrap();

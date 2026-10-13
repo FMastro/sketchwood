@@ -35,6 +35,8 @@ fn app() -> App {
     let gpu = GPU.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let mut harness = Harness::builder()
         .with_size([1200.0, 800.0])
+        // Real frame timing, so quick successive clicks count as double-clicks.
+        .with_step_dt(1.0 / 60.0)
         .wgpu()
         .build_eframe(|cc| SketchCraftApp::new(cc));
     harness.run();
@@ -63,7 +65,7 @@ fn snapshot(harness: &mut Harness<'_, SketchCraftApp>, name: &str) {
 }
 
 fn size(harness: &Harness<'_, SketchCraftApp>) -> (f64, f64) {
-    let (lo, hi) = harness.state().document().model().bounds().expect("geometry exists");
+    let (lo, hi) = harness.state().document().bounds().expect("geometry exists");
     ((hi - lo).x, (hi - lo).y)
 }
 
@@ -81,7 +83,7 @@ fn draw_a_two_by_four_by_typing_its_size() {
     harness.key_press(Key::Enter);
     harness.run();
 
-    let model = harness.state().document().model();
+    let model = harness.state().document().view().model();
     assert_eq!(model.faces().count(), 1);
     assert_eq!(model.edges().count(), 4);
     assert_eq!(size(&harness), (1.5, 3.5));
@@ -117,7 +119,7 @@ fn space_selects_and_ctrl_a_delete_undo_work() {
 
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
     harness.run();
-    assert_eq!(harness.state().document().model().faces().count(), 1);
+    assert_eq!(harness.state().document().view().model().faces().count(), 1);
 }
 
 #[test]
@@ -128,7 +130,7 @@ fn clicking_a_face_selects_it() {
     click(&mut harness, corner);
     let far = pos2(760.0, 360.0);
     click(&mut harness, far);
-    assert_eq!(harness.state().document().model().faces().count(), 1);
+    assert_eq!(harness.state().document().view().model().faces().count(), 1);
 
     type_text(&mut harness, " ");
     // Halfway between the corners is inside the rectangle on screen.
@@ -166,7 +168,7 @@ fn push_pull_a_profile_into_an_eight_foot_two_by_four() {
 
     type_text(&mut harness, "p");
     assert_eq!(harness.state().tools().active(), ToolId::PushPull);
-    let (lo, hi) = harness.state().document().model().bounds().unwrap();
+    let (lo, hi) = harness.state().document().bounds().unwrap();
     let center = harness.state().to_window((lo + hi) * 0.5).unwrap();
     click(&mut harness, center);
     // Pull upward on screen, then type the length.
@@ -176,7 +178,7 @@ fn push_pull_a_profile_into_an_eight_foot_two_by_four() {
     harness.key_press(Key::Enter);
     harness.run();
 
-    let model = harness.state().document().model();
+    let model = harness.state().document().view().model();
     assert_eq!(model.faces().count(), 6);
     let (lo, hi) = model.bounds().unwrap();
     assert_eq!((hi - lo).to_array(), [1.5, 3.5, 96.0]);
@@ -197,7 +199,7 @@ fn board(harness: &mut App) {
     harness.run();
     type_text(harness, "Z");
     type_text(harness, "p");
-    let (lo, hi) = harness.state().document().model().bounds().unwrap();
+    let (lo, hi) = harness.state().document().bounds().unwrap();
     let center = harness.state().to_window((lo + hi) * 0.5).unwrap();
     click(harness, center);
     harness.hover_at(center - egui::vec2(0.0, 60.0));
@@ -224,7 +226,7 @@ fn copy_a_stud_into_a_wall_with_move_ctrl_and_array() {
     harness.run();
     assert!(harness.state().tools().status().contains("copying"), "{}", harness.state().tools().status());
 
-    let (start, _) = harness.state().document().model().bounds().unwrap();
+    let (start, _) = harness.state().document().bounds().unwrap();
     let base = harness.state().to_window(start).unwrap();
     click(&mut harness, base);
     harness.key_press(Key::ArrowRight);
@@ -238,7 +240,7 @@ fn copy_a_stud_into_a_wall_with_move_ctrl_and_array() {
     harness.key_press(Key::Enter);
     harness.run();
 
-    let model = harness.state().document().model();
+    let model = harness.state().document().view().model();
     assert_eq!(model.faces().count(), 30, "five boards");
     let (lo, hi) = model.bounds().unwrap();
     // Original plus four copies, 16" on center, along red only.
@@ -254,7 +256,7 @@ fn rotate_a_board_with_a_move_grip() {
     let mut harness = app();
     board(&mut harness);
     type_text(&mut harness, "m");
-    let (lo, hi) = harness.state().document().model().bounds().unwrap();
+    let (lo, hi) = harness.state().document().bounds().unwrap();
     let center = (lo + hi) * 0.5;
 
     // Hover the board's side: grips appear on the visible faces of its bounding box.
@@ -280,11 +282,66 @@ fn rotate_a_board_with_a_move_grip() {
     harness.key_press(Key::Enter);
     harness.run();
 
-    let (new_lo, new_hi) = harness.state().document().model().bounds().unwrap();
+    let (new_lo, new_hi) = harness.state().document().bounds().unwrap();
     let size = new_hi - new_lo;
     assert!((size.x - 3.5).abs() < 1e-9 && (size.y - 1.5).abs() < 1e-9, "{size}");
     assert!(((new_lo + new_hi) * 0.5).abs_diff_eq(center, 1e-9));
     assert_eq!(harness.state().tools().active(), ToolId::Move);
+}
+
+#[test]
+fn new_boards_are_groups_you_open_by_double_clicking() {
+    let mut harness = app();
+    board(&mut harness);
+    let doc = harness.state().document();
+    assert!(doc.model().is_empty(), "the board went into a group");
+    assert_eq!(doc.container().instances().count(), 1);
+    let (lo, hi) = doc.bounds().unwrap();
+
+    // Clicking the board with Select picks the whole group.
+    type_text(&mut harness, " ");
+    let side = harness.state().to_window(glam::DVec3::new((lo.x + hi.x) * 0.5, lo.y, (lo.z + hi.z) * 0.5)).unwrap();
+    click(&mut harness, side);
+    let selection = harness.state().document().selection();
+    assert!(matches!(selection.iter().next(), Some(sketchcraft_doc::Entity::Instance(_))));
+    snapshot(&mut harness, "group_selected");
+
+    // Double-click opens it: now its faces are editable. One button event per frame, well
+    // inside the double-click interval.
+    for pressed in [true, false, true, false] {
+        harness.event(Event::PointerButton { pos: side, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+        harness.step();
+    }
+    harness.run();
+    assert_eq!(harness.state().document().path().len(), 1, "double-click opened the group");
+    assert_eq!(harness.state().document().model().faces().count(), 6);
+    snapshot(&mut harness, "group_open");
+
+    // Esc closes it again (twice: first clears any selection).
+    harness.key_press(Key::Escape);
+    harness.key_press(Key::Escape);
+    harness.run();
+    assert!(harness.state().document().path().is_empty());
+}
+
+#[test]
+fn g_makes_a_component_from_loose_geometry() {
+    let mut harness = app();
+    type_text(&mut harness, "r");
+    click(&mut harness, pos2(600.0, 450.0));
+    harness.hover_at(pos2(680.0, 400.0));
+    harness.run();
+    type_text(&mut harness, "1.5,3.5");
+    harness.key_press(Key::Enter);
+    harness.run();
+    type_text(&mut harness, " ");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    harness.run();
+    type_text(&mut harness, "g");
+    let doc = harness.state().document();
+    assert!(doc.model().is_empty());
+    let (id, _) = doc.container().instances().next().expect("a component");
+    assert_eq!(doc.instance_name(id), Some("Component#1"));
 }
 
 #[test]

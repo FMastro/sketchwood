@@ -3,7 +3,7 @@
 //! Arrow keys lock an axis; tapping Ctrl on its own toggles copy in Move.
 
 use eframe::egui;
-use sketchcraft_doc::Document;
+use sketchcraft_doc::{DefinitionKind, Document};
 use sketchcraft_tools::{Axis, ToolId, Tools};
 
 use crate::viewport::Viewport;
@@ -36,6 +36,9 @@ impl Keyboard {
                     for c in text.chars() {
                         if tools.is_typing() || Tools::starts_value(c) {
                             tools.type_char(c);
+                        } else if c == 'g' {
+                            // SketchUp's Make Component shortcut.
+                            tools.make_group(doc, DefinitionKind::Component);
                         } else if c == 'Z' {
                             viewport.request_zoom_extents();
                         } else if let Some(tool) = ToolId::from_shortcut(c) {
@@ -61,6 +64,7 @@ impl Keyboard {
                         egui::Key::Z if command => undo(doc, tools),
                         egui::Key::Y if command => redo(doc, tools),
                         egui::Key::A if command => doc.select_all(),
+                        egui::Key::G if command => tools.make_group(doc, DefinitionKind::Group),
                         // SketchUp for Windows also binds Zoom Extents to Ctrl+Shift+E.
                         egui::Key::E if command && modifiers.shift => viewport.request_zoom_extents(),
                         _ => {}

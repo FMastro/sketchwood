@@ -4,13 +4,14 @@
 
 use glam::{DVec3, Vec2};
 use sketchcraft_doc::units::{format_length, parse_length};
-use sketchcraft_doc::{Document, FaceId, Model};
+use sketchcraft_doc::{Document, Entity, FaceId, Model, Owner};
 
 use crate::Overlay;
 use crate::pick::{Screen, Snap, closest_on_line, hit_face, snap_feature};
 
-#[derive(Default)]
 pub struct PushPullTool {
+    /// Make a board made from a free-standing face into a group (on by default).
+    pub auto_group: bool,
     op: Option<Op>,
     /// The face under the cursor while idle.
     hover: Option<FaceId>,
@@ -20,6 +21,12 @@ pub struct PushPullTool {
     last: Option<Done>,
     /// The last distance used, for double-click repeat.
     repeat: Option<f64>,
+}
+
+impl Default for PushPullTool {
+    fn default() -> Self {
+        Self { auto_group: true, op: None, hover: None, snap: None, last: None, repeat: None }
+    }
 }
 
 struct Op {
@@ -50,15 +57,15 @@ impl PushPullTool {
     }
 
     pub fn hover(&mut self, doc: &Document, screen: Screen<'_>, cursor: Vec2) {
-        let model = doc.model();
         let Some(op) = &mut self.op else {
-            self.hover = hit_face(model, &screen.ray(cursor)).map(|(id, _)| id);
+            self.hover = active_face(doc, screen, cursor).ok().flatten().map(|(id, _)| id);
             return;
         };
+        let (model, view) = (doc.model(), doc.view().model());
         // Corners, midpoints and edges elsewhere set the distance to their height, so faces can
         // be matched to other geometry. The face's own vertices don't count.
         let face = model.face(op.face);
-        self.snap = snap_feature(model, screen, cursor, |v| face.is_some_and(|f| f.uses_vertex(v)));
+        self.snap = snap_feature(view, screen, cursor, |v| face.is_some_and(|f| f.uses_vertex(v)));
         op.distance = match &self.snap {
             Some(s) => (s.point - op.anchor).dot(op.normal),
             None => closest_on_line(op.anchor, op.normal, &screen.ray(cursor)).unwrap_or(op.distance),
@@ -73,7 +80,7 @@ impl PushPullTool {
         {
             let face = match self.op.take() {
                 Some(op) => Some(op.face),
-                None => hit_face(doc.model(), &screen.ray(cursor)).map(|(id, _)| id),
+                None => active_face(doc, screen, cursor)?.map(|(id, _)| id),
             };
             return match face {
                 Some(face) => self.apply(doc, face, repeat),
@@ -84,15 +91,15 @@ impl PushPullTool {
             self.hover(doc, screen, cursor);
             self.finish(doc, None)
         } else {
-            self.start(doc.model(), screen, cursor, false);
-            Ok(())
+            self.start(doc, screen, cursor, false)
         }
     }
 
-    pub fn drag_start(&mut self, doc: &Document, screen: Screen<'_>, origin: Vec2) {
+    pub fn drag_start(&mut self, doc: &Document, screen: Screen<'_>, origin: Vec2) -> Result<(), String> {
         if self.op.is_none() {
-            self.start(doc.model(), screen, origin, true);
+            return self.start(doc, screen, origin, true);
         }
+        Ok(())
     }
 
     pub fn drag_end(&mut self, doc: &mut Document, screen: Screen<'_>, cursor: Vec2) -> Result<(), String> {
@@ -168,11 +175,12 @@ impl PushPullTool {
         }
     }
 
-    fn start(&mut self, model: &Model, screen: Screen<'_>, cursor: Vec2, dragging: bool) {
-        let Some((face, anchor)) = hit_face(model, &screen.ray(cursor)) else { return };
-        let normal = model.face(face).expect("hit a live face").normal;
+    fn start(&mut self, doc: &Document, screen: Screen<'_>, cursor: Vec2, dragging: bool) -> Result<(), String> {
+        let Some((face, anchor)) = active_face(doc, screen, cursor)? else { return Ok(()) };
+        let normal = doc.model().face(face).expect("hit a live face").normal;
         self.last = None;
         self.op = Some(Op { face, anchor, normal, distance: 0.0, dragging });
+        Ok(())
     }
 
     fn finish(&mut self, doc: &mut Document, typed: Option<f64>) -> Result<(), String> {
@@ -184,11 +192,10 @@ impl PushPullTool {
         Ok(())
     }
 
-    /// Push/pull as one undo step, leaving the document untouched on failure.
+    /// Push/pull as one undo step (auto-grouping a new board if enabled), leaving the document
+    /// untouched on failure.
     fn apply(&mut self, doc: &mut Document, face: FaceId, distance: f64) -> Result<(), String> {
-        let mut trial = doc.model().clone();
-        trial.push_pull(face, distance).map_err(|e| e.to_string())?;
-        doc.edit(|model| *model = trial);
+        doc.push_pull(face, distance, self.auto_group).map_err(|e| e.to_string())?;
         self.last = Some(Done { face, distance, model_version: doc.model_version() });
         self.repeat = Some(distance);
         self.hover = None;
@@ -196,6 +203,18 @@ impl PushPullTool {
     }
 }
 
+/// The face of the container being edited under the cursor, and where it was hit. Faces inside
+/// groups can't be pushed without opening the group first (as in SketchUp).
+fn active_face(doc: &Document, screen: Screen<'_>, cursor: Vec2) -> Result<Option<(FaceId, DVec3)>, String> {
+    let view = doc.view();
+    match hit_face(view.model(), &screen.ray(cursor)) {
+        None => Ok(None),
+        Some((face, point)) => match view.owner(Entity::Face(face)) {
+            Owner::Active => Ok(Some((face, point))),
+            _ => Err("That face is part of a group. Double-click the group to edit inside it, then push/pull.".into()),
+        },
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -222,14 +241,14 @@ mod tests {
     }
 
     fn height(doc: &Document) -> f64 {
-        let (lo, hi) = doc.model().bounds().unwrap();
+        let (lo, hi) = doc.bounds().unwrap();
         hi.z - lo.z
     }
 
     #[test]
     fn click_type_enter_makes_a_board() {
         let (mut doc, camera, _) = setup();
-        let screen = Screen { camera: &camera, size: SIZE };
+        let screen = Screen::new(&camera, SIZE);
         let mut tool = PushPullTool::default();
         let center = DVec3::new(0.75, 1.75, 0.0);
         tool.click(&mut doc, screen, at(screen, center), 1).unwrap();
@@ -238,14 +257,30 @@ mod tests {
         tool.enter(&mut doc, "96").unwrap();
         assert!(!tool.is_busy());
         assert_eq!(height(&doc), 96.0);
-        assert_eq!(doc.model().faces().count(), 6);
+        // The new board is its own group (auto-grouping is on by default).
+        assert!(doc.model().is_empty());
+        assert_eq!(doc.container().instances().count(), 1);
+        assert_eq!(doc.view().model().faces().count(), 6);
         assert_eq!(tool.measurement(), "96\"");
+    }
+
+    #[test]
+    fn auto_group_off_leaves_loose_geometry() {
+        let (mut doc, camera, _) = setup();
+        let screen = Screen::new(&camera, SIZE);
+        let mut tool = PushPullTool { auto_group: false, ..Default::default() };
+        let center = DVec3::new(0.75, 1.75, 0.0);
+        tool.click(&mut doc, screen, at(screen, center), 1).unwrap();
+        tool.hover(&doc, screen, at(screen, center + DVec3::Z * 5.0));
+        tool.enter(&mut doc, "96").unwrap();
+        assert_eq!(doc.model().faces().count(), 6);
+        assert_eq!(doc.container().instances().count(), 0);
     }
 
     #[test]
     fn mouse_distance_follows_the_cursor_up_the_normal() {
         let (mut doc, camera, _) = setup();
-        let screen = Screen { camera: &camera, size: SIZE };
+        let screen = Screen::new(&camera, SIZE);
         let mut tool = PushPullTool::default();
         let center = DVec3::new(0.75, 1.75, 0.0);
         tool.click(&mut doc, screen, at(screen, center), 1).unwrap();
@@ -257,7 +292,7 @@ mod tests {
     #[test]
     fn retyping_after_finishing_changes_the_length() {
         let (mut doc, camera, _) = setup();
-        let screen = Screen { camera: &camera, size: SIZE };
+        let screen = Screen::new(&camera, SIZE);
         let mut tool = PushPullTool::default();
         let center = DVec3::new(0.75, 1.75, 0.0);
         tool.click(&mut doc, screen, at(screen, center), 1).unwrap();
@@ -275,13 +310,13 @@ mod tests {
     #[test]
     fn typing_pushes_the_way_the_mouse_went() {
         let (mut doc, camera, _) = setup();
-        let screen = Screen { camera: &camera, size: SIZE };
+        let screen = Screen::new(&camera, SIZE);
         let mut tool = PushPullTool::default();
         let center = DVec3::new(0.75, 1.75, 0.0);
         tool.click(&mut doc, screen, at(screen, center), 1).unwrap();
         tool.hover(&doc, screen, at(screen, center - DVec3::Z * 5.0));
         tool.enter(&mut doc, "10").unwrap();
-        let (lo, _) = doc.model().bounds().unwrap();
+        let (lo, _) = doc.bounds().unwrap();
         assert_eq!(lo.z, -10.0);
     }
 
@@ -295,7 +330,7 @@ mod tests {
         });
         let mut camera = OrbitCamera { target: glam::Vec3::new(3.0, 1.75, 0.0), distance: 40.0, ..Default::default() };
         camera.set_view(StandardView::Iso);
-        let screen = Screen { camera: &camera, size: SIZE };
+        let screen = Screen::new(&camera, SIZE);
         let mut tool = PushPullTool::default();
         let first = DVec3::new(0.75, 1.75, 0.0);
         tool.click(&mut doc, screen, at(screen, first), 1).unwrap();
@@ -306,9 +341,31 @@ mod tests {
         tool.click(&mut doc, screen, second, 1).unwrap();
         tool.click(&mut doc, screen, second, 2).unwrap();
         assert!(!tool.is_busy());
-        let tops = doc.model().faces().filter(|(_, f)| (doc.model().vertex(f.outer[0]).z - 12.0).abs() < 1e-9).count();
+        // Both profiles became 12" boards, each auto-grouped.
+        let view = doc.view().model();
+        let tops = view.faces().filter(|(_, f)| (view.vertex(f.outer[0]).z - 12.0).abs() < 1e-9).count();
         assert_eq!(tops, 2);
-        assert!(doc.model().face(a).is_some() && doc.model().face(b).is_some());
+        assert_eq!(doc.container().instances().count(), 2);
+        assert!(doc.model().face(a).is_none() && doc.model().face(b).is_none());
+    }
+
+    #[test]
+    fn faces_inside_groups_need_the_group_opened_first() {
+        let (mut doc, camera, face) = setup();
+        let group = doc.push_pull(face, 10.0, true).unwrap().unwrap();
+        let screen = Screen::new(&camera, SIZE);
+        let mut tool = PushPullTool::default();
+        let top = DVec3::new(0.75, 1.75, 10.0);
+        let error = tool.click(&mut doc, screen, at(screen, top), 1).unwrap_err();
+        assert!(error.contains("Double-click the group"), "{error}");
+        // Inside the group, the top face can be pulled; the board stays one group.
+        doc.enter(group);
+        let screen = Screen::in_context(&camera, SIZE, doc.context_transform());
+        tool.click(&mut doc, screen, at(screen, top), 1).unwrap();
+        tool.hover(&doc, screen, at(screen, top + DVec3::Z * 3.0));
+        tool.enter(&mut doc, "2").unwrap();
+        assert_eq!(doc.bounds().unwrap().1.z, 12.0);
+        assert_eq!(doc.scene().root.instances().count(), 1);
     }
 
     #[test]
@@ -316,7 +373,7 @@ mod tests {
         let (mut doc, camera, face) = setup();
         doc.edit(|m| m.push_pull(face, 10.0)).unwrap();
         let version = doc.model_version();
-        let screen = Screen { camera: &camera, size: SIZE };
+        let screen = Screen::new(&camera, SIZE);
         let mut tool = PushPullTool::default();
         // Click the top face, then try to push it through the bottom.
         let top = DVec3::new(0.75, 1.75, 10.0);

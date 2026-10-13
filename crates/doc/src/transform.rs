@@ -40,6 +40,7 @@ impl Model {
         for entity in entities {
             match entity {
                 Entity::Edge(id) => vertices.extend(self.edge(id).into_iter().flat_map(|e| [e.a, e.b])),
+                Entity::Instance(_) => {}
                 Entity::Face(id) => {
                     vertices.extend(self.face(id).into_iter().flat_map(|f| f.loops().flatten().copied()))
                 }
@@ -125,13 +126,25 @@ impl Model {
     /// Copy `entities` mapped through `transform`, which must preserve orientation (a move or
     /// rotation, not a mirror). Returns the copies.
     pub fn copy_entities_with(&mut self, entities: &[Entity], transform: impl Fn(DVec3) -> DVec3) -> Vec<Entity> {
+        let source = self.clone();
+        self.copy_entities_with_from(&source, entities, transform)
+    }
+
+    /// Copy `entities` of `source` into this model, mapped through `transform` (a move or
+    /// rotation). Returns the copies.
+    pub fn copy_entities_with_from(
+        &mut self,
+        source: &Model,
+        entities: &[Entity],
+        transform: impl Fn(DVec3) -> DVec3,
+    ) -> Vec<Entity> {
         let faces: Vec<FaceId> =
             entities.iter().filter_map(|e| if let Entity::Face(id) = e { Some(*id) } else { None }).collect();
-        let face_edges: BTreeSet<_> = faces.iter().flat_map(|&f| self.face_edges(f)).collect();
+        let face_edges: BTreeSet<_> = faces.iter().flat_map(|&f| source.face_edges(f)).collect();
         let mut copies = Vec::new();
         for face in faces {
-            let Some(face) = self.face(face).cloned() else { continue };
-            let moved = |ids: &[VertexId]| -> Vec<DVec3> { ids.iter().map(|&v| transform(self.vertex(v))).collect() };
+            let Some(face) = source.face(face) else { continue };
+            let moved = |ids: &[VertexId]| -> Vec<DVec3> { ids.iter().map(|&v| transform(source.vertex(v))).collect() };
             let outer = moved(&face.outer);
             let holes: Vec<Vec<DVec3>> = face.holes.iter().map(|h| moved(h)).collect();
             if let Some(copy) = self.add_face_with_holes(&outer, &holes) {
@@ -142,9 +155,9 @@ impl Model {
         for entity in entities {
             if let Entity::Edge(id) = *entity
                 && !face_edges.contains(&id)
-                && let Some(edge) = self.edge(id).copied()
+                && let Some(edge) = source.edge(id).copied()
             {
-                let [a, b] = self.edge_points(&edge);
+                let [a, b] = source.edge_points(&edge);
                 let (a, b) = (self.add_vertex(transform(a)), self.add_vertex(transform(b)));
                 if let Some(copy) = self.add_edge(a, b) {
                     copies.push(Entity::Edge(copy));

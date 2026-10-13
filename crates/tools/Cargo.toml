@@ -1,0 +1,15 @@
+[package]
+name = "sketchcraft-tools"
+description = "SketchCraft tools (Select, Rectangle, navigation), picking and snapping"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+sketchcraft-doc.workspace = true
+sketchcraft-view.workspace = true
+glam.workspace = true
+
+[lints]
+workspace = true

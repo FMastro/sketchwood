@@ -1,0 +1,16 @@
+[package]
+name = "sketchcraft-render"
+description = "wgpu viewport renderer for SketchCraft"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+sketchcraft-doc.workspace = true
+wgpu.workspace = true
+glam.workspace = true
+bytemuck.workspace = true
+
+[lints]
+workspace = true

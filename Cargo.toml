@@ -1,0 +1,48 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "apps/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.95"
+
+[workspace.dependencies]
+# internal
+sketchcraft-doc = { path = "crates/doc" }
+sketchcraft-tools = { path = "crates/tools" }
+sketchcraft-view = { path = "crates/view" }
+sketchcraft-render = { path = "crates/render" }
+sketchcraft-ui-egui = { path = "crates/ui-egui" }
+
+# external
+eframe = { version = "0.36", default-features = false, features = ["default_fonts", "wgpu", "accesskit"] }
+egui = "0.36"
+egui-wgpu = "0.36"
+egui_kittest = "0.36"
+# Must stay on the same major version egui-wgpu uses, or the device types won't match.
+wgpu = "30"
+glam = { version = "0.34", features = ["bytemuck"] }
+bytemuck = "1"
+earcut = "0.4"
+log = "0.4"
+env_logger = "0.11"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+
+# Dependencies optimized even in dev builds, so the viewport stays smooth while debugging.
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

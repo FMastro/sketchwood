@@ -1,0 +1,25 @@
+[package]
+name = "sketchcraft-ui-egui"
+description = "egui user interface for SketchCraft"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+sketchcraft-doc.workspace = true
+sketchcraft-tools.workspace = true
+sketchcraft-view.workspace = true
+sketchcraft-render.workspace = true
+eframe.workspace = true
+egui.workspace = true
+egui-wgpu.workspace = true
+glam.workspace = true
+egui-phosphor = "0.14"
+
+[dev-dependencies]
+egui_kittest = { workspace = true, features = ["eframe", "wgpu"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[lints]
+workspace = true

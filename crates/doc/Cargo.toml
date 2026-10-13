@@ -1,0 +1,14 @@
+[package]
+name = "sketchcraft-doc"
+description = "SketchCraft document: geometry model, selection, undo, units"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+glam.workspace = true
+earcut.workspace = true
+
+[lints]
+workspace = true

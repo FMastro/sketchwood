@@ -1,0 +1,13 @@
+[package]
+name = "sketchcraft-view"
+description = "Camera and view math for SketchCraft (no GPU or UI dependencies)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+glam.workspace = true
+
+[lints]
+workspace = true

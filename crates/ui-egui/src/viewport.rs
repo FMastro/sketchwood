@@ -240,10 +240,13 @@ fn draw_overlay(painter: &egui::Painter, rect: egui::Rect, camera: &OrbitCamera,
     if let Some(snap) = &overlay.snap
         && let Some(pos) = screen(snap.point)
     {
-        // SketchUp's inference colors: green endpoints, yellow-ish origin, blue on-face.
+        // SketchUp's inference colors: green endpoints, cyan midpoints, red on-edge, blue
+        // on-face (and yellow-ish for the origin).
         let color = match snap.kind {
             SnapKind::Endpoint => egui::Color32::from_rgb(0, 170, 0),
             SnapKind::Origin => egui::Color32::from_rgb(230, 170, 0),
+            SnapKind::Midpoint => egui::Color32::from_rgb(0, 190, 210),
+            SnapKind::OnEdge => egui::Color32::from_rgb(220, 0, 0),
             SnapKind::OnFace => egui::Color32::from_rgb(0, 90, 255),
             SnapKind::OnPlane | SnapKind::OnGround => egui::Color32::from_gray(90),
         };

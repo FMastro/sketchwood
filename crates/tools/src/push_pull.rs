@@ -7,7 +7,7 @@ use sketchcraft_doc::units::{format_length, parse_length};
 use sketchcraft_doc::{Document, FaceId, Model};
 
 use crate::Overlay;
-use crate::pick::{Screen, Snap, SnapKind, closest_on_line, hit_face, snap};
+use crate::pick::{Screen, Snap, closest_on_line, hit_face, snap_feature};
 
 #[derive(Default)]
 pub struct PushPullTool {
@@ -55,8 +55,10 @@ impl PushPullTool {
             self.hover = hit_face(model, &screen.ray(cursor)).map(|(id, _)| id);
             return;
         };
-        // Endpoints set the distance to their height, so faces can be matched to other geometry.
-        self.snap = snap(model, screen, cursor, None).filter(|s| matches!(s.kind, SnapKind::Endpoint | SnapKind::Origin));
+        // Corners, midpoints and edges elsewhere set the distance to their height, so faces can
+        // be matched to other geometry. The face's own vertices don't count.
+        let face = model.face(op.face);
+        self.snap = snap_feature(model, screen, cursor, |v| face.is_some_and(|f| f.uses_vertex(v)));
         op.distance = match &self.snap {
             Some(s) => (s.point - op.anchor).dot(op.normal),
             None => closest_on_line(op.anchor, op.normal, &screen.ray(cursor)).unwrap_or(op.distance),

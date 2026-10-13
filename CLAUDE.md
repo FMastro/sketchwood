@@ -46,21 +46,23 @@ to the box too (so `38mm` isn't Move). Otherwise letters are tool shortcuts, Spa
 - `cargo test --workspace`
 - `cargo clippy --workspace --all-targets` (keep it warning-free)
 
+## Backlog
+`docs/BACKLOG.md` lists known gaps and skipped work. When you skip or simplify something,
+add it there; when you finish an item, remove it.
+
 ## Roadmap (MVP)
 1. Viewport, grid, axes, orbit/pan/zoom (done)
 2. Select + Rectangle with typed dimensions, all tool shortcuts, undo/redo, Delete (done)
-   - Known gaps: partially overlapping coplanar faces don't split; endpoint/origin snapping
-     only (no axis/midpoint/on-edge inference yet).
 3. Push/Pull + icon toolbar (Phosphor icons via `egui-phosphor`) (done)
    - `doc::push_pull`: free face → closed solid; prism cap → moves (no seam); face set in a
      surface → block or pocket. Tool: typed distance, retype after, double-click repeats.
-   - Known gaps: no coplanar-face merging; pocket walls touching an existing side don't cut it.
 4. Move (done): `doc::transform` (move vertices with stretch + planarity check, copy);
    tool with axis inference, arrow-key locks, Ctrl-tap copy, `3x` / `/3` arrays, typed
    distance or `x,y,z` / `<x,y,z>` / `[x,y,z]`.
-5. Line tool, face splitting, fuller inference (midpoint, on-edge); Rotate, Offset, Circle
-6. Tape Measure + guides
+5. Midpoint and on-edge snapping (done): `pick::snap_feature`, priority endpoint > midpoint > on-edge
+6. Rotate (next)
 7. Groups and components (shared definitions), outliner
 8. Tags (SketchUp's renamed Layers)
 9. Materials, with fields for OpenCutList-style cut lists (type, thickness, grain)
 10. Native save/load; OBJ/glTF export. Later: `.skp` import via the C SDK, cut lists.
+11. Line tool and face splitting, Offset, Circle, Tape Measure + guides (see backlog)

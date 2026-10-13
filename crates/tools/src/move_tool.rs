@@ -14,7 +14,7 @@ use glam::{DVec3, Vec2};
 use sketchcraft_doc::units::{format_length, parse_length, parse_lengths};
 use sketchcraft_doc::{Document, EPS, Entity, Model, VertexId};
 
-use crate::pick::{Screen, Snap, closest_on_line, pick_entity, snap_endpoint};
+use crate::pick::{Screen, Snap, closest_on_line, pick_entity, snap_feature};
 use crate::{Axis, Guide, Overlay};
 
 /// How close, in points, the cursor must come to an axis line to lock onto it.
@@ -225,7 +225,7 @@ impl MoveTool {
         let base = op.base;
         let ray = screen.ray(cursor);
         // Don't snap to the geometry being moved, unless copying (the original stays put).
-        let snap = snap_endpoint(model, screen, cursor, |v| !self.copy && op.vertices.contains(&v));
+        let snap = snap_feature(model, screen, cursor, |v| !self.copy && op.vertices.contains(&v));
 
         if let Some(axis) = self.lock {
             let dir = axis.dir();

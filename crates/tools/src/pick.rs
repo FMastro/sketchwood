@@ -108,6 +108,8 @@ pub fn pick_entity(model: &Model, screen: Screen<'_>, cursor: Vec2) -> Option<En
 pub enum SnapKind {
     Endpoint,
     Origin,
+    Midpoint,
+    OnEdge,
     OnFace,
     /// On the plane a tool is drawing in.
     OnPlane,
@@ -120,9 +122,16 @@ impl SnapKind {
         match self {
             Self::Endpoint => Some("Endpoint"),
             Self::Origin => Some("Origin"),
+            Self::Midpoint => Some("Midpoint"),
+            Self::OnEdge => Some("On Edge"),
             Self::OnFace => Some("On Face"),
             Self::OnPlane | Self::OnGround => None,
         }
+    }
+
+    /// A point on existing geometry (as opposed to a surface or the drawing plane).
+    pub fn is_feature(self) -> bool {
+        matches!(self, Self::Endpoint | Self::Origin | Self::Midpoint | Self::OnEdge)
     }
 }
 
@@ -135,7 +144,7 @@ pub struct Snap {
 }
 
 /// The point the cursor indicates. With a `plane` (point, normal), the result is always on
-/// that plane. Endpoints within [`SNAP_RADIUS`] win, then faces, then the ground.
+/// that plane. Features ([`snap_feature`]) win, then faces, then the ground.
 pub fn snap(
     model: &Model,
     screen: Screen<'_>,
@@ -150,7 +159,7 @@ pub fn snap(
             .or_else(|| ray.hit_plane(DVec3::ZERO, DVec3::Z).map(|p| (p, DVec3::Z, SnapKind::OnGround))),
     };
 
-    match (snap_endpoint(model, screen, cursor, |_| false), plane) {
+    match (snap_feature(model, screen, cursor, |_| false), plane) {
         // Snapped points off the drawing plane are projected onto it.
         (Some(s), Some((origin, normal))) => {
             Some(Snap { point: s.point - normal * (s.point - origin).dot(normal), kind: s.kind, normal })
@@ -160,34 +169,75 @@ pub fn snap(
     }
 }
 
-/// The visible endpoint (or the origin) nearest the cursor within [`SNAP_RADIUS`], skipping
-/// vertices `exclude` accepts. The snap's normal is +Z.
-pub fn snap_endpoint(
+/// The geometry feature the cursor is on, in SketchUp's priority: an endpoint (or the origin)
+/// within [`SNAP_RADIUS`], else an edge midpoint within [`SNAP_RADIUS`], else the nearest point
+/// on an edge within [`EDGE_RADIUS`]. Hidden features, and those of edges touching vertices
+/// `exclude` accepts, are skipped. The snap's normal is +Z.
+pub fn snap_feature(
     model: &Model,
     screen: Screen<'_>,
     cursor: Vec2,
     exclude: impl Fn(VertexId) -> bool,
 ) -> Option<Snap> {
     let eye = screen.eye();
-    model
+    let nearest = |candidates: Vec<(f32, DVec3, SnapKind)>| {
+        candidates
+            .into_iter()
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, point, kind)| Snap { point, kind, normal: DVec3::Z })
+    };
+    let near = |point: DVec3, radius: f32| screen.project(point).map(|s| s.distance(cursor)).filter(|&d| d <= radius);
+
+    let endpoints = model
         .vertices()
         .filter(|(id, _)| !exclude(*id))
-        .map(|(id, p)| (p, SnapKind::Endpoint, Some(id)))
-        .chain(std::iter::once((DVec3::ZERO, SnapKind::Origin, None)))
-        .filter_map(|(point, kind, id)| {
-            let distance = screen.project(point)?.distance(cursor);
-            if distance > SNAP_RADIUS {
-                return None;
-            }
-            if let Some(id) = id
-                && occluded(model, eye, point, |f| model.face(f).is_some_and(|face| face.uses_vertex(id)))
-            {
-                return None;
-            }
-            Some((distance, Snap { point, kind, normal: DVec3::Z }))
+        .filter_map(|(id, point)| {
+            let distance = near(point, SNAP_RADIUS)?;
+            let hidden = occluded(model, eye, point, |f| model.face(f).is_some_and(|face| face.uses_vertex(id)));
+            (!hidden).then_some((distance, point, SnapKind::Endpoint))
         })
-        .min_by(|a, b| a.0.total_cmp(&b.0))
-        .map(|(_, snap)| snap)
+        .chain(near(DVec3::ZERO, SNAP_RADIUS).map(|d| (d, DVec3::ZERO, SnapKind::Origin)))
+        .collect();
+    if let Some(snap) = nearest(endpoints) {
+        return Some(snap);
+    }
+
+    let edges: Vec<_> = model.edges().filter(|(_, e)| !exclude(e.a) && !exclude(e.b)).map(|(_, e)| e).collect();
+    let visible = |point: DVec3, edge: &sketchcraft_doc::Edge| {
+        !occluded(model, eye, point, |f| model.face(f).is_some_and(|face| face.uses_edge(edge)))
+    };
+
+    let midpoints = edges
+        .iter()
+        .filter_map(|edge| {
+            let [a, b] = model.edge_points(edge);
+            let mid = (a + b) * 0.5;
+            let distance = near(mid, SNAP_RADIUS)?;
+            visible(mid, edge).then_some((distance, mid, SnapKind::Midpoint))
+        })
+        .collect();
+    if let Some(snap) = nearest(midpoints) {
+        return Some(snap);
+    }
+
+    let ray = screen.ray(cursor);
+    let on_edge = edges
+        .iter()
+        .filter_map(|edge| {
+            let [a, b] = model.edge_points(edge);
+            let (distance, _) = segment_distance(cursor, screen.project(a)?, screen.project(b)?);
+            if distance > EDGE_RADIUS {
+                return None;
+            }
+            // The exact 3D point: where the edge passes closest to the cursor ray.
+            let length = a.distance(b);
+            let dir = (b - a) / length;
+            let t = closest_on_line(a, dir, &ray)?.clamp(0.0, length);
+            let point = a + dir * t;
+            visible(point, edge).then_some((distance, point, SnapKind::OnEdge))
+        })
+        .collect();
+    nearest(on_edge)
 }
 
 /// The parameter `t` of the point on the line `anchor + t * dir` (unit `dir`) closest to `ray`,
@@ -252,6 +302,43 @@ mod tests {
         let snap = snap(&model, screen, near_corner, None).unwrap();
         assert_eq!(snap.kind, SnapKind::Endpoint);
         assert!(snap.point.abs_diff_eq(DVec3::new(10.0, 10.0, 0.0), 1e-9));
+    }
+
+    #[test]
+    fn snaps_to_midpoint_then_on_edge() {
+        let model = square();
+        let camera = top_camera();
+        let screen = Screen { camera: &camera, size: SIZE };
+        // Near the bottom edge's midpoint (5, 0).
+        let near_mid = screen.project(DVec3::new(5.0, 0.0, 0.0)).unwrap() + Vec2::new(5.0, 3.0);
+        let mid = snap(&model, screen, near_mid, None).unwrap();
+        assert_eq!(mid.kind, SnapKind::Midpoint);
+        assert!(mid.point.abs_diff_eq(DVec3::new(5.0, 0.0, 0.0), 1e-9));
+        // Further along the edge: on-edge, at the exact point on the edge.
+        let along = screen.project(DVec3::new(7.5, 0.0, 0.0)).unwrap() + Vec2::new(0.0, 3.0);
+        let on_edge = snap(&model, screen, along, None).unwrap();
+        assert_eq!(on_edge.kind, SnapKind::OnEdge);
+        assert!((on_edge.point.x - 7.5).abs() < 0.01 && on_edge.point.y.abs() < 1e-9, "{}", on_edge.point);
+    }
+
+    #[test]
+    fn endpoints_beat_midpoints_on_short_edges() {
+        let mut model = Model::default();
+        model.add_rectangle(DVec3::ZERO, DVec3::X * 0.25, DVec3::Y * 10.0, DVec3::Z);
+        let camera = top_camera();
+        let screen = Screen { camera: &camera, size: SIZE };
+        // The short edge's midpoint and endpoints are all within the snap radius.
+        let cursor = screen.project(DVec3::new(0.05, 0.0, 0.0)).unwrap();
+        assert_eq!(snap(&model, screen, cursor, None).unwrap().kind, SnapKind::Endpoint);
+    }
+
+    #[test]
+    fn excluded_geometry_is_not_snapped() {
+        let model = square();
+        let camera = top_camera();
+        let screen = Screen { camera: &camera, size: SIZE };
+        let near_mid = screen.project(DVec3::new(5.0, 0.0, 0.0)).unwrap();
+        assert_eq!(snap_feature(&model, screen, near_mid, |_| true), None);
     }
 
     #[test]

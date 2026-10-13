@@ -60,8 +60,11 @@ add it there; when you finish an item, remove it.
    tool with axis inference, arrow-key locks, Ctrl-tap copy, `3x` / `/3` arrays, typed
    distance or `x,y,z` / `<x,y,z>` / `[x,y,z]`.
 5. Midpoint and on-edge snapping (done): `pick::snap_feature`, priority endpoint > midpoint > on-edge
-6. Rotate (next)
-7. Groups and components (shared definitions), outliner
+6. Rotate (done): protractor tool (Q) + Move rotation grips on bounding-box faces; 15° snap,
+   typed angles, Ctrl-tap copy, `3x` / `/3` rotational arrays
+7. Groups and components (shared definitions), outliner (next). Plan: tools keep working on
+   loose geometry, but Push/Pull auto-groups a new solid made from a free face (setting, on by
+   default) so boards behave as parts, like SketchUp best practice and OpenCutList expect.
 8. Tags (SketchUp's renamed Layers)
 9. Materials, with fields for OpenCutList-style cut lists (type, thickness, grain)
 10. Native save/load; OBJ/glTF export. Later: `.skp` import via the C SDK, cut lists.

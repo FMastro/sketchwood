@@ -9,4 +9,4 @@ pub mod units;
 pub use document::{Document, Selection};
 pub use model::{EPS, Edge, EdgeId, Entity, Face, FaceId, Model, VertexId};
 pub use push_pull::PushPullError;
-pub use transform::MoveError;
+pub use transform::{MoveError, rotation};

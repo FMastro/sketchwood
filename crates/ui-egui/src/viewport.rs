@@ -181,6 +181,61 @@ fn to_vec2(v: egui::Vec2) -> Vec2 {
     Vec2::new(v.x, v.y)
 }
 
+/// Protractor radius on screen, in points.
+const PROTRACTOR_RADIUS: f32 = 45.0;
+
+/// SketchUp's protractor: a circle with 15° ticks in the rotation plane, colored by the axis
+/// it's aligned with, plus the starting (dashed) and current (solid) rays.
+fn draw_protractor(
+    painter: &egui::Painter,
+    camera: &OrbitCamera,
+    size: Vec2,
+    screen: &dyn Fn(DVec3) -> Option<egui::Pos2>,
+    protractor: &sketchcraft_tools::Protractor,
+) {
+    let (center, n) = (protractor.center, protractor.normal.normalize());
+    // Keep the protractor a constant size on screen.
+    let depth = (center.as_vec3() - camera.eye()).dot(camera.forward()).max(0.01);
+    let world_per_point = 2.0 * depth * (camera.fov_y * 0.5).tan() / size.y.max(1.0);
+    let radius = f64::from(PROTRACTOR_RADIUS * world_per_point);
+    let u = n.cross(if n.z.abs() < 0.9 { DVec3::Z } else { DVec3::X }).normalize();
+    let v = n.cross(u);
+    let at = |degrees: f64, r: f64| {
+        let a = degrees.to_radians();
+        center + (u * a.cos() + v * a.sin()) * r
+    };
+    let color = if n.z.abs() > 0.999 {
+        egui::Color32::from_rgb(0, 0, 230)
+    } else if n.x.abs() > 0.999 {
+        egui::Color32::from_rgb(220, 0, 0)
+    } else if n.y.abs() > 0.999 {
+        egui::Color32::from_rgb(0, 160, 0)
+    } else {
+        egui::Color32::from_gray(60)
+    };
+    let stroke = egui::Stroke::new(1.5, color);
+    let circle: Option<Vec<egui::Pos2>> = (0..=72).map(|i| screen(at(f64::from(i) * 5.0, radius))).collect();
+    if let Some(circle) = circle {
+        painter.add(egui::Shape::line(circle, stroke));
+    }
+    for i in 0..24 {
+        let degrees = f64::from(i) * 15.0;
+        let inner = if i % 6 == 0 { 0.7 } else { 0.85 };
+        if let (Some(a), Some(b)) = (screen(at(degrees, radius * inner)), screen(at(degrees, radius))) {
+            painter.line_segment([a, b], stroke);
+        }
+    }
+    let Some(c) = screen(center) else { return };
+    painter.circle_filled(c, 2.5, color);
+    if let Some(from) = protractor.from.and_then(screen) {
+        let dashed = egui::Stroke::new(1.0, egui::Color32::from_gray(70));
+        painter.extend(egui::Shape::dashed_line(&[c, from], dashed, 5.0, 4.0));
+    }
+    if let Some(to) = protractor.to.and_then(screen) {
+        painter.line_segment([c, to], egui::Stroke::new(1.5, egui::Color32::BLACK));
+    }
+}
+
 /// A SketchUp-style inference tooltip below-right of `pos`.
 fn tooltip(painter: &egui::Painter, pos: egui::Pos2, label: &str) {
     let galley = painter.layout_no_wrap(label.into(), egui::FontId::proportional(12.0), egui::Color32::BLACK);
@@ -212,6 +267,20 @@ fn draw_overlay(painter: &egui::Painter, rect: egui::Rect, camera: &OrbitCamera,
         if let (Some(a), Some(b)) = (screen(*a), screen(*b)) {
             painter.line_segment([a, b], preview);
         }
+    }
+
+    // Move's rotation grips: small red crosses, bigger under the cursor.
+    for &(point, hovered) in &overlay.grips {
+        if let Some(p) = screen(point) {
+            let (r, width) = if hovered { (7.0, 2.5) } else { (4.5, 1.5) };
+            let stroke = egui::Stroke::new(width, egui::Color32::from_rgb(220, 0, 0));
+            painter.line_segment([p - egui::vec2(r, 0.0), p + egui::vec2(r, 0.0)], stroke);
+            painter.line_segment([p - egui::vec2(0.0, r), p + egui::vec2(0.0, r)], stroke);
+        }
+    }
+
+    if let Some(protractor) = &overlay.protractor {
+        draw_protractor(painter, camera, size, &screen, protractor);
     }
 
     // The rubber band from the base point: in the axis's color when following one, as in

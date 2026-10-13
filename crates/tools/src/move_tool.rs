@@ -15,16 +15,38 @@ use sketchcraft_doc::units::{format_length, parse_length, parse_lengths};
 use sketchcraft_doc::{Document, EPS, Entity, Model, VertexId};
 
 use crate::pick::{Screen, Snap, closest_on_line, pick_entity, snap_feature};
-use crate::{Axis, Guide, Overlay};
+use crate::{Array, Axis, Guide, Overlay, Protractor, highlight_entity, parse_array};
 
 /// How close, in points, the cursor must come to an axis line to lock onto it.
 const AXIS_RADIUS: f32 = 14.0;
+
+/// How close, in points, the cursor must be to a rotation grip.
+const GRIP_RADIUS: f32 = 9.0;
+
+/// SketchUp's rotation grips: red crosses on the faces of the bounding box of what Move would
+/// move. Clicking one rotates about that face's center line instead of moving.
+pub struct Grips {
+    pub entities: Vec<Entity>,
+    pub vertices: BTreeSet<VertexId>,
+    /// Faces of the bounding box that face the camera.
+    pub faces: Vec<GripFace>,
+    /// The grip under the cursor: (face index, grip index).
+    pub hovered: Option<(usize, usize)>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct GripFace {
+    pub center: DVec3,
+    pub normal: DVec3,
+    pub grips: [DVec3; 4],
+}
 
 #[derive(Default)]
 pub struct MoveTool {
     op: Option<Op>,
     /// What the move would pick up when nothing is selected.
     hover: Option<Entity>,
+    grips: Option<Grips>,
     snap: Option<Snap>,
     /// Axis locked with the arrow keys.
     lock: Option<Axis>,
@@ -51,14 +73,6 @@ struct Done {
     model_version: u64,
 }
 
-/// How copies are laid out: `count` copies at multiples of the offset, or (divided) spread
-/// evenly up to it.
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct Array {
-    count: u32,
-    divide: bool,
-}
-
 impl MoveTool {
     pub fn is_busy(&self) -> bool {
         self.op.is_some()
@@ -69,6 +83,7 @@ impl MoveTool {
         self.snap = None;
         self.lock = None;
         self.last = None;
+        self.grips = None;
     }
 
     pub fn toggle_copy(&mut self) {
@@ -83,8 +98,25 @@ impl MoveTool {
     pub fn hover(&mut self, doc: &Document, screen: Screen<'_>, cursor: Vec2) {
         let model = doc.model();
         if self.op.is_none() {
+            // Grips can sit off the geometry; keep them while the cursor is on one.
+            if let Some(grips) = &mut self.grips {
+                grips.hovered = grip_at(grips, screen, cursor);
+                if grips.hovered.is_some() {
+                    self.snap = None;
+                    return;
+                }
+            }
             self.hover = if doc.selection().is_empty() { pick_entity(model, screen, cursor) } else { None };
             self.snap = crate::pick::snap(model, screen, cursor, None);
+            let target: Vec<Entity> = match self.hover {
+                // Loose geometry: grips go around the whole connected piece, like a board.
+                Some(entity) => model.connected(entity).into_iter().collect(),
+                None => doc.selection().iter().collect(),
+            };
+            self.grips = grips_for(model, screen, target);
+            if let Some(grips) = &mut self.grips {
+                grips.hovered = grip_at(grips, screen, cursor);
+            }
             return;
         }
         let (target, axis, snap) = self.target(model, screen, cursor);
@@ -93,6 +125,25 @@ impl MoveTool {
             op.offset = target - op.base;
             op.axis = axis;
         }
+    }
+
+    /// The rotation grip under the cursor, if any: (what to rotate, the vertices, center, axis,
+    /// starting direction).
+    pub fn grip_under(&mut self, doc: &Document, screen: Screen<'_>, cursor: Vec2) -> Option<GripRotation> {
+        if self.op.is_some() {
+            return None;
+        }
+        self.hover(doc, screen, cursor);
+        let grips = self.grips.as_ref()?;
+        let (f, g) = grips.hovered?;
+        let face = grips.faces[f];
+        Some(GripRotation {
+            entities: grips.entities.clone(),
+            vertices: grips.vertices.clone(),
+            center: face.center,
+            normal: face.normal,
+            from: (face.grips[g] - face.center).normalize(),
+        })
     }
 
     pub fn click(&mut self, doc: &mut Document, screen: Screen<'_>, cursor: Vec2) -> Result<(), String> {
@@ -177,6 +228,20 @@ impl MoveTool {
         let Some(op) = &self.op else {
             if let Some(entity) = self.hover {
                 highlight_entity(model, entity, overlay);
+            }
+            if let Some(grips) = &self.grips {
+                for (f, face) in grips.faces.iter().enumerate() {
+                    for (g, &p) in face.grips.iter().enumerate() {
+                        overlay.grips.push((p, grips.hovered == Some((f, g))));
+                    }
+                }
+                // Hovering a grip previews the protractor it would rotate with.
+                if let Some((f, g)) = grips.hovered {
+                    let face = grips.faces[f];
+                    overlay.protractor =
+                        Some(Protractor { center: face.center, normal: face.normal, from: Some(face.grips[g]), to: None });
+                    overlay.snap = None;
+                }
             }
             return;
         };
@@ -322,30 +387,70 @@ impl MoveTool {
     }
 }
 
-fn highlight_entity(model: &Model, entity: Entity, overlay: &mut Overlay) {
-    match entity {
-        Entity::Edge(id) => {
-            if let Some(edge) = model.edge(id) {
-                overlay.highlight.push(model.edge_points(edge));
-            }
-        }
-        Entity::Face(id) => {
-            for edge in model.face_edges(id).into_iter().filter_map(|e| model.edge(e)) {
-                overlay.highlight.push(model.edge_points(edge));
-            }
-        }
-    }
+/// What a grip rotates and how.
+pub struct GripRotation {
+    pub entities: Vec<Entity>,
+    pub vertices: BTreeSet<VertexId>,
+    pub center: DVec3,
+    pub normal: DVec3,
+    pub from: DVec3,
 }
 
-/// `3x`, `x3`, `*3` → 3 copies; `/3` → divide into 3.
-fn parse_array(typed: &str) -> Option<Array> {
-    let t = typed.trim().to_ascii_lowercase();
-    let (number, divide) = match t.strip_prefix('/') {
-        Some(n) => (n, true),
-        None => (t.strip_prefix('*').or_else(|| t.strip_prefix('x')).or_else(|| t.strip_suffix('x'))?, false),
-    };
-    let count: u32 = number.trim().parse().ok()?;
-    (count >= 1).then_some(Array { count, divide })
+/// Grips for the bounding box of `entities`: on each box face that faces the camera, four
+/// grips halfway between the face's center and its sides. Flat boxes keep only their two big
+/// faces (one of them visible).
+fn grips_for(model: &Model, screen: Screen<'_>, entities: Vec<Entity>) -> Option<Grips> {
+    if entities.is_empty() {
+        return None;
+    }
+    let vertices = model.entity_vertices(entities.iter().copied());
+    let (lo, hi) = vertices
+        .iter()
+        .map(|&v| model.vertex(v))
+        .fold((DVec3::INFINITY, DVec3::NEG_INFINITY), |(lo, hi), p| (lo.min(p), hi.max(p)));
+    let (center, half) = ((lo + hi) * 0.5, (hi - lo) * 0.5);
+    let eye = screen.eye();
+    let mut faces = Vec::new();
+    for axis in Axis::ALL {
+        let n = axis.dir();
+        // The two in-plane axes of the box faces perpendicular to `axis`.
+        let (u, v) = match axis {
+            Axis::X => (DVec3::Y, DVec3::Z),
+            Axis::Y => (DVec3::X, DVec3::Z),
+            Axis::Z => (DVec3::X, DVec3::Y),
+        };
+        let (hu, hv) = (half.dot(u), half.dot(v));
+        if hu < EPS || hv < EPS {
+            continue;
+        }
+        for side in [1.0, -1.0] {
+            let normal = n * side;
+            let face_center = center + normal * half.dot(n);
+            if (eye - face_center).dot(normal) <= 0.0 {
+                continue;
+            }
+            let grips = [
+                face_center + u * hu * 0.5,
+                face_center - u * hu * 0.5,
+                face_center + v * hv * 0.5,
+                face_center - v * hv * 0.5,
+            ];
+            faces.push(GripFace { center: face_center, normal, grips });
+        }
+    }
+    Some(Grips { entities, vertices, faces, hovered: None })
+}
+
+fn grip_at(grips: &Grips, screen: Screen<'_>, cursor: Vec2) -> Option<(usize, usize)> {
+    grips
+        .faces
+        .iter()
+        .enumerate()
+        .flat_map(|(f, face)| face.grips.iter().enumerate().map(move |(g, &p)| (f, g, p)))
+        .filter_map(|(f, g, p)| Some((screen.project(p)?.distance(cursor), f, g)))
+        .filter(|(d, ..)| *d <= GRIP_RADIUS)
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, f, g)| (f, g))
 }
 
 /// A typed move: a length along `current`'s direction (negative reverses), a relative vector

@@ -263,6 +263,12 @@ impl Model {
         }
     }
 
+    pub(crate) fn set_vertex(&mut self, id: VertexId, point: DVec3) {
+        if let Some(p) = self.vertices.get_mut(id.0) {
+            *p = point;
+        }
+    }
+
     pub(crate) fn set_face_normal(&mut self, id: FaceId, normal: DVec3) {
         if let Some(face) = self.faces.get_mut(id.0) {
             face.normal = normal;

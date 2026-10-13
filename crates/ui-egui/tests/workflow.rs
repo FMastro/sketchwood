@@ -250,6 +250,44 @@ fn copy_a_stud_into_a_wall_with_move_ctrl_and_array() {
 }
 
 #[test]
+fn rotate_a_board_with_a_move_grip() {
+    let mut harness = app();
+    board(&mut harness);
+    type_text(&mut harness, "m");
+    let (lo, hi) = harness.state().document().model().bounds().unwrap();
+    let center = (lo + hi) * 0.5;
+
+    // Hover the board's side: grips appear on the visible faces of its bounding box.
+    let side = harness.state().to_window(glam::DVec3::new(center.x, lo.y, center.z)).unwrap();
+    harness.hover_at(side);
+    harness.run();
+    let state = harness.state();
+    let grips = state.tools().overlay(state.document()).grips;
+    assert_eq!(grips.len(), 12);
+    snapshot(&mut harness, "grips");
+
+    // Grab a grip on the top and turn it.
+    let top = grips.iter().map(|(p, _)| *p).find(|p| (p.z - hi.z).abs() < 1e-9).unwrap();
+    let grip = harness.state().to_window(top).unwrap();
+    click(&mut harness, grip);
+    assert_eq!(harness.state().tools().measurement_label(), "Angle");
+    let pivot = glam::DVec3::new(center.x, center.y, hi.z);
+    let turned = pivot + (top - pivot).cross(glam::DVec3::Z);
+    harness.hover_at(harness.state().to_window(turned).unwrap());
+    harness.run();
+    snapshot(&mut harness, "grip_rotate");
+    type_text(&mut harness, "90");
+    harness.key_press(Key::Enter);
+    harness.run();
+
+    let (new_lo, new_hi) = harness.state().document().model().bounds().unwrap();
+    let size = new_hi - new_lo;
+    assert!((size.x - 3.5).abs() < 1e-9 && (size.y - 1.5).abs() < 1e-9, "{size}");
+    assert!(((new_lo + new_hi) * 0.5).abs_diff_eq(center, 1e-9));
+    assert_eq!(harness.state().tools().active(), ToolId::Move);
+}
+
+#[test]
 fn unavailable_tool_shortcut_explains() {
     let mut harness = app();
     type_text(&mut harness, "l");

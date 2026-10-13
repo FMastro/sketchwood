@@ -22,6 +22,13 @@ each section. Remove items when they're done (mention them in the commit).
 - Rectangle: square and golden-ratio diagonal hints; drawing rectangles off the axes.
 - Snapping only considers screen distance; no "sticky" preference for the last inference.
 
+## Rotate / grips
+- Grips appear around loose connected geometry; SketchUp shows them only on groups and
+  components. Once groups exist, decide whether loose geometry keeps them.
+- Grips on thin boards crowd together; consider hiding grips on faces that are tiny on screen.
+- The protractor doesn't auto-orient to edges (SketchUp aligns to the hovered edge's plane)
+  or flip when looking at it edge-on.
+
 ## Tools
 - Eraser (drag-erase, Shift to hide), Line, Arc, Circle, Polygon, Offset, Scale, Tape
   Measure + guides, Paint Bucket, Make Component (G).

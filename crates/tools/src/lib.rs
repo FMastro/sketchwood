@@ -4,6 +4,7 @@
 pub mod pick;
 mod move_tool;
 mod push_pull;
+mod rotate;
 mod rectangle;
 mod select;
 
@@ -15,6 +16,7 @@ pub use pick::{Snap, SnapKind};
 use pick::Screen;
 use move_tool::MoveTool;
 use push_pull::PushPullTool;
+use rotate::RotateTool;
 use rectangle::RectangleTool;
 use select::SelectTool;
 
@@ -118,7 +120,14 @@ impl ToolId {
     pub fn is_available(self) -> bool {
         matches!(
             self,
-            Self::Select | Self::Rectangle | Self::PushPull | Self::Move | Self::Orbit | Self::Pan | Self::Zoom
+            Self::Select
+                | Self::Rectangle
+                | Self::PushPull
+                | Self::Move
+                | Self::Rotate
+                | Self::Orbit
+                | Self::Pan
+                | Self::Zoom
         )
     }
 }
@@ -149,6 +158,9 @@ pub struct Overlay {
     pub highlight: Vec<[DVec3; 2]>,
     /// A rubber band from a base point, colored by the axis it follows.
     pub guide: Option<Guide>,
+    pub protractor: Option<Protractor>,
+    /// Rotation grips, and whether each is under the cursor.
+    pub grips: Vec<(DVec3, bool)>,
     /// The inference point under the cursor.
     pub snap: Option<Snap>,
     pub window: Option<SelectionWindow>,
@@ -183,6 +195,52 @@ impl Axis {
     }
 }
 
+/// SketchUp's protractor: a circle in the plane through `center` with `normal`, with rays to
+/// the starting direction and the current one.
+#[derive(Clone, Copy, Debug)]
+pub struct Protractor {
+    pub center: DVec3,
+    pub normal: DVec3,
+    pub from: Option<DVec3>,
+    pub to: Option<DVec3>,
+}
+
+/// How copies are laid out: `count` copies at multiples of the move or turn, or (divided)
+/// spread evenly up to it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Array {
+    pub count: u32,
+    pub divide: bool,
+}
+
+/// `3x`, `x3`, `*3` → 3 copies; `/3` → divide into 3.
+pub(crate) fn parse_array(typed: &str) -> Option<Array> {
+    let t = typed.trim().to_ascii_lowercase();
+    let (number, divide) = match t.strip_prefix('/') {
+        Some(n) => (n, true),
+        None => (t.strip_prefix('*').or_else(|| t.strip_prefix('x')).or_else(|| t.strip_suffix('x'))?, false),
+    };
+    let count: u32 = number.trim().parse().ok()?;
+    (count >= 1).then_some(Array { count, divide })
+}
+
+/// Outline an entity, e.g. what a tool would pick up.
+pub(crate) fn highlight_entity(model: &sketchcraft_doc::Model, entity: sketchcraft_doc::Entity, overlay: &mut Overlay) {
+    use sketchcraft_doc::Entity;
+    match entity {
+        Entity::Edge(id) => {
+            if let Some(edge) = model.edge(id) {
+                overlay.highlight.push(model.edge_points(edge));
+            }
+        }
+        Entity::Face(id) => {
+            for edge in model.face_edges(id).into_iter().filter_map(|e| model.edge(e)) {
+                overlay.highlight.push(model.edge_points(edge));
+            }
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Guide {
     pub from: DVec3,
@@ -207,6 +265,11 @@ pub struct Tools {
     rectangle: RectangleTool,
     push_pull: PushPullTool,
     move_tool: MoveTool,
+    rotate: RotateTool,
+    /// A grip rotation started by press-and-drag; finishes on release.
+    grip_dragging: bool,
+    /// Move just rotated with a grip, so typed angles and arrays go to that rotation.
+    grip_rotated: bool,
     /// Measurements box text being typed.
     typed: String,
     /// One-off feedback (errors, "coming soon"), shown until the next action.
@@ -221,6 +284,9 @@ impl Default for Tools {
             rectangle: RectangleTool::default(),
             push_pull: PushPullTool::default(),
             move_tool: MoveTool::default(),
+            rotate: RotateTool::default(),
+            grip_dragging: false,
+            grip_rotated: false,
             typed: String::new(),
             message: None,
         }
@@ -241,14 +307,55 @@ impl Tools {
         self.active = tool;
     }
 
+    /// Move's rotation grips: a click or press on a grip rotates instead of moving, using the
+    /// Rotate tool's logic. Returns `None` when the event is ordinary Move input.
+    fn grip_pointer(&mut self, event: PointerEvent, doc: &mut Document, screen: Screen<'_>) -> Option<Result<(), String>> {
+        if self.rotate.is_busy() {
+            return Some(match event {
+                PointerEvent::Move(pos) | PointerEvent::Drag { pos, .. } => {
+                    self.rotate.hover(doc, screen, pos);
+                    Ok(())
+                }
+                PointerEvent::Click { pos, .. } => self.rotate.click(doc, screen, pos),
+                // Press on a grip, drag to turn, release to finish.
+                PointerEvent::DragEnd { pos, .. } if self.grip_dragging => {
+                    self.grip_dragging = false;
+                    self.rotate.click(doc, screen, pos)
+                }
+                _ => Ok(()),
+            });
+        }
+        let pos = match event {
+            PointerEvent::Click { pos, .. } => pos,
+            PointerEvent::DragStart { origin } => origin,
+            _ => return None,
+        };
+        // A new click or press ends the previous grip rotation's chance to be retyped.
+        self.grip_rotated = false;
+        let grip = self.move_tool.grip_under(doc, screen, pos)?;
+        self.typed.clear();
+        self.rotate.begin(grip.entities, grip.vertices, grip.center, grip.normal, grip.from);
+        self.grip_dragging = matches!(event, PointerEvent::DragStart { .. });
+        self.grip_rotated = true;
+        Some(Ok(()))
+    }
+
+    /// Whether Move is turning with a grip, or just did (so typing changes that rotation).
+    fn grip_active(&self) -> bool {
+        self.active == ToolId::Move && (self.rotate.is_busy() || self.grip_rotated)
+    }
+
     /// Abandon whatever the active tool is in the middle of.
     pub fn cancel(&mut self) {
+        self.grip_dragging = false;
+        self.grip_rotated = false;
         self.typed.clear();
         self.message = None;
         self.select.cancel();
         self.rectangle.cancel();
         self.push_pull.cancel();
         self.move_tool.cancel();
+        self.rotate.cancel();
     }
 
     pub fn pointer(&mut self, event: PointerEvent, doc: &mut Document, camera: &mut OrbitCamera, size: Vec2) {
@@ -270,6 +377,14 @@ impl Tools {
         }
 
         let screen = Screen { camera, size };
+        if self.active == ToolId::Move
+            && let Some(result) = self.grip_pointer(event, doc, screen)
+        {
+            if let Err(message) = result {
+                self.message = Some(message);
+            }
+            return;
+        }
         let result = match (self.active, event) {
             (ToolId::Select, PointerEvent::Click { pos, count, mods }) => {
                 self.select.click(doc, screen, pos, count, mods);
@@ -323,6 +438,16 @@ impl Tools {
             }
             (ToolId::Move, PointerEvent::DragStart { origin }) => self.move_tool.drag_start(doc, screen, origin),
             (ToolId::Move, PointerEvent::DragEnd { pos, .. }) => self.move_tool.drag_end(doc, screen, pos),
+            (ToolId::Rotate, PointerEvent::Move(pos) | PointerEvent::Drag { pos, .. }) => {
+                self.rotate.hover(doc, screen, pos);
+                Ok(())
+            }
+            (ToolId::Rotate, PointerEvent::Click { pos, .. }) => {
+                self.typed.clear();
+                self.rotate.click(doc, screen, pos)
+            }
+            (ToolId::Rotate, PointerEvent::DragStart { origin }) => self.rotate.drag_start(doc, screen, origin),
+            (ToolId::Rotate, PointerEvent::DragEnd { pos, .. }) => self.rotate.drag_end(doc, screen, pos),
             _ => Ok(()),
         };
         if let Err(message) = result {
@@ -332,15 +457,20 @@ impl Tools {
 
     /// A tap of Ctrl on its own: toggles copying in Move.
     pub fn ctrl_tap(&mut self) {
-        if self.active == ToolId::Move {
-            self.move_tool.toggle_copy();
+        match self.active {
+            ToolId::Move if self.rotate.is_busy() => self.rotate.toggle_copy(),
+            ToolId::Move => self.move_tool.toggle_copy(),
+            ToolId::Rotate => self.rotate.toggle_copy(),
+            _ => {}
         }
     }
 
     /// Arrow keys lock drawing and moving to an axis (pressing again unlocks).
     pub fn lock_axis(&mut self, axis: Axis) {
-        if self.active == ToolId::Move {
-            self.move_tool.lock_axis(axis);
+        match self.active {
+            ToolId::Move => self.move_tool.lock_axis(axis),
+            ToolId::Rotate => self.rotate.lock_axis(axis),
+            _ => {}
         }
     }
 
@@ -373,7 +503,9 @@ impl Tools {
         let result = match self.active {
             ToolId::Rectangle => self.rectangle.enter(doc, &typed),
             ToolId::PushPull => self.push_pull.enter(doc, &typed),
+            ToolId::Move if self.grip_active() => self.rotate.enter(doc, &typed),
             ToolId::Move => self.move_tool.enter(doc, &typed),
+            ToolId::Rotate => self.rotate.enter(doc, &typed),
             _ => Err(format!("{} doesn't take typed values.", self.active.name())),
         };
         if let Err(message) = result {
@@ -385,7 +517,7 @@ impl Tools {
     pub fn escape(&mut self, doc: &mut Document) {
         if self.is_typing() {
             self.typed.clear();
-        } else if self.select.is_busy() || self.rectangle.is_busy() || self.push_pull.is_busy() || self.move_tool.is_busy() {
+        } else if self.select.is_busy() || self.rectangle.is_busy() || self.push_pull.is_busy() || self.move_tool.is_busy() || self.rotate.is_busy() {
             self.cancel();
         } else if self.active == ToolId::Select && !doc.selection().is_empty() {
             doc.selection_mut().clear();
@@ -402,7 +534,9 @@ impl Tools {
                 .into(),
             ToolId::Rectangle => self.rectangle.status().into(),
             ToolId::PushPull => self.push_pull.status().into(),
+            ToolId::Move if self.rotate.is_busy() => self.rotate.status(),
             ToolId::Move => self.move_tool.status(),
+            ToolId::Rotate => self.rotate.status(),
             ToolId::Orbit => "Drag to orbit.".into(),
             ToolId::Pan => "Drag to pan.".into(),
             ToolId::Zoom => "Drag up to zoom in, down to zoom out.".into(),
@@ -413,7 +547,9 @@ impl Tools {
     pub fn measurement_label(&self) -> &'static str {
         match self.active {
             ToolId::Rectangle => "Dimensions",
+            ToolId::Move if self.grip_active() => "Angle",
             ToolId::PushPull | ToolId::Move => "Distance",
+            ToolId::Rotate => "Angle",
             _ => "Measurements",
         }
     }
@@ -426,7 +562,9 @@ impl Tools {
         match self.active {
             ToolId::Rectangle => self.rectangle.measurement(),
             ToolId::PushPull => self.push_pull.measurement(),
+            ToolId::Move if self.grip_active() => self.rotate.measurement(),
             ToolId::Move => self.move_tool.measurement(),
+            ToolId::Rotate => self.rotate.measurement(),
             _ => String::new(),
         }
     }
@@ -437,7 +575,9 @@ impl Tools {
             ToolId::Select => self.select.overlay(&mut overlay),
             ToolId::Rectangle => self.rectangle.overlay(&mut overlay),
             ToolId::PushPull => self.push_pull.overlay(doc.model(), &mut overlay),
+            ToolId::Move if self.rotate.is_busy() => self.rotate.overlay(doc, &mut overlay),
             ToolId::Move => self.move_tool.overlay(doc, &mut overlay),
+            ToolId::Rotate => self.rotate.overlay(doc, &mut overlay),
             _ => {}
         }
         overlay
@@ -471,6 +611,58 @@ mod tests {
         tools.activate(ToolId::Rectangle);
         assert_eq!(tools.active(), ToolId::Rectangle);
         assert_eq!(tools.status(), "Select first corner.");
+    }
+
+    #[test]
+    fn move_rotation_grip_turns_a_board_in_place() {
+        use sketchcraft_view::StandardView;
+        let mut doc = Document::default();
+        doc.edit(|m| {
+            let face = m.add_rectangle(DVec3::new(10.0, 0.0, 0.0), DVec3::X * 1.5, DVec3::Y * 3.5, DVec3::Z).unwrap();
+            m.push_pull(face, 10.0).unwrap();
+        });
+        let mut camera =
+            OrbitCamera { target: glam::Vec3::new(10.75, 1.75, 5.0), distance: 60.0, ..Default::default() };
+        camera.set_view(StandardView::Iso);
+        let size = Vec2::new(1000.0, 800.0);
+        let mut tools = Tools::default();
+        tools.activate(ToolId::Move);
+
+        // Hovering the board shows grips on the box faces facing the camera.
+        let middle = camera.project(glam::Vec3::new(10.75, 0.0, 5.0), size).unwrap();
+        tools.pointer(PointerEvent::Move(middle), &mut doc, &mut camera, size);
+        let overlay = tools.overlay(&doc);
+        assert_eq!(overlay.grips.len(), 12, "3 visible box faces x 4 grips");
+
+        // Click a grip on the top face (z = 10) and turn a quarter.
+        let top_grip = overlay.grips.iter().map(|(p, _)| *p).find(|p| (p.z - 10.0).abs() < 1e-9).unwrap();
+        let at = |p: DVec3, camera: &OrbitCamera| camera.project(p.as_vec3(), size).unwrap();
+        tools.pointer(PointerEvent::Move(at(top_grip, &camera)), &mut doc, &mut camera, size);
+        assert!(tools.overlay(&doc).protractor.is_some());
+        let mods = Modifiers::default();
+        tools.pointer(PointerEvent::Click { pos: at(top_grip, &camera), count: 1, mods }, &mut doc, &mut camera, size);
+        assert_eq!(tools.measurement_label(), "Angle");
+        let center = DVec3::new(10.75, 1.75, 10.0);
+        let quarter = center + (top_grip - center).cross(DVec3::Z) * -1.0;
+        tools.pointer(PointerEvent::Move(at(quarter, &camera)), &mut doc, &mut camera, size);
+        for c in "90".chars() {
+            tools.type_char(c);
+        }
+        tools.enter(&mut doc);
+
+        // Turned about its own vertical center line: same footprint center, swapped sides.
+        let (lo, hi) = doc.model().bounds().unwrap();
+        assert!(((lo + hi) * 0.5).abs_diff_eq(DVec3::new(10.75, 1.75, 5.0), 1e-9), "{lo} {hi}");
+        assert!((hi - lo).abs_diff_eq(DVec3::new(3.5, 1.5, 10.0), 1e-9), "{}", hi - lo);
+        assert_eq!(tools.active(), ToolId::Move);
+        assert_eq!(tools.measurement(), "90.0°");
+        // Typing again changes that rotation, as with the Rotate tool.
+        for c in "45".chars() {
+            tools.type_char(c);
+        }
+        tools.enter(&mut doc);
+        let (lo, hi) = doc.model().bounds().unwrap();
+        assert!((hi - lo).x > 3.5 && (hi - lo).x < 4.0, "45° footprint {}", hi - lo);
     }
 
     #[test]

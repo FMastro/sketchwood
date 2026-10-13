@@ -2,6 +2,7 @@
 //! keyboard input into calls on [`Tools`], and draws what [`Tools::overlay`] returns.
 
 pub mod pick;
+mod move_tool;
 mod push_pull;
 mod rectangle;
 mod select;
@@ -12,6 +13,7 @@ use sketchcraft_view::OrbitCamera;
 
 pub use pick::{Snap, SnapKind};
 use pick::Screen;
+use move_tool::MoveTool;
 use push_pull::PushPullTool;
 use rectangle::RectangleTool;
 use select::SelectTool;
@@ -114,7 +116,10 @@ impl ToolId {
     }
 
     pub fn is_available(self) -> bool {
-        matches!(self, Self::Select | Self::Rectangle | Self::PushPull | Self::Orbit | Self::Pan | Self::Zoom)
+        matches!(
+            self,
+            Self::Select | Self::Rectangle | Self::PushPull | Self::Move | Self::Orbit | Self::Pan | Self::Zoom
+        )
     }
 }
 
@@ -142,9 +147,47 @@ pub struct Overlay {
     pub lines: Vec<[DVec3; 2]>,
     /// Highlighted model edges, e.g. the face Push/Pull would act on.
     pub highlight: Vec<[DVec3; 2]>,
+    /// A rubber band from a base point, colored by the axis it follows.
+    pub guide: Option<Guide>,
     /// The inference point under the cursor.
     pub snap: Option<Snap>,
     pub window: Option<SelectionWindow>,
+}
+
+/// The model axes, in SketchUp's colors: red X, green Y, blue Z.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Axis {
+    X,
+    Y,
+    Z,
+}
+
+impl Axis {
+    pub const ALL: [Self; 3] = [Self::X, Self::Y, Self::Z];
+
+    pub fn dir(self) -> DVec3 {
+        match self {
+            Self::X => DVec3::X,
+            Self::Y => DVec3::Y,
+            Self::Z => DVec3::Z,
+        }
+    }
+
+    /// SketchUp-style inference tooltip.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::X => "On Red Axis",
+            Self::Y => "On Green Axis",
+            Self::Z => "On Blue Axis",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Guide {
+    pub from: DVec3,
+    pub to: DVec3,
+    pub axis: Option<Axis>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -163,6 +206,7 @@ pub struct Tools {
     select: SelectTool,
     rectangle: RectangleTool,
     push_pull: PushPullTool,
+    move_tool: MoveTool,
     /// Measurements box text being typed.
     typed: String,
     /// One-off feedback (errors, "coming soon"), shown until the next action.
@@ -176,6 +220,7 @@ impl Default for Tools {
             select: SelectTool::default(),
             rectangle: RectangleTool::default(),
             push_pull: PushPullTool::default(),
+            move_tool: MoveTool::default(),
             typed: String::new(),
             message: None,
         }
@@ -203,6 +248,7 @@ impl Tools {
         self.select.cancel();
         self.rectangle.cancel();
         self.push_pull.cancel();
+        self.move_tool.cancel();
     }
 
     pub fn pointer(&mut self, event: PointerEvent, doc: &mut Document, camera: &mut OrbitCamera, size: Vec2) {
@@ -267,10 +313,34 @@ impl Tools {
                 Ok(())
             }
             (ToolId::PushPull, PointerEvent::DragEnd { pos, .. }) => self.push_pull.drag_end(doc, screen, pos),
+            (ToolId::Move, PointerEvent::Move(pos) | PointerEvent::Drag { pos, .. }) => {
+                self.move_tool.hover(doc, screen, pos);
+                Ok(())
+            }
+            (ToolId::Move, PointerEvent::Click { pos, .. }) => {
+                self.typed.clear();
+                self.move_tool.click(doc, screen, pos)
+            }
+            (ToolId::Move, PointerEvent::DragStart { origin }) => self.move_tool.drag_start(doc, screen, origin),
+            (ToolId::Move, PointerEvent::DragEnd { pos, .. }) => self.move_tool.drag_end(doc, screen, pos),
             _ => Ok(()),
         };
         if let Err(message) = result {
             self.message = Some(message);
+        }
+    }
+
+    /// A tap of Ctrl on its own: toggles copying in Move.
+    pub fn ctrl_tap(&mut self) {
+        if self.active == ToolId::Move {
+            self.move_tool.toggle_copy();
+        }
+    }
+
+    /// Arrow keys lock drawing and moving to an axis (pressing again unlocks).
+    pub fn lock_axis(&mut self, axis: Axis) {
+        if self.active == ToolId::Move {
+            self.move_tool.lock_axis(axis);
         }
     }
 
@@ -303,6 +373,7 @@ impl Tools {
         let result = match self.active {
             ToolId::Rectangle => self.rectangle.enter(doc, &typed),
             ToolId::PushPull => self.push_pull.enter(doc, &typed),
+            ToolId::Move => self.move_tool.enter(doc, &typed),
             _ => Err(format!("{} doesn't take typed values.", self.active.name())),
         };
         if let Err(message) = result {
@@ -314,7 +385,7 @@ impl Tools {
     pub fn escape(&mut self, doc: &mut Document) {
         if self.is_typing() {
             self.typed.clear();
-        } else if self.select.is_busy() || self.rectangle.is_busy() || self.push_pull.is_busy() {
+        } else if self.select.is_busy() || self.rectangle.is_busy() || self.push_pull.is_busy() || self.move_tool.is_busy() {
             self.cancel();
         } else if self.active == ToolId::Select && !doc.selection().is_empty() {
             doc.selection_mut().clear();
@@ -331,6 +402,7 @@ impl Tools {
                 .into(),
             ToolId::Rectangle => self.rectangle.status().into(),
             ToolId::PushPull => self.push_pull.status().into(),
+            ToolId::Move => self.move_tool.status(),
             ToolId::Orbit => "Drag to orbit.".into(),
             ToolId::Pan => "Drag to pan.".into(),
             ToolId::Zoom => "Drag up to zoom in, down to zoom out.".into(),
@@ -341,7 +413,7 @@ impl Tools {
     pub fn measurement_label(&self) -> &'static str {
         match self.active {
             ToolId::Rectangle => "Dimensions",
-            ToolId::PushPull => "Distance",
+            ToolId::PushPull | ToolId::Move => "Distance",
             _ => "Measurements",
         }
     }
@@ -354,6 +426,7 @@ impl Tools {
         match self.active {
             ToolId::Rectangle => self.rectangle.measurement(),
             ToolId::PushPull => self.push_pull.measurement(),
+            ToolId::Move => self.move_tool.measurement(),
             _ => String::new(),
         }
     }
@@ -364,6 +437,7 @@ impl Tools {
             ToolId::Select => self.select.overlay(&mut overlay),
             ToolId::Rectangle => self.rectangle.overlay(&mut overlay),
             ToolId::PushPull => self.push_pull.overlay(doc.model(), &mut overlay),
+            ToolId::Move => self.move_tool.overlay(doc, &mut overlay),
             _ => {}
         }
         overlay
@@ -391,7 +465,7 @@ mod tests {
     #[test]
     fn unavailable_tools_explain_instead_of_switching() {
         let mut tools = Tools::default();
-        tools.activate(ToolId::Move);
+        tools.activate(ToolId::Line);
         assert_eq!(tools.active(), ToolId::Select);
         assert!(tools.status().contains("coming soon"));
         tools.activate(ToolId::Rectangle);

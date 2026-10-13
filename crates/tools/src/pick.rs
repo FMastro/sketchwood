@@ -1,7 +1,7 @@
 //! Turning cursor positions into model entities and snapped points.
 
 use glam::{DVec3, Vec2};
-use sketchcraft_doc::{EdgeId, Entity, FaceId, Model};
+use sketchcraft_doc::{EdgeId, Entity, FaceId, Model, VertexId};
 use sketchcraft_view::OrbitCamera;
 
 /// How close, in points, the cursor must be to snap to an endpoint.
@@ -150,9 +150,28 @@ pub fn snap(
             .or_else(|| ray.hit_plane(DVec3::ZERO, DVec3::Z).map(|p| (p, DVec3::Z, SnapKind::OnGround))),
     };
 
+    match (snap_endpoint(model, screen, cursor, |_| false), plane) {
+        // Snapped points off the drawing plane are projected onto it.
+        (Some(s), Some((origin, normal))) => {
+            Some(Snap { point: s.point - normal * (s.point - origin).dot(normal), kind: s.kind, normal })
+        }
+        (Some(s), None) => Some(Snap { normal: surface.map_or(DVec3::Z, |s| s.1), ..s }),
+        (None, _) => surface.map(|(point, normal, kind)| Snap { point, kind, normal }),
+    }
+}
+
+/// The visible endpoint (or the origin) nearest the cursor within [`SNAP_RADIUS`], skipping
+/// vertices `exclude` accepts. The snap's normal is +Z.
+pub fn snap_endpoint(
+    model: &Model,
+    screen: Screen<'_>,
+    cursor: Vec2,
+    exclude: impl Fn(VertexId) -> bool,
+) -> Option<Snap> {
     let eye = screen.eye();
-    let endpoint = model
+    model
         .vertices()
+        .filter(|(id, _)| !exclude(*id))
         .map(|(id, p)| (p, SnapKind::Endpoint, Some(id)))
         .chain(std::iter::once((DVec3::ZERO, SnapKind::Origin, None)))
         .filter_map(|(point, kind, id)| {
@@ -165,20 +184,22 @@ pub fn snap(
             {
                 return None;
             }
-            Some((distance, point, kind))
+            Some((distance, Snap { point, kind, normal: DVec3::Z }))
         })
-        .min_by(|a, b| a.0.total_cmp(&b.0));
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, snap)| snap)
+}
 
-    match (endpoint, plane) {
-        // Snapped points off the drawing plane are projected onto it.
-        (Some((_, point, kind)), Some((origin, normal))) => {
-            Some(Snap { point: point - normal * (point - origin).dot(normal), kind, normal })
-        }
-        (Some((_, point, kind)), None) => {
-            Some(Snap { point, kind, normal: surface.map_or(DVec3::Z, |s| s.1) })
-        }
-        (None, _) => surface.map(|(point, normal, kind)| Snap { point, kind, normal }),
+/// The parameter `t` of the point on the line `anchor + t * dir` (unit `dir`) closest to `ray`,
+/// or `None` when looking straight down the line.
+pub fn closest_on_line(anchor: DVec3, dir: DVec3, ray: &Ray) -> Option<f64> {
+    let b = dir.dot(ray.dir);
+    let denom = 1.0 - b * b;
+    if denom < 1e-6 {
+        return None;
     }
+    let w = anchor - ray.origin;
+    Some((b * ray.dir.dot(w) - dir.dot(w)) / denom)
 }
 
 /// Distance from `p` to segment `ab`, and the parameter of the closest point.

@@ -55,8 +55,10 @@ to the box too (so `38mm` isn't Move). Otherwise letters are tool shortcuts, Spa
    - `doc::push_pull`: free face → closed solid; prism cap → moves (no seam); face set in a
      surface → block or pocket. Tool: typed distance, retype after, double-click repeats.
    - Known gaps: no coplanar-face merging; pocket walls touching an existing side don't cut it.
-4. Line tool, face splitting, fuller inference (axes, midpoint, on-edge)
-5. Move, Rotate, Offset, Circle
+4. Move (done): `doc::transform` (move vertices with stretch + planarity check, copy);
+   tool with axis inference, arrow-key locks, Ctrl-tap copy, `3x` / `/3` arrays, typed
+   distance or `x,y,z` / `<x,y,z>` / `[x,y,z]`.
+5. Line tool, face splitting, fuller inference (midpoint, on-edge); Rotate, Offset, Circle
 6. Tape Measure + guides
 7. Groups and components (shared definitions), outliner
 8. Tags (SketchUp's renamed Layers)

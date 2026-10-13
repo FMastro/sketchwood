@@ -5,7 +5,7 @@ use eframe::egui;
 use glam::{DVec3, Vec2};
 use sketchcraft_doc::Document;
 use sketchcraft_render::{Scene, ViewportRenderer};
-use sketchcraft_tools::{Modifiers, Overlay, PointerEvent, SnapKind, Tools};
+use sketchcraft_tools::{Axis, Modifiers, Overlay, PointerEvent, SnapKind, Tools};
 use sketchcraft_view::OrbitCamera;
 
 /// Scroll distance, in points, that counts as one zoom step (about one mouse-wheel notch).
@@ -181,6 +181,20 @@ fn to_vec2(v: egui::Vec2) -> Vec2 {
     Vec2::new(v.x, v.y)
 }
 
+/// A SketchUp-style inference tooltip below-right of `pos`.
+fn tooltip(painter: &egui::Painter, pos: egui::Pos2, label: &str) {
+    let galley = painter.layout_no_wrap(label.into(), egui::FontId::proportional(12.0), egui::Color32::BLACK);
+    let text_rect = egui::Rect::from_min_size(pos + egui::vec2(12.0, 10.0), galley.size()).expand(3.0);
+    painter.rect(
+        text_rect,
+        2.0,
+        egui::Color32::from_rgb(255, 255, 220),
+        egui::Stroke::new(1.0, egui::Color32::GRAY),
+        egui::StrokeKind::Outside,
+    );
+    painter.galley(text_rect.min + egui::vec2(3.0, 3.0), galley, egui::Color32::BLACK);
+}
+
 /// Draw tool previews on top of the rendered model: preview edges, the inference point and its
 /// tooltip, and the selection window.
 fn draw_overlay(painter: &egui::Painter, rect: egui::Rect, camera: &OrbitCamera, size: Vec2, overlay: &Overlay) {
@@ -200,6 +214,29 @@ fn draw_overlay(painter: &egui::Painter, rect: egui::Rect, camera: &OrbitCamera,
         }
     }
 
+    // The rubber band from the base point: in the axis's color when following one, as in
+    // SketchUp, otherwise dashed grey.
+    let mut axis_label = None;
+    if let Some(guide) = &overlay.guide
+        && let (Some(from), Some(to)) = (screen(guide.from), screen(guide.to))
+    {
+        match guide.axis {
+            Some(axis) => {
+                let color = match axis {
+                    Axis::X => egui::Color32::from_rgb(220, 0, 0),
+                    Axis::Y => egui::Color32::from_rgb(0, 160, 0),
+                    Axis::Z => egui::Color32::from_rgb(0, 0, 230),
+                };
+                painter.line_segment([from, to], egui::Stroke::new(2.0, color));
+                axis_label = Some((to, axis.label()));
+            }
+            None => {
+                let stroke = egui::Stroke::new(1.0, egui::Color32::from_gray(80));
+                painter.extend(egui::Shape::dashed_line(&[from, to], stroke, 5.0, 4.0));
+            }
+        }
+    }
+
     if let Some(snap) = &overlay.snap
         && let Some(pos) = screen(snap.point)
     {
@@ -213,17 +250,12 @@ fn draw_overlay(painter: &egui::Painter, rect: egui::Rect, camera: &OrbitCamera,
         let radius = if matches!(snap.kind, SnapKind::OnPlane | SnapKind::OnGround) { 2.5 } else { 5.0 };
         painter.circle(pos, radius, color, egui::Stroke::new(1.0, egui::Color32::WHITE));
         if let Some(label) = snap.kind.label() {
-            let galley = painter.layout_no_wrap(label.into(), egui::FontId::proportional(12.0), egui::Color32::BLACK);
-            let text_rect = egui::Rect::from_min_size(pos + egui::vec2(12.0, 10.0), galley.size()).expand(3.0);
-            painter.rect(
-                text_rect,
-                2.0,
-                egui::Color32::from_rgb(255, 255, 220),
-                egui::Stroke::new(1.0, egui::Color32::GRAY),
-                egui::StrokeKind::Outside,
-            );
-            painter.galley(text_rect.min + egui::vec2(3.0, 3.0), galley, egui::Color32::BLACK);
+            tooltip(painter, pos, label);
+            axis_label = None;
         }
+    }
+    if let Some((pos, label)) = axis_label {
+        tooltip(painter, pos, label);
     }
 
     if let Some(window) = &overlay.window {

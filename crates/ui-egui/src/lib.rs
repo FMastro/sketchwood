@@ -13,6 +13,7 @@ use viewport::Viewport;
 pub struct SketchCraftApp {
     doc: Document,
     tools: Tools,
+    keyboard: keys::Keyboard,
     viewport: Viewport,
 }
 
@@ -23,7 +24,12 @@ impl SketchCraftApp {
             .as_ref()
             .expect("SketchCraft needs eframe's wgpu renderer");
         icons::install(&cc.egui_ctx);
-        Self { doc: Document::default(), tools: Tools::default(), viewport: Viewport::new(render_state) }
+        Self {
+            doc: Document::default(),
+            tools: Tools::default(),
+            keyboard: keys::Keyboard::default(),
+            viewport: Viewport::new(render_state),
+        }
     }
 
     pub fn document(&self) -> &Document {
@@ -42,7 +48,7 @@ impl SketchCraftApp {
 
 impl eframe::App for SketchCraftApp {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
-        keys::handle(ui.ctx(), &mut self.doc, &mut self.tools, &mut self.viewport);
+        self.keyboard.handle(ui.ctx(), &mut self.doc, &mut self.tools, &mut self.viewport);
 
         egui::Panel::top("toolbar").show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {

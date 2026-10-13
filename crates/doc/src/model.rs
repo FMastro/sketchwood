@@ -263,6 +263,12 @@ impl Model {
         }
     }
 
+    pub(crate) fn set_face_normal(&mut self, id: FaceId, normal: DVec3) {
+        if let Some(face) = self.faces.get_mut(id.0) {
+            face.normal = normal;
+        }
+    }
+
     /// Move vertices by `delta`. Faces using them must stay planar; callers ensure that.
     pub fn translate_vertices(&mut self, ids: impl IntoIterator<Item = VertexId>, delta: DVec3) {
         for id in ids {

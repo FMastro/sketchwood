@@ -186,10 +186,73 @@ fn push_pull_a_profile_into_an_eight_foot_two_by_four() {
     snapshot(&mut harness, "board");
 }
 
+/// An 8' 2x4 standing at the origin, framed.
+fn board(harness: &mut App) {
+    type_text(harness, "r");
+    click(harness, pos2(600.0, 450.0));
+    harness.hover_at(pos2(680.0, 400.0));
+    harness.run();
+    type_text(harness, "1.5,3.5");
+    harness.key_press(Key::Enter);
+    harness.run();
+    type_text(harness, "Z");
+    type_text(harness, "p");
+    let (lo, hi) = harness.state().document().model().bounds().unwrap();
+    let center = harness.state().to_window((lo + hi) * 0.5).unwrap();
+    click(harness, center);
+    harness.hover_at(center - egui::vec2(0.0, 60.0));
+    harness.run();
+    type_text(harness, "96");
+    harness.key_press(Key::Enter);
+    harness.run();
+    type_text(harness, "Z");
+}
+
+#[test]
+fn copy_a_stud_into_a_wall_with_move_ctrl_and_array() {
+    let mut harness = app();
+    board(&mut harness);
+    type_text(&mut harness, " ");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    harness.run();
+
+    type_text(&mut harness, "m");
+    assert_eq!(harness.state().tools().active(), ToolId::Move);
+    // Tap Ctrl on its own to switch to copying.
+    harness.event(Event::ModifiersChanged(Modifiers::COMMAND));
+    harness.event(Event::ModifiersChanged(Modifiers::NONE));
+    harness.run();
+    assert!(harness.state().tools().status().contains("copying"), "{}", harness.state().tools().status());
+
+    let (start, _) = harness.state().document().model().bounds().unwrap();
+    let base = harness.state().to_window(start).unwrap();
+    click(&mut harness, base);
+    harness.key_press(Key::ArrowRight);
+    harness.hover_at(base + egui::vec2(120.0, 0.0));
+    harness.run();
+    snapshot(&mut harness, "move_on_red");
+    type_text(&mut harness, "16");
+    harness.key_press(Key::Enter);
+    harness.run();
+    type_text(&mut harness, "4x");
+    harness.key_press(Key::Enter);
+    harness.run();
+
+    let model = harness.state().document().model();
+    assert_eq!(model.faces().count(), 30, "five boards");
+    let (lo, hi) = model.bounds().unwrap();
+    // Original plus four copies, 16" on center, along red only.
+    assert_eq!(lo, start);
+    assert!((hi.x - lo.x - 65.5).abs() < 1e-9, "{}", hi.x - lo.x);
+    assert_eq!(hi.y - lo.y, 3.5);
+    type_text(&mut harness, "Z");
+    snapshot(&mut harness, "stud_wall");
+}
+
 #[test]
 fn unavailable_tool_shortcut_explains() {
     let mut harness = app();
-    type_text(&mut harness, "m");
+    type_text(&mut harness, "l");
     assert_eq!(harness.state().tools().active(), ToolId::Select);
-    assert!(harness.state().tools().status().contains("Move (M) is coming soon"));
+    assert!(harness.state().tools().status().contains("Line (L) is coming soon"));
 }

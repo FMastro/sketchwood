@@ -7,7 +7,7 @@ use sketchcraft_doc::units::{format_length, parse_length};
 use sketchcraft_doc::{Document, FaceId, Model};
 
 use crate::Overlay;
-use crate::pick::{Ray, Screen, Snap, SnapKind, hit_face, snap};
+use crate::pick::{Screen, Snap, SnapKind, closest_on_line, hit_face, snap};
 
 #[derive(Default)]
 pub struct PushPullTool {
@@ -59,7 +59,7 @@ impl PushPullTool {
         self.snap = snap(model, screen, cursor, None).filter(|s| matches!(s.kind, SnapKind::Endpoint | SnapKind::Origin));
         op.distance = match &self.snap {
             Some(s) => (s.point - op.anchor).dot(op.normal),
-            None => distance_along(op.anchor, op.normal, &screen.ray(cursor)).unwrap_or(op.distance),
+            None => closest_on_line(op.anchor, op.normal, &screen.ray(cursor)).unwrap_or(op.distance),
         };
     }
 
@@ -194,17 +194,6 @@ impl PushPullTool {
     }
 }
 
-/// Signed distance along the line `anchor + t * normal` to its closest point to `ray`, or
-/// `None` when looking straight down the line.
-fn distance_along(anchor: DVec3, normal: DVec3, ray: &Ray) -> Option<f64> {
-    let b = normal.dot(ray.dir);
-    let denom = 1.0 - b * b;
-    if denom < 1e-6 {
-        return None;
-    }
-    let w = anchor - ray.origin;
-    Some((b * ray.dir.dot(w) - normal.dot(w)) / denom)
-}
 
 #[cfg(test)]
 mod tests {

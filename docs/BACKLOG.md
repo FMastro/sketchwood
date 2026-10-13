@@ -42,7 +42,7 @@ each section. Remove items when they're done (mention them in the commit).
 
 ## Tools
 - Eraser (drag-erase, Shift to hide), Line, Arc, Circle, Polygon, Offset, Scale, Tape
-  Measure + guides, Paint Bucket, Make Component (G).
+  Measure + guides, Paint Bucket.
 - Push/Pull: Ctrl to keep the original face (push/pull copy), double-click repeat across
   tools, and pushing a face into an opposite face to cut a hole through.
 - Typing before the first click (e.g. absolute `[x,y,z]` start points).

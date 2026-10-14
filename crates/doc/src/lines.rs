@@ -194,7 +194,7 @@ impl Model {
 
     /// Recompute the faces of one plane. `affected` faces are replaced by the regions inside
     /// them; regions bounded by a `new` edge outside every face become new faces.
-    fn rebuild_plane(
+    pub(crate) fn rebuild_plane(
         &mut self,
         normal: DVec3,
         origin: DVec3,

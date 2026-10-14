@@ -2,6 +2,7 @@
 //! No UI or GPU dependencies.
 
 mod arena;
+pub mod curves;
 pub mod cutlist;
 pub mod cutplan;
 mod document;

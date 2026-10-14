@@ -703,3 +703,42 @@ fn offset_a_door_into_a_frame_and_recess_the_panel() {
     type_text(&mut harness, "Z");
     snapshot(&mut harness, "door_panel");
 }
+
+#[test]
+fn drill_a_dowel_hole_with_circle_and_push_pull() {
+    use glam::DVec3;
+    let mut harness = app();
+    {
+        let doc = harness.state_mut().document_mut();
+        let face = doc.edit(|m| m.add_rectangle(DVec3::ZERO, DVec3::X * 6.0, DVec3::Y * 4.0, DVec3::Z)).unwrap();
+        doc.push_pull(face, 0.75, false).unwrap();
+    }
+    harness.run();
+    type_text(&mut harness, "Z");
+
+    type_text(&mut harness, "c");
+    assert_eq!(harness.state().tools().active(), ToolId::Circle);
+    let center = harness.state().to_window(DVec3::new(3.0, 2.0, 0.75)).unwrap();
+    click(&mut harness, center);
+    harness.hover_at(center + egui::vec2(30.0, 0.0));
+    harness.run();
+    assert_eq!(harness.state().tools().measurement_label(), "Radius");
+    type_text(&mut harness, "3/16");
+    harness.key_press(Key::Enter);
+    harness.run();
+
+    type_text(&mut harness, "p");
+    click(&mut harness, center);
+    harness.hover_at(center + egui::vec2(0.0, 30.0));
+    harness.run();
+    type_text(&mut harness, "3/4");
+    harness.key_press(Key::Enter);
+    harness.run();
+
+    let model = harness.state().document().model();
+    let top = model.faces().find(|(_, f)| f.normal.z > 0.5).unwrap().1;
+    let bottom = model.faces().find(|(_, f)| f.normal.z < -0.5).unwrap().1;
+    assert_eq!((top.holes.len(), bottom.holes.len()), (1, 1), "a hole right through");
+    assert_eq!(model.faces().count(), 6 + 24, "the board and the hole's 24 walls");
+    snapshot(&mut harness, "dowel_hole");
+}

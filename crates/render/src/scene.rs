@@ -1,7 +1,9 @@
 //! CPU-side geometry the renderer draws: the reference grid and axes, plus the model.
 
 use glam::{DAffine3, DVec3, Vec3};
-use sketchcraft_doc::{Entity, Owner, Scene as SceneData, Selection, View};
+use std::collections::HashMap;
+
+use sketchcraft_doc::{Entity, Owner, Scene as SceneData, Selection, VertexId, View};
 
 /// Linear-space RGBA. The render target is sRGB, so colors are converted from sRGB on creation.
 pub type Color = [f32; 4];
@@ -114,8 +116,24 @@ impl Scene {
                 }
             }
         }
+        // The normals of the faces on each edge, to hide the edges between a curve's facets.
+        let mut sides: HashMap<(VertexId, VertexId), Vec<DVec3>> = HashMap::new();
+        for (_, face) in model.faces() {
+            for l in face.loops() {
+                for i in 0..l.len() {
+                    let (a, b) = (l[i], l[(i + 1) % l.len()]);
+                    sides.entry((a.min(b), a.max(b))).or_default().push(face.normal);
+                }
+            }
+        }
         for (id, e) in model.edges() {
             let entity = Entity::Edge(id);
+            if let Some([n, m]) = sides.get(&(e.a.min(e.b), e.a.max(e.b))).map(Vec::as_slice)
+                && is_soft(*n, *m)
+                && !is_selected(entity)
+            {
+                continue;
+            }
             let color = match view.owner(entity) {
                 Owner::Outside => faded_edge,
                 _ if is_selected(entity) => selected_edge,
@@ -125,6 +143,14 @@ impl Scene {
             self.add_line(world(a), world(b), color);
         }
     }
+}
+
+/// Whether the edge between faces with normals `n` and `m` is soft, as SketchUp draws the edges
+/// between a circle's or arc's facets: hidden, because the faces meet at a shallow angle (under
+/// 30°). Edges between faces on one plane stay visible: they're real seams.
+fn is_soft(n: DVec3, m: DVec3) -> bool {
+    let cos = n.dot(m);
+    cos > 30f64.to_radians().cos() && cos < 1.0 - 1e-6
 }
 
 #[cfg(test)]
@@ -140,6 +166,21 @@ mod tests {
         let loose = doc.edit(|m| m.add_rectangle(DVec3::X * 20.0, DVec3::X * 1.5, DVec3::Y * 3.5, DVec3::Z)).unwrap();
         doc.push_pull(loose, 10.0, false).unwrap();
         (doc, group)
+    }
+
+    #[test]
+    fn edges_between_a_holes_facets_are_hidden() {
+        let mut doc = Document::default();
+        doc.edit(|m| {
+            let base = m.add_rectangle(DVec3::ZERO, DVec3::X * 6.0, DVec3::Y * 4.0, DVec3::Z).unwrap();
+            m.push_pull(base, 0.75).unwrap();
+            let disk = m.draw_circle(DVec3::new(3.0, 2.0, 0.75), DVec3::Z, 0.5, 24).unwrap();
+            m.push_pull(disk, -0.75).unwrap();
+        });
+        let mut scene = Scene::default();
+        scene.add_view(doc.view(), doc.selection(), &doc.context_transform(), doc.scene());
+        // The board's 12 edges and the hole's two rims; not the 24 seams down its wall.
+        assert_eq!(scene.lines.len(), (12 + 24 + 24) * 2);
     }
 
     #[test]

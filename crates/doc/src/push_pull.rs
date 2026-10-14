@@ -98,6 +98,25 @@ impl Model {
             self.remove_face(face);
         }
 
+        // Pushed exactly to the far side of the board: cut the outline out of the face there, a
+        // hole right through, instead of capping the pocket. Done before the walls, so their
+        // bottom edges don't already exist when the outline is drawn.
+        let through = removing && {
+            let outline: Vec<DVec3> = loops[0].iter().map(|&p| p + offset).collect();
+            let center = outline.iter().sum::<DVec3>() / outline.len() as f64;
+            let far = self.faces().find(|(_, f)| {
+                f.normal.dot(n) < -1.0 + 1e-9
+                    && (self.vertex(f.outer[0]) - center).dot(n).abs() <= EPS
+                    && self.face_contains(f, center)
+            });
+            far.is_some() && {
+                if let Some(opening) = self.draw_polygon(&outline, -n) {
+                    self.remove_face(opening);
+                }
+                true
+            }
+        };
+
         for (i, points) in loops.iter().enumerate() {
             // Outward (away from the solid) is to the right of a loop winding counter-clockwise
             // around `n` for the outer loop, and to the left for holes.
@@ -127,9 +146,11 @@ impl Model {
         let cap_outer = orient(loops[0].iter().map(|&p| p + offset).collect(), cap_normal);
         let cap_holes: Vec<Vec<DVec3>> =
             loops[1..].iter().map(|h| orient(h.iter().map(|&p| p + offset).collect(), -cap_normal)).collect();
-        // The moved end keeps the original face's paint; new walls start unpainted (SketchUp).
-        if let Some(cap) = self.add_face_with_holes(&cap_outer, &cap_holes) {
-            self.set_face_material(cap, original.material);
+        if !through {
+            // The moved end keeps the original face's paint; new walls start unpainted (SketchUp).
+            if let Some(cap) = self.add_face_with_holes(&cap_outer, &cap_holes) {
+                self.set_face_material(cap, original.material);
+            }
         }
 
         if !attached && distance > 0.0 {
@@ -144,7 +165,7 @@ impl Model {
                 .flat_map(|points| {
                     (0..points.len()).flat_map(move |j| {
                         let (a, b) = (points[j], points[(j + 1) % points.len()]);
-                        [(a, b), (a, a + offset)]
+                        [(a, b), (a, a + offset), (a + offset, b + offset)]
                     })
                 })
                 .filter_map(|(a, b)| self.find_edge(self.vertex_at(a)?, self.vertex_at(b)?))
@@ -174,10 +195,17 @@ impl Model {
             return;
         };
         let side_normal = self.face(side).expect("found above").normal;
-        // Draw the wall's other three edges onto the side's plane; that splits the side (push)
+        // Draw the wall's edges onto the side's plane (the one along the base already exists, and
+        // the quad may wind either way); that splits the side (push)
         // or closes a new face beside it (pull).
-        for i in 1..4 {
+        for i in 0..4 {
             self.add_line(quad[i], quad[(i + 1) % 4]);
+        }
+        // Its edges may all exist already (a neighbouring wall drew them), in which case no line
+        // was new and nothing split; split the side by them explicitly.
+        if let Some(f) = self.face(side) {
+            let origin = self.vertex(f.outer[0]);
+            self.rebuild_plane(side_normal, origin, &[], &BTreeSet::from([side]), None);
         }
         let center = quad.iter().sum::<DVec3>() / 4.0;
         let in_plane = |f: &crate::Face| {

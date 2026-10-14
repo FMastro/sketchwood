@@ -101,4 +101,8 @@ add it there; when you finish an item, remove it.
 14. Offset (done): `Model::offset_outline` / `offset_face` (mitered corners, refuses outlines that
    fold over), drawn through `draw_polygon` so an inward offset makes a frame and a panel. Tool (F):
    click a face (or select one), move in or out, click or type; retyping changes it.
-15. Circle, Arc; OBJ/STL export (see backlog)
+15. Circle (C) and Arc (A) (done): `doc::curves` (circle and 2-point arc points, 24 / 12 sides,
+   `Ns` to change, `Nr` for an arc radius), drawn as lines so they split faces. Push/Pull cuts
+   through when pushed to the far face (dowel holes, rounded corners). Edges between faces
+   meeting under 30° are drawn soft (hidden).
+16. OBJ/STL export (see backlog)

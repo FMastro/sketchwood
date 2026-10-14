@@ -61,22 +61,23 @@ each section. Remove items when they're done (mention them in the commit).
   it its own copy, which isn't an undo step by itself.
 
 ## Cut list
-- Stock sizes and kerf live in the Cut List window only: not saved with the drawing, not per
-  material (OpenCutList keeps a list of stock sizes per material). Defaults are US sizes.
+- One sheet size per material (OpenCutList keeps a list of sheet sizes to choose from), and
+  no offcuts inventory. Defaults are US sizes.
 - Grain always runs along a part's longest side; no per-part grain override, no edge banding,
   no veneer or hardware counts beyond listing.
 - Packing is heuristic (several orders and rules, best kept), not provably optimal; no
   offcut reuse across materials, no "use my leftover pieces first".
 - Solid wood assumes one board width per material (the narrowest standard width holding the
   widest part); real hardwood comes in random widths.
-- Parts are named by their group's name ("Group#3"); rename groups to get "Left side".
-- No printable or PDF cut sheets yet; CSV export only.
+- Parts are named by their group's name; rename in Entity Info. The Outliner can't rename yet.
+- The cut sheet is a web page printed from the browser (or saved as PDF there), not a PDF
+  written directly; no labels/stickers per part.
 
 ## Materials
 - No textures (color only), so no visible grain direction; parts' grain is assumed along their
   longest side for now (as OpenCutList does by default).
 - Dimensional lumber stores one thickness, not a section (e.g. 1.5" x 3.5"); no list of stock
-  thicknesses or sheet sizes yet (needed for cut optimization).
+  thicknesses yet (each material has one thickness and optional stock sizes).
 - Paint Bucket has no Ctrl (paint connected faces) or Shift (replace everywhere) variants.
 - Painted color shows on both sides of a face; SketchUp paints front and back separately.
 

@@ -11,12 +11,15 @@
 //! Every cut takes a saw kerf. Several part orders and placement rules are tried and the plan
 //! using the least stock wins. These are good heuristics, not guaranteed optima.
 
-use crate::MaterialKind;
+use serde::{Deserialize, Serialize};
+
 use crate::cutlist::MaterialParts;
+use crate::{MaterialKind, Scene};
 use crate::units::format_length;
 
-/// Stock sizes and the saw kerf, in inches. US defaults.
-#[derive(Clone, Debug, PartialEq)]
+/// Stock sizes and the saw kerf, in inches. US defaults. Saved with the drawing; a material
+/// can override the sizes that apply to its type ([`StockOverride`]).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Settings {
     pub kerf: f64,
     /// Sheet goods: (length, width).
@@ -40,6 +43,54 @@ impl Default for Settings {
     }
 }
 
+
+/// A material's own stock sizes, replacing the drawing's for its type: the sheet size for
+/// sheet goods, board lengths and widths for solid wood, lengths for dimensional lumber.
+/// `None` uses the drawing's.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct StockOverride {
+    pub sheet: Option<(f64, f64)>,
+    pub lengths: Option<Vec<f64>>,
+    pub widths: Option<Vec<f64>>,
+}
+
+impl StockOverride {
+    pub fn is_empty(&self) -> bool {
+        self.sheet.is_none() && self.lengths.is_none() && self.widths.is_none()
+    }
+}
+
+impl Settings {
+    /// These settings with a material's own stock sizes swapped in.
+    pub fn with_override(&self, kind: MaterialKind, stock: &StockOverride) -> Settings {
+        let mut s = self.clone();
+        match kind {
+            MaterialKind::SheetGood => s.sheet = stock.sheet.unwrap_or(s.sheet),
+            MaterialKind::SolidWood => {
+                s.board_lengths = stock.lengths.clone().unwrap_or(s.board_lengths);
+                s.board_widths = stock.widths.clone().unwrap_or(s.board_widths);
+            }
+            MaterialKind::DimensionalLumber => s.lumber_lengths = stock.lengths.clone().unwrap_or(s.lumber_lengths),
+            _ => {}
+        }
+        s
+    }
+}
+
+/// Plan every material in the drawing's cut list with the drawing's settings and each
+/// material's own stock sizes.
+pub fn plan_all(scene: &Scene, list: &crate::cutlist::CutList) -> Vec<Option<Plan>> {
+    list.materials
+        .iter()
+        .map(|parts| {
+            let settings = match (parts.kind, parts.material.and_then(|m| scene.material(m))) {
+                (Some(kind), Some(material)) => scene.cut_settings.with_override(kind, &material.stock),
+                _ => scene.cut_settings.clone(),
+            };
+            plan(parts, &settings)
+        })
+        .collect()
+}
 /// Dimensional lumber's actual sizes, with nominal names (a 2x4 is 1.5" x 3.5").
 const LUMBER_THICKNESSES: [(f64, u32); 3] = [(0.75, 1), (1.5, 2), (3.5, 4)];
 const LUMBER_WIDTHS: [(f64, u32); 7] = [(1.5, 2), (2.5, 3), (3.5, 4), (5.5, 6), (7.25, 8), (9.25, 10), (11.25, 12)];
@@ -444,6 +495,8 @@ fn place(bin: &mut Bin, piece: &Piece, can_rotate: bool, kerf: f64, rule: Rule) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use glam::DVec3;
+
     use crate::cutlist::Part;
 
     fn material(kind: MaterialKind, grained: bool, parts: &[(&str, usize, f64, f64, f64)]) -> MaterialParts {
@@ -506,6 +559,36 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn a_materials_own_sheet_size_replaces_the_drawings() {
+        use crate::{Document, Entity};
+        let mut doc = Document::default();
+        let face = doc.edit(|m| m.add_rectangle(DVec3::ZERO, DVec3::X * 50.0, DVec3::Y * 30.0, DVec3::Z)).unwrap();
+        let panel = doc.push_pull(face, 0.75, true).unwrap().unwrap();
+        let ply = doc.add_material(MaterialKind::SheetGood);
+        doc.paint(&[Entity::Instance(panel)], Some(ply));
+        let sheets = |doc: &Document| {
+            let list = crate::cutlist::cut_list(doc.scene());
+            plan_all(doc.scene(), &list)[0].as_ref().unwrap().shopping_list()[0].0.clone()
+        };
+        assert_eq!(sheets(&doc), "Sheet 96\" x 48\"");
+        // Baltic birch comes 5' x 5'.
+        doc.edit_material(ply, |m| m.stock.sheet = Some((60.0, 60.0)));
+        assert_eq!(sheets(&doc), "Sheet 60\" x 60\"");
+        // Saved with the drawing, as are the drawing's own settings.
+        doc.set_cut_settings(Settings { kerf: 0.09375, ..Settings::default() });
+        let reloaded = crate::file::from_str(&crate::file::to_string(doc.scene())).unwrap();
+        assert_eq!(reloaded.cut_settings.kerf, 0.09375);
+        assert_eq!(reloaded.material(ply).unwrap().stock.sheet, Some((60.0, 60.0)));
+    }
+
+    #[test]
+    fn older_files_get_the_default_stock() {
+        let text = r#"{"format":"sketchcraft","version":1,"units":"inches","scene":{"root":{"model":{"vertices":[],"edges":[],"faces":[]},"instances":[]},"definitions":[],"tags":[],"materials":[],"next_group":0,"next_component":0}}"#;
+        let scene = crate::file::from_str(text).unwrap();
+        assert_eq!(scene.cut_settings, Settings::default());
     }
 
     #[test]

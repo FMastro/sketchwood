@@ -767,3 +767,30 @@ fn export_obj_with_materials_and_stl() {
     assert_eq!(stl.matches("facet normal").count(), 12, "a board: 6 faces, 12 triangles");
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn rename_a_board_in_entity_info_for_the_cut_list() {
+    use egui_kittest::kittest::Queryable;
+    let mut harness = app();
+    board(&mut harness);
+    type_text(&mut harness, " ");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    harness.run();
+    harness.get_by_role(egui::accesskit::Role::TextInput).click();
+    harness.run();
+    // Replace the default "Group#1" while the field has focus; shortcuts don't fire.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    type_text(&mut harness, "Left side");
+    assert_eq!(harness.state().tools().active(), ToolId::Select, "typing a name isn't tool shortcuts");
+    let doc = harness.state().document();
+    let (board, _) = doc.container().instances().next().unwrap();
+    assert_eq!(doc.instance_name(board), Some("Left side"));
+    let list = sketchcraft_doc::cutlist::cut_list(doc.scene());
+    assert_eq!(list.materials[0].parts[0].names, vec!["Left side".to_owned()]);
+    // One undo step undoes the whole name.
+    harness.key_press(Key::Escape);
+    harness.run();
+    harness.state_mut().document_mut().undo();
+    let doc = harness.state().document();
+    assert_eq!(doc.instance_name(board), Some("Group#1"));
+}

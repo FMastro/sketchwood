@@ -213,7 +213,7 @@ impl eframe::App for SketchCraftApp {
         self.tool_set(ui);
         self.tray(ui);
 
-        self.cut_list.show(&ctx, &self.doc);
+        self.cut_list.show(&ctx, &mut self.doc);
         self.about_window(&ctx);
 
         egui::CentralPanel::no_frame()

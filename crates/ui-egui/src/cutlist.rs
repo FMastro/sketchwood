@@ -1,12 +1,15 @@
 //! The Cut List window: parts grouped by material, cutting diagrams on standard stock with a
-//! shopping list, and the stock sizes and saw kerf they assume.
+//! shopping list, and the stock sizes and saw kerf they assume (saved with the drawing, with
+//! per-material sizes). Exports a CSV, or a cut sheet to print.
+
+use std::collections::HashMap;
 
 use eframe::egui;
 use egui_phosphor::regular as ph;
 use sketchcraft_doc::cutlist::{self, CutList, MaterialParts};
-use sketchcraft_doc::cutplan::{self, Plan, Settings};
+use sketchcraft_doc::cutplan::{self, Plan, Settings, StockOverride};
 use sketchcraft_doc::units::{format_length, parse_length, parse_lengths};
-use sketchcraft_doc::{Document, MaterialKind};
+use sketchcraft_doc::{Document, MaterialId, MaterialKind, cutsheet};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Tab {
@@ -20,17 +23,17 @@ pub enum Tab {
 pub struct CutListWindow {
     pub open: bool,
     pub tab: Tab,
-    settings: Settings,
-    /// Settings as typed, applied when they parse.
-    settings_text: Option<SettingsText>,
-    /// The list and plans, for the document version and settings they were made from.
+    /// The drawing's settings as typed (and the drawing version they were read at).
+    settings_text: Option<(u64, SettingsText)>,
+    /// Each material's own stock sizes as typed.
+    stock_text: HashMap<MaterialId, StockText>,
+    /// The list and plans, for the drawing version they were made from.
     cache: Option<Cache>,
     message: Option<String>,
 }
 
 struct Cache {
     model_version: u64,
-    settings: Settings,
     list: CutList,
     plans: Vec<Option<Plan>>,
 }
@@ -44,34 +47,98 @@ struct SettingsText {
     lumber_lengths: String,
 }
 
+fn list_text(values: &[f64]) -> String {
+    values.iter().map(|&v| format_length(v)).collect::<Vec<_>>().join(", ")
+}
+
+/// A length, or `None` if it doesn't parse or is negative.
+fn one(s: &str) -> Option<f64> {
+    parse_length(s).ok().filter(|v| *v >= 0.0)
+}
+
+/// A comma-separated list of positive lengths.
+fn many(s: &str) -> Option<Vec<f64>> {
+    let values: Vec<f64> = parse_lengths(s).ok()?.into_iter().flatten().filter(|v| *v > 0.0).collect();
+    (!values.is_empty()).then_some(values)
+}
+
 impl SettingsText {
     fn from(settings: &Settings) -> Self {
-        let list = |values: &[f64]| values.iter().map(|&v| format_length(v)).collect::<Vec<_>>().join(", ");
         Self {
             kerf: format_length(settings.kerf),
             sheet_length: format_length(settings.sheet.0),
             sheet_width: format_length(settings.sheet.1),
-            board_lengths: list(&settings.board_lengths),
-            board_widths: list(&settings.board_widths),
-            lumber_lengths: list(&settings.lumber_lengths),
+            board_lengths: list_text(&settings.board_lengths),
+            board_widths: list_text(&settings.board_widths),
+            lumber_lengths: list_text(&settings.lumber_lengths),
         }
+    }
+
+    fn parse(&self) -> Option<Settings> {
+        Some(Settings {
+            kerf: one(&self.kerf)?,
+            sheet: (one(&self.sheet_length)?, one(&self.sheet_width)?),
+            board_lengths: many(&self.board_lengths)?,
+            board_widths: many(&self.board_widths)?,
+            lumber_lengths: many(&self.lumber_lengths)?,
+        })
+    }
+}
+
+/// A material's own sizes as typed; blank fields use the drawing's.
+struct StockText {
+    first: String,
+    second: String,
+}
+
+impl StockText {
+    fn from(kind: MaterialKind, stock: &StockOverride) -> Self {
+        match kind {
+            MaterialKind::SheetGood => Self {
+                first: stock.sheet.map(|s| format_length(s.0)).unwrap_or_default(),
+                second: stock.sheet.map(|s| format_length(s.1)).unwrap_or_default(),
+            },
+            _ => Self {
+                first: stock.lengths.as_deref().map(list_text).unwrap_or_default(),
+                second: stock.widths.as_deref().map(list_text).unwrap_or_default(),
+            },
+        }
+    }
+
+    /// The override, or `None` if something typed doesn't parse.
+    fn parse(&self, kind: MaterialKind) -> Option<StockOverride> {
+        let blank = |s: &str| s.trim().is_empty();
+        Some(match kind {
+            MaterialKind::SheetGood => StockOverride {
+                sheet: if blank(&self.first) && blank(&self.second) {
+                    None
+                } else {
+                    Some((one(&self.first)?, one(&self.second)?))
+                },
+                ..StockOverride::default()
+            },
+            _ => StockOverride {
+                lengths: if blank(&self.first) { None } else { Some(many(&self.first)?) },
+                widths: if blank(&self.second) || kind != MaterialKind::SolidWood { None } else { Some(many(&self.second)?) },
+                ..StockOverride::default()
+            },
+        })
     }
 }
 
 impl CutListWindow {
-    /// The current cut list and plans, recomputed when the drawing or settings change.
+    /// The current cut list and plans, recomputed when the drawing changes.
     pub fn refresh(&mut self, doc: &Document) -> (&CutList, &[Option<Plan>]) {
-        let stale = self.cache.as_ref().is_none_or(|c| c.model_version != doc.model_version() || c.settings != self.settings);
-        if stale {
+        if self.cache.as_ref().is_none_or(|c| c.model_version != doc.model_version()) {
             let list = cutlist::cut_list(doc.scene());
-            let plans = list.materials.iter().map(|m| cutplan::plan(m, &self.settings)).collect();
-            self.cache = Some(Cache { model_version: doc.model_version(), settings: self.settings.clone(), list, plans });
+            let plans = cutplan::plan_all(doc.scene(), &list);
+            self.cache = Some(Cache { model_version: doc.model_version(), list, plans });
         }
         let cache = self.cache.as_ref().expect("just filled");
         (&cache.list, &cache.plans)
     }
 
-    pub fn show(&mut self, ctx: &egui::Context, doc: &Document) {
+    pub fn show(&mut self, ctx: &egui::Context, doc: &mut Document) {
         if !self.open {
             return;
         }
@@ -89,6 +156,12 @@ impl CutListWindow {
                         }
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let print = ui
+                            .button(format!("{} Print cut sheet...", ph::PRINTER))
+                            .on_hover_text("Save the parts and cutting diagrams as a page to print, or save as PDF, from your browser");
+                        if print.clicked() {
+                            self.export_sheet(doc);
+                        }
                         if ui.button(format!("{} Export CSV...", ph::FILE_CSV)).clicked() {
                             self.export_csv(doc);
                         }
@@ -107,7 +180,7 @@ impl CutListWindow {
                         let (list, plans) = self.refresh(doc);
                         diagrams_tab(ui, list, plans, doc);
                     }
-                    Tab::Settings => self.settings_tab(ui),
+                    Tab::Settings => self.settings_tab(ui, doc),
                 });
             });
         self.open = open;
@@ -125,9 +198,33 @@ impl CutListWindow {
         };
     }
 
-    fn settings_tab(&mut self, ui: &mut egui::Ui) {
-        let text = self.settings_text.get_or_insert_with(|| SettingsText::from(&self.settings));
-        ui.label("Standard stock the cutting diagrams use (inches unless you type units). Lists are comma-separated.");
+    /// Save the printable cut sheet and open it in the browser to print.
+    fn export_sheet(&mut self, doc: &Document) {
+        let html = self.cut_sheet(doc, "Cut list");
+        let Some(path) = rfd::FileDialog::new().add_filter("Web page", &["html"]).set_file_name("cut sheet.html").save_file() else {
+            return;
+        };
+        self.message = match std::fs::write(&path, html) {
+            Ok(()) => open_with_system(&path).err().map(|e| format!("Saved, but couldn't open it: {e}")),
+            Err(e) => Some(format!("Couldn't save {}: {e}", path.display())),
+        };
+    }
+
+    /// The cut sheet as a web page.
+    pub fn cut_sheet(&mut self, doc: &Document, title: &str) -> String {
+        let (list, plans) = self.refresh(doc);
+        cutsheet::to_html(doc.scene(), list, plans, title)
+    }
+
+    fn settings_tab(&mut self, ui: &mut egui::Ui, doc: &mut Document) {
+        // Retyped from the drawing whenever it changes underneath (undo, open).
+        let version = doc.model_version();
+        if self.settings_text.as_ref().is_none_or(|(v, _)| *v != version) {
+            self.settings_text = Some((version, SettingsText::from(&doc.scene().cut_settings)));
+            self.stock_text.clear();
+        }
+        let (_, text) = self.settings_text.as_mut().expect("just filled");
+        ui.label("Standard stock for the cutting diagrams, saved with the drawing (inches unless you type units). Lists are comma-separated.");
         ui.add_space(6.0);
         let mut changed = false;
         egui::Grid::new("cut_settings").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
@@ -144,35 +241,103 @@ impl CutListWindow {
             row(ui, "Lumber lengths", &mut text.lumber_lengths, "96, 120, 144, 192");
         });
         if changed {
-            let one = |s: &str| parse_length(s).ok().filter(|v| *v >= 0.0);
-            let many = |s: &str| -> Option<Vec<f64>> {
-                let values: Vec<f64> = parse_lengths(s).ok()?.into_iter().flatten().filter(|v| *v > 0.0).collect();
-                (!values.is_empty()).then_some(values)
-            };
-            let parsed = (|| {
-                Some(Settings {
-                    kerf: one(&text.kerf)?,
-                    sheet: (one(&text.sheet_length)?, one(&text.sheet_width)?),
-                    board_lengths: many(&text.board_lengths)?,
-                    board_widths: many(&text.board_widths)?,
-                    lumber_lengths: many(&text.lumber_lengths)?,
-                })
-            })();
-            match parsed {
+            match text.parse() {
                 Some(settings) => {
-                    self.settings = settings;
+                    doc.set_cut_settings(settings);
                     self.message = None;
                 }
                 None => self.message = Some("Some stock sizes don't read as lengths; the last good ones are used.".into()),
             }
+            // Keep what's typed: this edit isn't a change from elsewhere.
+            if let Some((v, _)) = &mut self.settings_text {
+                *v = doc.model_version();
+            }
         }
         ui.add_space(8.0);
         if ui.button("Reset to US defaults").clicked() {
-            self.settings = Settings::default();
-            self.settings_text = None;
+            doc.set_cut_settings(Settings::default());
             self.message = None;
         }
+
+        self.material_stock(ui, doc);
     }
+
+    /// Each stock material's own sizes (OpenCutList keeps sizes per material).
+    fn material_stock(&mut self, ui: &mut egui::Ui, doc: &mut Document) {
+        let materials: Vec<(MaterialId, String, MaterialKind, StockOverride)> = doc
+            .scene()
+            .materials()
+            .filter(|(_, m)| matches!(m.kind, MaterialKind::SheetGood | MaterialKind::SolidWood | MaterialKind::DimensionalLumber))
+            .map(|(id, m)| (id, m.name.clone(), m.kind, m.stock.clone()))
+            .collect();
+        if materials.is_empty() {
+            return;
+        }
+        ui.add_space(12.0);
+        ui.strong("Per material");
+        ui.weak("Leave blank to use the sizes above.");
+        ui.add_space(4.0);
+        let mut edits = Vec::new();
+        egui::Grid::new("material_stock").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
+            for (id, name, kind, stock) in &materials {
+                let text = self.stock_text.entry(*id).or_insert_with(|| StockText::from(*kind, stock));
+                ui.label(name);
+                let (first, second) = match kind {
+                    MaterialKind::SheetGood => ("Sheet length", Some("width")),
+                    MaterialKind::SolidWood => ("Board lengths", Some("widths")),
+                    _ => ("Lengths", None),
+                };
+                let mut changed = false;
+                ui.horizontal(|ui| {
+                    ui.weak(first);
+                    changed |= ui.add(egui::TextEdit::singleline(&mut text.first).desired_width(140.0)).changed();
+                    if let Some(label) = second {
+                        ui.weak(label);
+                        changed |= ui.add(egui::TextEdit::singleline(&mut text.second).desired_width(140.0)).changed();
+                    }
+                });
+                ui.end_row();
+                if changed {
+                    edits.push((*id, text.parse(*kind)));
+                }
+            }
+        });
+        for (id, parsed) in edits {
+            match parsed {
+                Some(stock) => {
+                    doc.edit_material(id, |m| m.stock = stock);
+                    self.message = None;
+                }
+                None => self.message = Some("Some stock sizes don't read as lengths; the last good ones are used.".into()),
+            }
+            if let Some((v, _)) = &mut self.settings_text {
+                *v = doc.model_version();
+            }
+        }
+    }
+}
+
+/// Open a file with the system's default program (the browser, for a web page).
+fn open_with_system(path: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    let mut command = {
+        let mut c = std::process::Command::new("cmd");
+        c.args(["/C", "start", ""]).arg(path);
+        c
+    };
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut c = std::process::Command::new("open");
+        c.arg(path);
+        c
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut command = {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(path);
+        c
+    };
+    command.spawn().map(|_| ())
 }
 
 fn kind_name(material: &MaterialParts) -> &'static str {

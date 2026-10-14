@@ -89,16 +89,16 @@ pub fn entity_info(ui: &mut egui::Ui, doc: &mut Document, tools: &mut Tools) {
         return;
     }
     let instances = doc.selection().iter().filter(|e| matches!(e, sketchcraft_doc::Entity::Instance(_))).count();
-    ui.label(match (count, instances) {
-        (1, 1) => doc
-            .selection()
-            .iter()
-            .find_map(|e| if let sketchcraft_doc::Entity::Instance(i) = e { doc.instance_name(i) } else { None })
-            .unwrap_or("Group")
-            .to_owned(),
-        (n, 0) => format!("{n} loose entities"),
-        (n, i) => format!("{n} selected ({i} groups/components)"),
-    });
+    let single = doc.selection().iter().find_map(|e| if let sketchcraft_doc::Entity::Instance(i) = e { Some(i) } else { None });
+    match (count, instances, single) {
+        (1, 1, Some(instance)) => name_field(ui, doc, instance),
+        (n, 0, _) => {
+            ui.label(format!("{n} loose entities"));
+        }
+        (n, i, _) => {
+            ui.label(format!("{n} selected ({i} groups/components)"));
+        }
+    }
     crate::materials::entity_info_material(ui, doc, tools);
     if instances == 0 {
         ui.weak("Tags go on groups and components. Group this first (Ctrl+G).");
@@ -132,4 +132,24 @@ pub fn entity_info(ui: &mut egui::Ui, doc: &mut Document, tools: &mut Tools) {
         tools.cancel();
         doc.tag_selection(tag);
     }
+}
+
+/// The selected group's or component's name, editable: it names the part in the cut list.
+fn name_field(ui: &mut egui::Ui, doc: &mut Document, instance: sketchcraft_doc::InstanceId) {
+    let key = egui::Id::new(("entity_info_name", instance));
+    let current = doc.instance_name(instance).unwrap_or_default().to_owned();
+    // While typing, keep what's typed (even blank); otherwise show the drawing's name.
+    let mut text = ui.data(|d| d.get_temp::<String>(key)).unwrap_or(current);
+    ui.horizontal(|ui| {
+        ui.label("Name");
+        let response = ui.add(egui::TextEdit::singleline(&mut text).desired_width(150.0));
+        if response.changed() {
+            doc.rename_instance(instance, &text);
+        }
+        if response.has_focus() {
+            ui.data_mut(|d| d.insert_temp(key, text));
+        } else {
+            ui.data_mut(|d| d.remove::<String>(key));
+        }
+    });
 }

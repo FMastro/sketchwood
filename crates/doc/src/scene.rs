@@ -100,6 +100,9 @@ pub struct Material {
     pub grained: bool,
     /// Stock thickness in inches, for sheet goods and dimensional lumber.
     pub thickness: Option<f64>,
+    /// Stock sizes for this material's cutting diagrams, when they differ from the drawing's.
+    #[serde(default)]
+    pub stock: crate::cutplan::StockOverride,
 }
 
 /// A tag (SketchUp's renamed layers). Tags go on groups and components; hiding a tag hides
@@ -156,6 +159,9 @@ pub struct Scene {
     definitions: Arena<Definition>,
     tags: Arena<Tag>,
     materials: Arena<Material>,
+    /// Stock sizes and kerf for the cutting diagrams (older files get the US defaults).
+    #[serde(default)]
+    pub cut_settings: crate::cutplan::Settings,
     /// Counters for default names, like SketchUp's "Group#1", "Component#1".
     next_group: u32,
     next_component: u32,

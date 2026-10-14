@@ -108,3 +108,7 @@ add it there; when you finish an item, remove it.
 16. Export (done): `doc::export` (visible geometry in world coordinates, triangles wound to their
    front; OBJ named per group with an MTL of material colors; ASCII STL), File > Export with
    inches or millimeters.
+17. Cut-list polish (done): stock sizes and kerf saved with the drawing (`Scene::cut_settings`), each
+   material can override them (`Material::stock`, `cutplan::plan_all`); Entity Info renames groups
+   and components (the part name); `doc::cutsheet` writes a printable HTML cut sheet (parts, what
+   to buy, SVG diagrams) that opens in the browser.

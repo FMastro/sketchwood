@@ -5,6 +5,7 @@ mod arena;
 pub mod curves;
 pub mod cutlist;
 pub mod cutplan;
+pub mod cutsheet;
 mod document;
 pub mod export;
 pub mod file;

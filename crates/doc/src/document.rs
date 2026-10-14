@@ -134,6 +134,29 @@ impl Document {
         self.state.scene.bounds()
     }
 
+    /// Rename a group or component (its definition, so every copy of a component shares the
+    /// name). Typing a name merges into one undo step.
+    pub fn rename_instance(&mut self, id: InstanceId, name: &str) {
+        let Some(definition) = self.container().instance(id).map(|i| i.definition) else { return };
+        let name = name.trim();
+        if name.is_empty() || self.instance_name(id) == Some(name) {
+            return;
+        }
+        self.edit_scene_merging(&format!("rename {definition:?}"), |scene, _| {
+            if let Some(def) = scene.definition_mut(definition) {
+                def.name = name.to_owned();
+            }
+        });
+    }
+
+    /// Change the drawing's stock sizes and kerf. Edits merge into one undo step.
+    pub fn set_cut_settings(&mut self, settings: crate::cutplan::Settings) {
+        if self.state.scene.cut_settings == settings {
+            return;
+        }
+        self.edit_scene_merging("cut settings", |scene, _| scene.cut_settings = settings);
+    }
+
     pub fn instance_name(&self, id: InstanceId) -> Option<&str> {
         let instance = self.container().instance(id)?;
         self.state.scene.definition(instance.definition).map(|d| d.name.as_str())
@@ -392,7 +415,7 @@ impl Document {
             .chain((2..).map(|i| format!("{base} {i}")))
             .find(|n| !taken(n))
             .expect("some name is free");
-        self.edit_scene(|scene, _| scene.add_material(Material { name, color, kind, grained, thickness }))
+        self.edit_scene(|scene, _| scene.add_material(Material { name, color, kind, grained, thickness, stock: Default::default() }))
     }
 
     /// Change a material. Consecutive edits of the same material merge into one undo step.

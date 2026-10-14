@@ -6,6 +6,7 @@ pub mod cutlist;
 pub mod cutplan;
 mod document;
 pub mod file;
+mod lines;
 mod model;
 mod push_pull;
 mod scene;

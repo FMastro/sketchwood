@@ -4,6 +4,8 @@ use glam::{DAffine3, DVec3, Vec2};
 use sketchcraft_doc::{EdgeId, Entity, FaceId, Model, VertexId};
 use sketchcraft_view::OrbitCamera;
 
+use crate::Axis;
+
 /// How close, in points, the cursor must be to snap to an endpoint.
 pub const SNAP_RADIUS: f32 = 12.0;
 /// How close, in points, the cursor must be to pick an edge.
@@ -271,6 +273,24 @@ pub fn closest_on_line(anchor: DVec3, dir: DVec3, ray: &Ray) -> Option<f64> {
     }
     let w = anchor - ray.origin;
     Some((b * ray.dir.dot(w) - dir.dot(w)) / denom)
+}
+
+/// How close, in points, the cursor must come to an axis line to lock onto it.
+pub const AXIS_RADIUS: f32 = 14.0;
+
+/// SketchUp's axis inference: the point on the red, green or blue line through `base` nearest
+/// the cursor, when the cursor is within [`AXIS_RADIUS`] of one on screen.
+pub fn infer_axis(screen: Screen<'_>, base: DVec3, cursor: Vec2) -> Option<(DVec3, Axis)> {
+    let ray = screen.ray(cursor);
+    Axis::ALL
+        .into_iter()
+        .filter_map(|axis| {
+            let point = base + axis.dir() * closest_on_line(base, axis.dir(), &ray)?;
+            let distance = screen.project(point)?.distance(cursor);
+            (distance < AXIS_RADIUS).then_some((distance, point, axis))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, point, axis)| (point, axis))
 }
 
 /// Distance from `p` to segment `ab`, and the parameter of the closest point.

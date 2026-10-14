@@ -54,6 +54,13 @@ pub struct Instance {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct MaterialId(u32);
 
+#[cfg(test)]
+impl MaterialId {
+    pub(crate) fn for_tests(id: u32) -> Self {
+        Self(id)
+    }
+}
+
 /// What a material is, for cut lists (the categories OpenCutList uses).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MaterialKind {

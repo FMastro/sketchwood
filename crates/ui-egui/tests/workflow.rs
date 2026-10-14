@@ -545,7 +545,48 @@ fn cut_list_shows_parts_and_cutting_diagrams() {
 #[test]
 fn unavailable_tool_shortcut_explains() {
     let mut harness = app();
-    type_text(&mut harness, "l");
+    type_text(&mut harness, "f");
     assert_eq!(harness.state().tools().active(), ToolId::Select);
-    assert!(harness.state().tools().status().contains("Line (L) is coming soon"));
+    assert!(harness.state().tools().status().contains("Offset (F) is coming soon"));
+}
+
+#[test]
+fn draw_a_line_across_a_boards_top_and_push_down_a_rabbet() {
+    use glam::DVec3;
+    let mut harness = app();
+    {
+        let doc = harness.state_mut().document_mut();
+        let face = doc.edit(|m| m.add_rectangle(DVec3::ZERO, DVec3::X * 10.0, DVec3::Y * 4.0, DVec3::Z)).unwrap();
+        doc.push_pull(face, 2.0, false).unwrap();
+    }
+    harness.run();
+    type_text(&mut harness, "Z");
+
+    type_text(&mut harness, "l");
+    assert_eq!(harness.state().tools().active(), ToolId::Line);
+    let front = harness.state().to_window(DVec3::new(8.0, 0.0, 2.0)).unwrap();
+    let back = harness.state().to_window(DVec3::new(8.0, 4.0, 2.0)).unwrap();
+    click(&mut harness, front);
+    harness.hover_at(back);
+    harness.run();
+    assert_eq!(harness.state().tools().measurement_label(), "Length");
+    click(&mut harness, back);
+    assert_eq!(harness.state().document().model().faces().count(), 7, "the top is split in two");
+    snapshot(&mut harness, "line_split");
+
+    type_text(&mut harness, "p");
+    let end = harness.state().to_window(DVec3::new(9.0, 2.0, 2.0)).unwrap();
+    click(&mut harness, end);
+    harness.hover_at(end + egui::vec2(0.0, 40.0));
+    harness.run();
+    type_text(&mut harness, "1");
+    harness.key_press(Key::Enter);
+    harness.run();
+
+    let model = harness.state().document().model();
+    assert_eq!(model.faces().count(), 8, "a clean rabbet: no patched holes");
+    assert!(model.faces().all(|(_, f)| f.holes.is_empty()));
+    let (lo, hi) = model.bounds().unwrap();
+    assert_eq!((hi - lo).to_array(), [10.0, 4.0, 2.0]);
+    snapshot(&mut harness, "rabbet");
 }

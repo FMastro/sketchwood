@@ -92,6 +92,11 @@ impl Model {
         // Pushing an attached face back cuts a pocket: the new faces look into the pocket.
         let removing = attached && distance < 0.0;
         let loops: Vec<Vec<DVec3>> = original.loops().map(|l| self.loop_points(l)).collect();
+        if attached {
+            // The base ends up inside the solid (or open to the pocket). Remove it first, so
+            // walls flush with a side face can merge with it across the base's edge.
+            self.remove_face(face);
+        }
 
         for (i, points) in loops.iter().enumerate() {
             // Outward (away from the solid) is to the right of a loop winding counter-clockwise
@@ -108,7 +113,7 @@ impl Model {
                 if newell_normal(&quad).dot(outward) < 0.0 {
                     quad.reverse();
                 }
-                self.add_face(&quad);
+                self.add_wall(quad, a, b, removing);
             }
         }
 
@@ -127,12 +132,69 @@ impl Model {
             self.set_face_material(cap, original.material);
         }
 
-        if attached {
-            // The base is now inside the solid (or open to the pocket).
-            self.remove_face(face);
-        } else if distance > 0.0 {
+        if !attached && distance > 0.0 {
             // The base becomes the solid's bottom, which must face away from the solid.
             self.reverse_face(face);
+        }
+        if removing {
+            // Cutting a rabbet removes part of a side face; the base's edges and wall edges
+            // that no longer border anything go with it.
+            let stray: Vec<crate::Entity> = loops
+                .iter()
+                .flat_map(|points| {
+                    (0..points.len()).flat_map(move |j| {
+                        let (a, b) = (points[j], points[(j + 1) % points.len()]);
+                        [(a, b), (a, a + offset)]
+                    })
+                })
+                .filter_map(|(a, b)| self.find_edge(self.vertex_at(a)?, self.vertex_at(b)?))
+                .filter(|&e| self.edge_faces(e).is_empty())
+                .map(crate::Entity::Edge)
+                .collect();
+            self.erase(stray);
+        }
+    }
+
+    /// Add one side wall of an extrusion, swept from the edge `a`–`b`. Where a face already
+    /// lies in the wall's plane on the far side of that edge (a board's side, when pushing or
+    /// pulling part of its top flush with it), the wall belongs to that face: a push cuts the
+    /// wall's area out of it (a rabbet or notch), a pull extends it.
+    fn add_wall(&mut self, quad: [DVec3; 4], a: DVec3, b: DVec3, removing: bool) {
+        let normal = newell_normal(&quad).normalize();
+        let edge_ab = |m: &Self| m.find_edge(m.vertex_at(a)?, m.vertex_at(b)?);
+        let flush = edge_ab(self).and_then(|edge| {
+            self.edge_faces(edge).into_iter().find(|&f| {
+                self.face(f).is_some_and(|f| {
+                    f.normal.dot(normal).abs() > 1.0 - 1e-9 && (self.vertex(f.outer[0]) - a).dot(normal).abs() <= EPS
+                })
+            })
+        });
+        let Some(side) = flush else {
+            self.add_face(&quad);
+            return;
+        };
+        let side_normal = self.face(side).expect("found above").normal;
+        // Draw the wall's other three edges onto the side's plane; that splits the side (push)
+        // or closes a new face beside it (pull).
+        for i in 1..4 {
+            self.add_line(quad[i], quad[(i + 1) % 4]);
+        }
+        let center = quad.iter().sum::<DVec3>() / 4.0;
+        let in_plane = |f: &crate::Face| {
+            f.normal.dot(normal).abs() > 1.0 - 1e-9 && (self.vertex(f.outer[0]) - center).dot(normal).abs() <= EPS
+        };
+        let Some((wall, _)) = self.faces().find(|(_, f)| in_plane(f) && self.face_contains(f, center)) else {
+            return;
+        };
+        if removing {
+            self.remove_face(wall);
+        } else {
+            if self.face(wall).is_some_and(|f| f.normal.dot(side_normal) < 0.0) {
+                self.reverse_face(wall);
+            }
+            if let Some(edge) = edge_ab(self) {
+                self.merge_across(edge);
+            }
         }
     }
 }
@@ -272,6 +334,43 @@ mod tests {
         // Base + cap + 4 outer walls + 4 hole walls.
         assert_eq!(model.faces().count(), 10);
         assert!((volume(&model) - 3.0 * 96.0).abs() < 1e-6, "{}", volume(&model));
+    }
+
+    /// A 10 x 4 x 2 board with a line across its top at x = 8; returns the top's end piece.
+    fn board_with_split_top(model: &mut Model) -> FaceId {
+        let base = model.add_rectangle(DVec3::ZERO, DVec3::X * 10.0, DVec3::Y * 4.0, DVec3::Z).unwrap();
+        model.push_pull(base, 2.0).unwrap();
+        model.add_line(DVec3::new(8.0, 0.0, 2.0), DVec3::new(8.0, 4.0, 2.0));
+        model
+            .faces()
+            .find(|(_, f)| f.normal.z > 0.5 && model.loop_points(&f.outer).iter().all(|p| p.x >= 8.0 - 1e-9))
+            .map(|(id, _)| id)
+            .unwrap()
+    }
+
+    #[test]
+    fn pushing_part_of_a_top_down_cuts_a_rabbet() {
+        let mut model = Model::default();
+        let end = board_with_split_top(&mut model);
+        model.push_pull(end, -1.0).unwrap();
+        assert!((volume(&model) - (80.0 - 8.0)).abs() < 1e-6, "{}", volume(&model));
+        // Bottom, notched front and back, two ends (one now shorter), the top's rest, the
+        // rabbet's shoulder and floor; no holes patched over.
+        assert_eq!(model.faces().count(), 8);
+        assert!(model.faces().all(|(_, f)| f.holes.is_empty()));
+        // An L-shaped prism: two 6-sided ends and 6 edges between them, nothing left over.
+        assert_eq!(model.edges().count(), 18);
+    }
+
+    #[test]
+    fn pulling_part_of_a_top_up_extends_the_sides() {
+        let mut model = Model::default();
+        let end = board_with_split_top(&mut model);
+        model.push_pull(end, 1.0).unwrap();
+        assert!((volume(&model) - (80.0 + 8.0)).abs() < 1e-6, "{}", volume(&model));
+        // Front, back and end each grew into one face; plus bottom, both tops and the step.
+        assert_eq!(model.faces().count(), 8);
+        assert!(model.faces().all(|(_, f)| f.holes.is_empty()));
     }
 
     #[test]

@@ -1,6 +1,7 @@
 //! Tools and their state machines, independent of the UI toolkit. The UI translates pointer and
 //! keyboard input into calls on [`Tools`], and draws what [`Tools::overlay`] returns.
 
+mod line;
 pub mod pick;
 mod move_tool;
 mod paint;
@@ -14,6 +15,7 @@ use sketchcraft_doc::Document;
 use sketchcraft_view::OrbitCamera;
 
 pub use pick::{Snap, SnapKind};
+use line::LineTool;
 use pick::Screen;
 use move_tool::MoveTool;
 use paint::PaintTool;
@@ -123,6 +125,7 @@ impl ToolId {
         matches!(
             self,
             Self::Select
+                | Self::Line
                 | Self::Rectangle
                 | Self::PushPull
                 | Self::Move
@@ -312,6 +315,7 @@ const ZOOM_DRAG_POINTS_PER_STEP: f32 = 25.0;
 pub struct Tools {
     active: ToolId,
     select: SelectTool,
+    line: LineTool,
     rectangle: RectangleTool,
     push_pull: PushPullTool,
     move_tool: MoveTool,
@@ -334,6 +338,7 @@ impl Default for Tools {
         Self {
             active: ToolId::Select,
             select: SelectTool::default(),
+            line: LineTool::default(),
             rectangle: RectangleTool::default(),
             push_pull: PushPullTool::default(),
             move_tool: MoveTool::default(),
@@ -407,6 +412,7 @@ impl Tools {
         self.typed.clear();
         self.message = None;
         self.select.cancel();
+        self.line.cancel();
         self.rectangle.cancel();
         self.push_pull.cancel();
         self.move_tool.cancel();
@@ -457,6 +463,19 @@ impl Tools {
                 self.select.drag_end(doc, screen, pos, mods);
                 Ok(())
             }
+            (ToolId::Line, PointerEvent::Move(pos) | PointerEvent::Drag { pos, .. }) => {
+                self.line.hover(doc, screen, pos);
+                Ok(())
+            }
+            (ToolId::Line, PointerEvent::Click { pos, .. }) => {
+                self.typed.clear();
+                self.line.click(doc, screen, pos)
+            }
+            (ToolId::Line, PointerEvent::DragStart { origin }) => {
+                self.line.drag_start(doc, screen, origin);
+                Ok(())
+            }
+            (ToolId::Line, PointerEvent::DragEnd { pos, .. }) => self.line.drag_end(doc, screen, pos),
             (ToolId::Rectangle, PointerEvent::Move(pos) | PointerEvent::Drag { pos, .. }) => {
                 self.rectangle.hover(doc, screen, pos);
                 Ok(())
@@ -527,6 +546,7 @@ impl Tools {
     /// Arrow keys lock drawing and moving to an axis (pressing again unlocks).
     pub fn lock_axis(&mut self, axis: Axis) {
         match self.active {
+            ToolId::Line => self.line.lock_axis(axis),
             ToolId::Move => self.move_tool.lock_axis(axis),
             ToolId::Rotate => self.rotate.lock_axis(axis),
             _ => {}
@@ -560,6 +580,7 @@ impl Tools {
             return;
         }
         let result = match self.active {
+            ToolId::Line => self.line.enter(doc, &typed),
             ToolId::Rectangle => self.rectangle.enter(doc, &typed),
             ToolId::PushPull => self.push_pull.enter(doc, &typed),
             ToolId::Move if self.grip_active() => self.rotate.enter(doc, &typed),
@@ -576,6 +597,7 @@ impl Tools {
     /// close the group being edited.
     pub fn escape(&mut self, doc: &mut Document) {
         let busy = self.select.is_busy()
+            || self.line.is_busy()
             || self.rectangle.is_busy()
             || self.push_pull.is_busy()
             || self.move_tool.is_busy()
@@ -628,6 +650,7 @@ impl Tools {
             ToolId::Select => "Select objects. Ctrl adds, Shift toggles, Ctrl+Shift removes. \
                                Drag right for window, left for crossing selection."
                 .into(),
+            ToolId::Line => self.line.status().into(),
             ToolId::Rectangle => self.rectangle.status().into(),
             ToolId::PushPull => self.push_pull.status().into(),
             ToolId::Move if self.rotate.is_busy() => self.rotate.status(),
@@ -645,6 +668,7 @@ impl Tools {
         match self.active {
             ToolId::Rectangle => "Dimensions",
             ToolId::Move if self.grip_active() => "Angle",
+            ToolId::Line => "Length",
             ToolId::PushPull | ToolId::Move => "Distance",
             ToolId::Rotate => "Angle",
             _ => "Measurements",
@@ -657,6 +681,7 @@ impl Tools {
             return self.typed.clone();
         }
         match self.active {
+            ToolId::Line => self.line.measurement(),
             ToolId::Rectangle => self.rectangle.measurement(),
             ToolId::PushPull => self.push_pull.measurement(),
             ToolId::Move if self.grip_active() => self.rotate.measurement(),
@@ -671,6 +696,7 @@ impl Tools {
         let mut overlay = Overlay::default();
         match self.active {
             ToolId::Select => self.select.overlay(&mut overlay),
+            ToolId::Line => self.line.overlay(&mut overlay),
             ToolId::Rectangle => self.rectangle.overlay(&mut overlay),
             ToolId::PushPull => self.push_pull.overlay(doc.model(), &mut overlay),
             ToolId::Move if self.rotate.is_busy() => self.rotate.overlay(doc, &mut overlay),
@@ -704,7 +730,7 @@ mod tests {
     #[test]
     fn unavailable_tools_explain_instead_of_switching() {
         let mut tools = Tools::default();
-        tools.activate(ToolId::Line);
+        tools.activate(ToolId::Offset);
         assert_eq!(tools.active(), ToolId::Select);
         assert!(tools.status().contains("coming soon"));
         tools.activate(ToolId::Rectangle);

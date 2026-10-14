@@ -7,16 +7,21 @@ each section. Remove items when they're done (mention them in the commit).
 - **Auto-joining**: moved or copied geometry doesn't merge with geometry it lands on (shared
   vertices/edges aren't welded). Fine while boards should stay separate; revisit with groups.
 - **Coplanar face merging**: two faces on one plane that share an edge stay separate (a seam
-  edge remains, e.g. boards glued end to end, or a block pulled flush with a side).
+  edge remains, e.g. boards glued end to end). Erasing the seam merges them, and Push/Pull
+  merges walls flush with a side, but nothing merges automatically otherwise.
 - **Partial overlaps**: a rectangle that partly overlaps a coplanar face doesn't split it;
-  the two faces overlap and z-fight. Needs real face splitting (with the Line tool).
-- **Pockets at an edge**: a pocket whose wall is flush with an existing side face doesn't cut
-  a notch into that face.
-- **Line tool and edge-splits-face**: drawing an edge across a face should split it.
+  the two faces overlap and z-fight. `Model::add_line` splits faces now; route the Rectangle
+  tool through it (four lines) instead of `add_face`.
+- **Collinear leftovers**: merging faces (erasing a splitting line, pulling part of a top up
+  flush with a side) keeps the extra vertex where an edge was split; SketchUp heals those.
 - **Move can't bend faces**: SketchUp folds a face that would become non-planar (adds a
   diagonal); we refuse the move instead.
 
 ## Inference / snapping
+- Line tool: no parallel/perpendicular-to-edge inference and no "from point" alignment; a
+  typed length can't be changed after the line is drawn.
+- Faces closed from loose lines face up, else toward the front, else to the right; SketchUp
+  orients them to match connected faces. No Reverse Faces command yet.
 - Parallel / perpendicular inference, "from point" (dotted alignment to a hovered point),
   and Shift to lock the current inference.
 - Rectangle: square and golden-ratio diagonal hints; drawing rectangles off the axes.

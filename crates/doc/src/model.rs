@@ -1,8 +1,9 @@
 //! Loose geometry, as in SketchUp: vertices, edges, and planar faces bounded by edges.
 //!
 //! Units are inches. Edges are shared between the faces they bound. A face drawn inside an
-//! existing coplanar face is cut into it as a hole, the way SketchUp does. Not handled yet:
-//! faces that partially overlap, and edges that split faces (both arrive with the Line tool).
+//! existing coplanar face is cut into it as a hole, the way SketchUp does. Lines that split
+//! faces and loops that close into faces live in `lines.rs`. Not handled yet: faces that
+//! partially overlap when added whole with `add_face`.
 use serde::{Deserialize, Serialize};
 
 use std::collections::BTreeSet;
@@ -163,13 +164,14 @@ impl Model {
         }
     }
 
+    /// The vertex within [`EPS`] of `point`, if any.
+    pub fn vertex_at(&self, point: DVec3) -> Option<VertexId> {
+        self.vertices().find(|(_, q)| q.distance_squared(point) <= EPS * EPS).map(|(id, _)| id)
+    }
+
     /// The vertex at `point`, creating it if none is within [`EPS`].
     pub fn add_vertex(&mut self, point: DVec3) -> VertexId {
-        let existing = self.vertices().find(|(_, q)| q.distance_squared(point) <= EPS * EPS);
-        match existing {
-            Some((id, _)) => id,
-            None => VertexId(self.vertices.insert(point)),
-        }
+        self.vertex_at(point).unwrap_or_else(|| VertexId(self.vertices.insert(point)))
     }
 
     pub fn find_edge(&self, a: VertexId, b: VertexId) -> Option<EdgeId> {
@@ -253,6 +255,43 @@ impl Model {
         self.faces.remove(id.0)
     }
 
+    pub(crate) fn insert_face(&mut self, face: Face) -> FaceId {
+        FaceId(self.faces.insert(face))
+    }
+
+    /// Give a live face new contents, keeping its id.
+    pub(crate) fn replace_face(&mut self, id: FaceId, face: Face) {
+        if let Some(slot) = self.faces.get_mut(id.0) {
+            *slot = face;
+        }
+    }
+
+    /// Remove just the edge, leaving faces and vertices alone.
+    pub(crate) fn remove_edge(&mut self, id: EdgeId) -> Option<Edge> {
+        self.edges.remove(id.0)
+    }
+
+    /// Split an edge at `point` (on it), keeping the faces it bounds whole: the new vertex is
+    /// inserted into their loops. Returns the vertex at `point`.
+    pub(crate) fn split_edge(&mut self, id: EdgeId, point: DVec3) -> Option<VertexId> {
+        let edge = *self.edge(id)?;
+        let v = self.add_vertex(point);
+        if v == edge.a || v == edge.b {
+            return Some(v);
+        }
+        self.edges.remove(id.0);
+        self.add_edge(edge.a, v);
+        self.add_edge(v, edge.b);
+        for face in self.faces.iter_mut() {
+            for l in std::iter::once(&mut face.outer).chain(face.holes.iter_mut()) {
+                if let Some(i) = (0..l.len()).find(|&i| edge.connects(l[i], l[(i + 1) % l.len()])) {
+                    l.insert(i + 1, v);
+                }
+            }
+        }
+        Some(v)
+    }
+
     /// Flip a face so its back becomes its front.
     pub fn reverse_face(&mut self, id: FaceId) {
         if let Some(face) = self.faces.get_mut(id.0) {
@@ -316,9 +355,18 @@ impl Model {
     }
 
     /// Erase entities. Erasing an edge also erases the faces it bounds, and heals any hole it
-    /// cut (SketchUp behavior). Vertices left without edges are removed.
+    /// cut (SketchUp behavior), except that an edge between two coplanar faces merges them.
+    /// Vertices left without edges are removed.
     pub fn erase(&mut self, entities: impl IntoIterator<Item = Entity>) {
+        // Faces first, so an erased edge between two erased faces doesn't merge them.
+        let mut entities: Vec<Entity> = entities.into_iter().collect();
+        entities.sort_by_key(|e| !matches!(e, Entity::Face(_)));
         for entity in entities {
+            if let Entity::Edge(id) = entity
+                && self.merge_across(id)
+            {
+                continue;
+            }
             match entity {
                 // Instances live in the container, not the model.
                 Entity::Instance(_) => {}
@@ -426,7 +474,7 @@ impl Model {
 }
 
 /// Whether two loops use the same vertices (in any order or direction).
-fn same_loop(a: &[VertexId], b: &[VertexId]) -> bool {
+pub(crate) fn same_loop(a: &[VertexId], b: &[VertexId]) -> bool {
     a.len() == b.len() && a.iter().collect::<BTreeSet<_>>() == b.iter().collect::<BTreeSet<_>>()
 }
 
@@ -461,13 +509,13 @@ fn projector(normal: DVec3) -> impl Fn(DVec3) -> DVec2 {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Location {
+pub(crate) enum Location {
     Inside,
     OnBoundary,
     Outside,
 }
 
-fn locate(p: DVec2, polygon: &[DVec2]) -> Location {
+pub(crate) fn locate(p: DVec2, polygon: &[DVec2]) -> Location {
     let mut inside = false;
     for (i, &a) in polygon.iter().enumerate() {
         let b = polygon[(i + 1) % polygon.len()];

@@ -15,7 +15,7 @@ goes through Trimble's official SketchUp C SDK.
   `Document` (scene + editing path, selection, snapshot undo/redo, version counters), `units` (Measurements-box parsing and
   fractional-inch formatting).
 - `crates/tools`: toolkit-independent tools (`Tools`, `ToolId` with SketchUp shortcuts),
-  picking and endpoint snapping (`pick`), Select and Rectangle state machines. The UI sends
+  picking, snapping and axis inference (`pick`), and one state machine per tool. The UI sends
   `PointerEvent`s and keystrokes; tools return an `Overlay` to draw.
 - `crates/render`: wgpu renderer. Draws into an offscreen MSAA texture that the UI shows as
   an egui image (own depth buffer, independent of egui's pass). Grid is a no-depth-write pass
@@ -84,4 +84,10 @@ add it there; when you finish an item, remove it.
    guillotine packing, grain-aware; lumber: smallest standard section, 1D packing over each
    stock length, boards split when shorter ones cost no more). Cut List window (toolbar): Parts,
    Cutting diagrams with shopping list, Stock & kerf settings.
-12. Line tool and face splitting, Offset, Circle, Tape Measure + guides; OBJ/STL export (see backlog)
+12. Line tool and face splitting (done): `doc::lines` (`Model::add_line` splits crossed edges;
+   faces are rebuilt per plane from the planar graph, so a line across a face splits it, a loop
+   on a face or closed in free space makes a face, and erasing a seam merges coplanar faces).
+   Push/Pull cuts a rabbet or notch when a wall is flush with a side face (and extends that
+   side when pulling). Line tool (L): chains points, axis inference and arrow locks, typed
+   lengths or `x,y,z`; ends when a face forms, on a repeated click, or with Esc.
+13. Offset, Circle, Tape Measure + guides; OBJ/STL export (see backlog)

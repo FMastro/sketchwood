@@ -14,11 +14,8 @@ use glam::{DAffine3, DVec3, Vec2};
 use sketchcraft_doc::units::{format_length, parse_length, parse_lengths};
 use sketchcraft_doc::{Document, EPS, Entity, Model, VertexId};
 
-use crate::pick::{Screen, Snap, closest_on_line, snap_feature};
+use crate::pick::{Screen, Snap, closest_on_line, infer_axis, snap_feature};
 use crate::{Array, Axis, Guide, Overlay, Protractor, highlight_entity, parse_array, pick_resolved};
-
-/// How close, in points, the cursor must come to an axis line to lock onto it.
-const AXIS_RADIUS: f32 = 14.0;
 
 /// How close, in points, the cursor must be to a rotation grip.
 const GRIP_RADIUS: f32 = 9.0;
@@ -304,15 +301,7 @@ impl MoveTool {
         if let Some(s) = snap {
             return (s.point, None, Some(s));
         }
-        let inferred = Axis::ALL
-            .into_iter()
-            .filter_map(|axis| {
-                let point = base + axis.dir() * closest_on_line(base, axis.dir(), &ray)?;
-                let distance = screen.project(point)?.distance(cursor);
-                (distance < AXIS_RADIUS).then_some((distance, point, axis))
-            })
-            .min_by(|a, b| a.0.total_cmp(&b.0));
-        if let Some((_, point, axis)) = inferred {
+        if let Some((point, axis)) = infer_axis(screen, base, cursor) {
             return (point, Some(axis), None);
         }
         let free = ray
@@ -463,7 +452,7 @@ fn grip_at(grips: &Grips, screen: Screen<'_>, cursor: Vec2) -> Option<(usize, us
 
 /// A typed move: a length along `current`'s direction (negative reverses), a relative vector
 /// `x,y,z` or `<x,y,z>`, or an absolute position `[x,y,z]` relative to `base`.
-fn parse_offset(typed: &str, current: DVec3, base: DVec3) -> Result<DVec3, String> {
+pub(crate) fn parse_offset(typed: &str, current: DVec3, base: DVec3) -> Result<DVec3, String> {
     let t = typed.trim();
     let vector = |inner: &str| -> Result<DVec3, String> {
         let values = parse_lengths(inner).map_err(|e| e.to_string())?;

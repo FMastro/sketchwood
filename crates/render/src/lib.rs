@@ -13,10 +13,12 @@ use wgpu::util::DeviceExt;
 pub const OUTPUT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const SAMPLE_COUNT: u32 = 4;
-/// Size of the `Globals` uniform: a 4x4 matrix plus one vec4 (the eye position).
-const GLOBALS_SIZE: u64 = 80;
+/// Size of the `Globals` uniform: the view-projection matrix, the eye position (a vec4) and the
+/// inverse view-projection matrix.
+const GLOBALS_SIZE: u64 = 144;
 
 pub struct ViewportRenderer {
+    sky_pipeline: wgpu::RenderPipeline,
     background_line_pipeline: wgpu::RenderPipeline,
     line_pipeline: wgpu::RenderPipeline,
     face_pipeline: wgpu::RenderPipeline,
@@ -116,6 +118,7 @@ impl ViewportRenderer {
 
         let [r, g, b, _] = srgb(250, 250, 250);
         Self {
+            sky_pipeline: create_sky_pipeline(device, &layout, &shader),
             background_line_pipeline,
             line_pipeline,
             face_pipeline,
@@ -153,9 +156,10 @@ impl ViewportRenderer {
         }
         let targets = self.targets.as_ref().expect("targets were just created");
 
-        let mut globals = [0.0_f32; 20];
+        let mut globals = [0.0_f32; 36];
         globals[..16].copy_from_slice(&view_proj.to_cols_array());
         globals[16..19].copy_from_slice(&eye.to_array());
+        globals[20..36].copy_from_slice(&view_proj.inverse().to_cols_array());
         queue.write_buffer(&self.globals, 0, bytemuck::cast_slice(&globals));
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -186,6 +190,8 @@ impl ViewportRenderer {
                 multiview_mask: None,
             });
             pass.set_bind_group(0, &self.bind_group, &[]);
+            pass.set_pipeline(&self.sky_pipeline);
+            pass.draw(0..3, 0..1);
             for (pipeline, buffer) in [
                 (&self.background_line_pipeline, &self.background_lines),
                 (&self.face_pipeline, &self.faces),
@@ -318,6 +324,41 @@ fn create_pipeline(
         fragment: Some(wgpu::FragmentState {
             module: shader,
             entry_point: Some(spec.fragment_entry),
+            compilation_options: Default::default(),
+            targets: &[Some(OUTPUT_FORMAT.into())],
+        }),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
+/// The sky: one screen-covering triangle from the vertex index, behind everything.
+fn create_sky_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    shader: &wgpu::ShaderModule,
+) -> wgpu::RenderPipeline {
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("viewport sky"),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: Some("vs_sky"),
+            compilation_options: Default::default(),
+            buffers: &[],
+        },
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(wgpu::CompareFunction::Always),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+        multisample: wgpu::MultisampleState { count: SAMPLE_COUNT, ..Default::default() },
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: Some("fs_sky"),
             compilation_options: Default::default(),
             targets: &[Some(OUTPUT_FORMAT.into())],
         }),

@@ -16,7 +16,6 @@ pub struct TagsPanel {
 impl TagsPanel {
     pub fn show(&mut self, ui: &mut egui::Ui, doc: &mut Document) {
         ui.horizontal(|ui| {
-            ui.heading("Tags");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button(ph::PLUS).on_hover_text("Add a tag").clicked() {
                     let tag = doc.add_tag();
@@ -84,7 +83,6 @@ impl TagsPanel {
 
 /// SketchUp's Entity Info, for now just the tag of the selected groups and components.
 pub fn entity_info(ui: &mut egui::Ui, doc: &mut Document, tools: &mut Tools) {
-    ui.heading("Entity Info");
     let count = doc.selection().len();
     if count == 0 {
         ui.weak("Nothing selected.");

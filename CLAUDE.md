@@ -18,13 +18,16 @@ goes through Trimble's official SketchUp C SDK.
   picking, snapping and axis inference (`pick`), and one state machine per tool. The UI sends
   `PointerEvent`s and keystrokes; tools return an `Overlay` to draw.
 - `crates/render`: wgpu renderer. Draws into an offscreen MSAA texture that the UI shows as
-  an egui image (own depth buffer, independent of egui's pass). Grid is a no-depth-write pass
+  an egui image (own depth buffer, independent of egui's pass). A sky pass (gradient above the
+  horizon, plain ground below) comes first. The optional grid (View > Grid) is a no-depth-write pass
   under faces; front/back face colors chosen per fragment from the eye position.
-- `crates/ui-egui`: window, toolbar, status bar, Measurements box, keyboard routing
-  (`keys.rs`), viewport input and overlays. `tests/workflow.rs` drives the real app headlessly
-  with `egui_kittest` (set `SKETCHCRAFT_SNAPSHOT_DIR` to save rendered PNGs).
+- `crates/ui-egui`: the window. `chrome.rs` lays it out like SketchUp on Windows (menu bar,
+  toolbar, Large Tool Set on the left, Default Tray on the right, status bar with the
+  Measurements box; light theme) so it reads as SketchUp's spiritual successor, without its
+  branding or artwork. Keyboard routing (`keys.rs`), viewport input and overlays
+  (`viewport.rs`). `tests/workflow.rs` drives the real app headlessly with `egui_kittest` (set
+  `SKETCHCRAFT_SNAPSHOT_DIR` to save rendered PNGs).
 - `apps/sketchcraft`: the binary.
-- Planned: groups/components, tags and materials in `doc`; more tools in `tools`.
 
 Keep logic out of `ui-egui`: anything testable belongs in a plain crate.
 

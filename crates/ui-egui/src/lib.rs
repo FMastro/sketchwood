@@ -1,5 +1,6 @@
-//! The SketchCraft window: toolbar, 3D viewport, status bar and Measurements box.
+//! The SketchCraft window: a 3D viewport inside SketchUp-style chrome (`chrome.rs`).
 
+mod chrome;
 mod cutlist;
 mod files;
 mod icons;
@@ -13,8 +14,7 @@ use std::path::{Path, PathBuf};
 
 use eframe::egui;
 use sketchcraft_doc::Document;
-use sketchcraft_tools::{ToolId, Tools};
-use sketchcraft_view::StandardView;
+use sketchcraft_tools::Tools;
 use viewport::Viewport;
 
 pub struct SketchCraftApp {
@@ -26,6 +26,8 @@ pub struct SketchCraftApp {
     viewport: Viewport,
     files: files::Files,
     cut_list: cutlist::CutListWindow,
+    show_tray: bool,
+    show_about: bool,
 }
 
 impl SketchCraftApp {
@@ -35,6 +37,7 @@ impl SketchCraftApp {
             .as_ref()
             .expect("SketchCraft needs eframe's wgpu renderer");
         icons::install(&cc.egui_ctx);
+        cc.egui_ctx.set_visuals(chrome::visuals());
         Self {
             doc: Document::default(),
             tools: Tools::default(),
@@ -44,6 +47,8 @@ impl SketchCraftApp {
             viewport: Viewport::new(render_state),
             files: files::Files::default(),
             cut_list: cutlist::CutListWindow::default(),
+            show_tray: true,
+            show_about: false,
         }
     }
 
@@ -129,54 +134,6 @@ impl SketchCraftApp {
         }
     }
 
-    fn file_menu(&mut self, ui: &mut egui::Ui) {
-        let ctx = ui.ctx().clone();
-        ui.menu_button("File", |ui| {
-            if ui.add(egui::Button::new("New").shortcut_text("Ctrl+N")).clicked() {
-                ui.close();
-                self.request(&ctx, files::Discard::New);
-            }
-            if ui.add(egui::Button::new("Open...").shortcut_text("Ctrl+O")).clicked() {
-                ui.close();
-                self.request(&ctx, files::Discard::Open);
-            }
-            ui.separator();
-            if ui.add(egui::Button::new("Save").shortcut_text("Ctrl+S")).clicked() {
-                ui.close();
-                self.save(false);
-            }
-            if ui.add(egui::Button::new("Save As...").shortcut_text("Ctrl+Shift+S")).clicked() {
-                ui.close();
-                self.save(true);
-            }
-            ui.separator();
-            if ui.button("Exit").clicked() {
-                ui.close();
-                self.request(&ctx, files::Discard::Close);
-            }
-        });
-    }
-
-    fn edit_menu(&mut self, ui: &mut egui::Ui) {
-        ui.menu_button("Edit", |ui| {
-            if ui.add(egui::Button::new("Undo").shortcut_text("Ctrl+Z")).clicked() {
-                ui.close();
-                self.tools.cancel();
-                self.doc.undo();
-            }
-            if ui.add(egui::Button::new("Redo").shortcut_text("Ctrl+Y")).clicked() {
-                ui.close();
-                self.tools.cancel();
-                self.doc.redo();
-            }
-            ui.separator();
-            if ui.button("Delete Guides").clicked() {
-                ui.close();
-                self.tools.delete_guides(&mut self.doc);
-            }
-        });
-    }
-
     /// The File menu's shortcuts and dialogs, and the window title.
     fn handle_files(&mut self, ctx: &egui::Context) {
         if ctx.input(|i| i.viewport().close_requested()) {
@@ -241,126 +198,17 @@ impl eframe::App for SketchCraftApp {
             self.keyboard.handle(&ctx, &mut self.doc, &mut self.tools, &mut self.viewport);
         }
 
-        egui::Panel::top("toolbar").show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing.x = 2.0;
-                self.file_menu(ui);
-                self.edit_menu(ui);
-                ui.separator();
-                for (i, group) in TOOL_GROUPS.iter().enumerate() {
-                    if i > 0 {
-                        ui.separator();
-                    }
-                    for &tool in *group {
-                        let hint = format!("{} ({})", tool.name(), tool.shortcut_label());
-                        let hint = if tool.is_available() { hint } else { format!("{hint}: coming soon") };
-                        let selected = self.tools.active() == tool;
-                        if icon_button(ui, icons::tool(tool), selected, tool.is_available(), &hint) {
-                            self.tools.activate(tool);
-                        }
-                    }
-                }
-                if icon_button(ui, icons::ZOOM_EXTENTS, false, true, "Zoom Extents (Shift+Z)") {
-                    self.viewport.request_zoom_extents();
-                }
-                ui.separator();
-                for (label, view) in [
-                    (format!("{} Iso", icons::ISO), StandardView::Iso),
-                    ("Top".into(), StandardView::Top),
-                    ("Front".into(), StandardView::Front),
-                    ("Right".into(), StandardView::Right),
-                ] {
-                    let response = ui.add(egui::Button::new(label).min_size(egui::vec2(0.0, BUTTON_SIZE)));
-                    if response.clicked() {
-                        response.surrender_focus();
-                        self.viewport.camera.set_view(view);
-                    }
-                }
-                ui.separator();
-                let open = self.cut_list.open;
-                if icon_button(ui, icons::CUT_LIST, open, true, "Cut List: parts and cutting diagrams") {
-                    self.cut_list.open = !open;
-                }
-                ui.separator();
-                if icon_button(ui, icons::UNDO, false, true, "Undo (Ctrl+Z)") {
-                    self.tools.cancel();
-                    self.doc.undo();
-                }
-                if icon_button(ui, icons::REDO, false, true, "Redo (Ctrl+Y)") {
-                    self.tools.cancel();
-                    self.doc.redo();
-                }
-            });
-        });
-
-        egui::Panel::bottom("status").show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    measurements_box(ui, &self.tools);
-                    ui.label(self.tools.measurement_label());
-                    ui.separator();
-                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                        ui.add(egui::Label::new(self.tools.status()).truncate());
-                    });
-                });
-            });
-        });
-
-        egui::Panel::left("sidebar").default_size(210.0).show(ui, |ui| {
-            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                outliner::show(ui, &mut self.doc, &mut self.tools);
-                ui.separator();
-                self.tags.show(ui, &mut self.doc);
-                ui.separator();
-                self.materials.show(ui, &mut self.doc, &mut self.tools);
-                ui.separator();
-                tags::entity_info(ui, &mut self.doc, &mut self.tools);
-            });
-        });
+        // Panels claim space in order: bars across the top and bottom, then the sides.
+        self.menu_bar(ui);
+        self.toolbar(ui);
+        self.status_bar(ui);
+        self.tool_set(ui);
+        self.tray(ui);
 
         self.cut_list.show(&ctx, &self.doc);
+        self.about_window(&ctx);
 
         egui::CentralPanel::no_frame()
             .show(ui, |ui| self.viewport.show(ui, frame, &mut self.doc, &mut self.tools));
     }
-}
-
-const BUTTON_SIZE: f32 = 32.0;
-
-/// Toolbar groups, ordered like SketchUp's Large Tool Set.
-const TOOL_GROUPS: &[&[ToolId]] = &[
-    &[ToolId::Select, ToolId::Eraser, ToolId::PaintBucket],
-    &[ToolId::Line, ToolId::Arc, ToolId::Rectangle, ToolId::Circle],
-    &[ToolId::PushPull, ToolId::Move, ToolId::Rotate, ToolId::Scale, ToolId::Offset],
-    &[ToolId::TapeMeasure],
-    &[ToolId::Orbit, ToolId::Pan, ToolId::Zoom],
-];
-
-/// A square icon button with a tooltip. Returns whether it was clicked.
-fn icon_button(ui: &mut egui::Ui, icon: &str, selected: bool, enabled: bool, hint: &str) -> bool {
-    let button = egui::Button::selectable(selected, egui::RichText::new(icon).size(20.0))
-        .min_size(egui::vec2(BUTTON_SIZE, BUTTON_SIZE));
-    let response = ui.add_enabled(enabled, button);
-    let response = if enabled { response.on_hover_text(hint) } else { response.on_disabled_hover_text(hint) };
-    if response.clicked() {
-        // Don't keep keyboard focus, or Space would press the button again.
-        response.surrender_focus();
-        return true;
-    }
-    false
-}
-
-/// SketchUp's Measurements box: shows live values, and whatever is being typed.
-fn measurements_box(ui: &mut egui::Ui, tools: &Tools) {
-    let text = tools.measurement();
-    let color = if tools.is_typing() { ui.visuals().strong_text_color() } else { ui.visuals().text_color() };
-    egui::Frame::new()
-        .fill(ui.visuals().extreme_bg_color)
-        .stroke(ui.visuals().widgets.inactive.bg_stroke)
-        .corner_radius(3.0)
-        .inner_margin(egui::Margin::symmetric(6, 2))
-        .show(ui, |ui| {
-            ui.set_min_width(150.0);
-            ui.label(egui::RichText::new(text).monospace().color(color));
-        });
 }

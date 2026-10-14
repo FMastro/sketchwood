@@ -20,7 +20,6 @@ pub struct MaterialsPanel {
 impl MaterialsPanel {
     pub fn show(&mut self, ui: &mut egui::Ui, doc: &mut Document, tools: &mut Tools) {
         ui.horizontal(|ui| {
-            ui.heading("Materials");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.menu_button(ph::PLUS, |ui| {
                     for kind in MaterialKind::ALL {

@@ -7,7 +7,6 @@ use sketchcraft_doc::{DefinitionKind, Document, Entity};
 use sketchcraft_tools::Tools;
 
 pub fn show(ui: &mut egui::Ui, doc: &mut Document, tools: &mut Tools) {
-    ui.heading("Outliner");
     breadcrumb(ui, doc, tools);
     ui.separator();
 

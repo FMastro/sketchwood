@@ -80,6 +80,13 @@ each section. Remove items when they're done (mention them in the commit).
 - No export yet (OBJ, glTF, STL) and no .skp import.
 
 ## UI
+- Layout follows SketchUp's Windows defaults (menu bar, toolbar, Large Tool Set, Default Tray,
+  Measurements at bottom right), but toolbars can't be moved or customized and tray panels
+  can't be reordered or undocked. No Components, Styles or Scenes panels yet.
+- No right-click context menus (SketchUp's Entity menu: Make Group, Explode, Reverse Faces...).
+- Standard views: Iso, Top, Front and Right only (no Back, Left, Bottom); no Parallel
+  Projection toggle; tool cursors are the system arrow rather than per-tool icons.
+- Sky and ground colors are fixed (SketchUp's Styles panel edits them).
 - Keyboard focus never stays on buttons (it would swallow shortcuts and re-press the button
   on Space/Enter), so Tab-navigation between widgets isn't available.
 

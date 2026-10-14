@@ -35,12 +35,12 @@ fn line_vertex(p: Vec3, color: Color) -> LineVertex {
 }
 
 impl Scene {
-    /// The ground grid (12" spacing) and SketchUp-colored axes.
-    pub fn reference() -> Self {
+    /// SketchUp-colored axes, and optionally a ground grid (12" spacing).
+    pub fn reference(grid: bool) -> Self {
         let mut scene = Self::default();
 
-        let grid = srgb(222, 222, 222);
-        let (spacing, half_count) = (12.0, 20);
+        let grid_color = srgb(222, 222, 222);
+        let (spacing, half_count) = (12.0, if grid { 20 } else { 0 });
         let extent = spacing * half_count as f32;
         for i in -half_count..=half_count {
             if i == 0 {
@@ -51,7 +51,7 @@ impl Scene {
                 (Vec3::new(o, -extent, 0.0), Vec3::new(o, extent, 0.0)),
                 (Vec3::new(-extent, o, 0.0), Vec3::new(extent, o, 0.0)),
             ] {
-                scene.background_lines.extend([line_vertex(a, grid), line_vertex(b, grid)]);
+                scene.background_lines.extend([line_vertex(a, grid_color), line_vertex(b, grid_color)]);
             }
         }
 

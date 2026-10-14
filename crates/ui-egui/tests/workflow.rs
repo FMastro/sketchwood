@@ -353,8 +353,8 @@ fn tag_a_board_and_hide_it_from_the_tags_panel() {
     board(&mut harness);
 
     // "+" adds a tag and starts renaming it.
-    // The first "+" is the Tags panel's (the Materials panel has one too).
-    harness.get_all_by_label(ph::PLUS).next().expect("Tags + button").click();
+    // The last "+" is the Tags panel's (the Materials panel above it has one too).
+    harness.get_all_by_label(ph::PLUS).last().expect("Tags + button").click();
     harness.run();
     harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
     type_text(&mut harness, "Legs");
@@ -400,8 +400,8 @@ fn paint_a_board_with_a_new_plywood_material() {
     board(&mut harness);
     let (lo, hi) = harness.state().document().bounds().unwrap();
 
-    // Materials' "+" (after the Tags panel's) opens a menu of material types.
-    harness.get_all_by_label(ph::PLUS).last().expect("Materials + button").click();
+    // Materials' "+" (above the Tags panel's) opens a menu of material types.
+    harness.get_all_by_label(ph::PLUS).next().expect("Materials + button").click();
     harness.run();
     harness.get_by_label("Sheet good").click();
     harness.run();
@@ -633,4 +633,27 @@ fn tape_a_guide_off_an_edge_then_draw_from_where_it_crosses() {
     harness.get_by_label("Delete Guides").click();
     harness.run();
     assert_eq!(harness.state().document().model().guides().count(), 0);
+}
+
+#[test]
+fn the_window_is_laid_out_like_sketchup() {
+    use egui_kittest::kittest::Queryable;
+    let mut harness = app();
+    for menu in ["File", "Edit", "View", "Camera", "Draw", "Tools", "Window", "Help"] {
+        assert!(harness.query_by_label(menu).is_some(), "{menu} menu");
+    }
+    for panel in ["Default Tray", "Entity Info", "Materials", "Tags", "Outliner", "Measurements"] {
+        assert!(harness.query_by_label_contains(panel).is_some(), "{panel}");
+    }
+    // Draw > Line activates the Line tool, like its L shortcut.
+    harness.get_by_label("Draw").click();
+    harness.run();
+    harness.get_by_label_contains("Line").click();
+    harness.run();
+    assert_eq!(harness.state().tools().active(), ToolId::Line);
+
+    // The front view shows the sky above the horizon.
+    harness.get_by_label("Front").click();
+    harness.run();
+    snapshot(&mut harness, "front_view");
 }

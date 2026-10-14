@@ -15,8 +15,10 @@ pub struct Viewport {
     pub camera: OrbitCamera,
     renderer: ViewportRenderer,
     texture: Option<egui::TextureId>,
-    /// The document version the renderer's scene was built from.
-    scene_version: Option<u64>,
+    /// The document version and grid setting the renderer's scene was built from.
+    scene_version: Option<(u64, bool)>,
+    /// The ground grid (View > Grid). SketchUp has none, so it starts off.
+    pub show_grid: bool,
     zoom_extents_pending: bool,
     last_hover: Option<Vec2>,
     /// Where the viewport was last laid out, in window points.
@@ -27,7 +29,8 @@ impl Viewport {
     pub fn new(render_state: &egui_wgpu::RenderState) -> Self {
         Self {
             camera: OrbitCamera::default(),
-            renderer: ViewportRenderer::new(&render_state.device, &Scene::reference()),
+            renderer: ViewportRenderer::new(&render_state.device, &Scene::reference(false)),
+            show_grid: false,
             texture: None,
             scene_version: None,
             zoom_extents_pending: false,
@@ -56,11 +59,12 @@ impl Viewport {
         }
 
         let Some(render_state) = frame.wgpu_render_state() else { return };
-        if self.scene_version != Some(doc.version()) {
-            let mut scene = Scene::reference();
+        let wanted = (doc.version(), self.show_grid);
+        if self.scene_version != Some(wanted) {
+            let mut scene = Scene::reference(self.show_grid);
             scene.add_view(doc.view(), doc.selection(), &doc.context_transform(), doc.scene());
             self.renderer.set_scene(&render_state.device, &scene);
-            self.scene_version = Some(doc.version());
+            self.scene_version = Some(wanted);
         }
         let pixels_per_point = ui.ctx().pixels_per_point();
         let physical = [

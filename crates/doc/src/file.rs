@@ -128,6 +128,15 @@ mod tests {
     }
 
     #[test]
+    fn coordinates_reload_bit_for_bit() {
+        let mut doc = Document::default();
+        let corner = DVec3::new(-1.9075752155031722, -11.711819318919822, 0.1 + 0.2);
+        doc.edit(|m| m.add_rectangle(corner, DVec3::X * 1.5, DVec3::Y * 3.5, DVec3::Z));
+        let loaded = Document::from_scene(from_str(&to_string(doc.scene())).unwrap());
+        assert_eq!(loaded.bounds(), doc.bounds());
+    }
+
+    #[test]
     fn the_file_is_readable_json_with_a_header() {
         let text = to_string(Document::default().scene());
         assert!(text.contains("\"format\": \"sketchcraft\""));

@@ -71,6 +71,9 @@ add it there; when you finish an item, remove it.
 8. Tags (done): on groups/components only (SketchUp best practice); hidden tags drop their
    instances from the `View` (not drawn, picked or snapped). Tags panel (add, rename,
    show/hide, delete → Untagged) and Entity Info tag picker in the left sidebar.
-9. Materials, with fields for OpenCutList-style cut lists (type, thickness, grain)
+9. Materials (done): `Material` (name, color, kind, grained, thickness) on instances and faces;
+   faces show their own paint, else the nearest painted group's (`View::face_material`). Paint
+   Bucket (B, Alt samples), Materials panel (clicking one activates the Paint Bucket), Entity
+   Info material picker. Material edits merge into one undo step (`edit_scene_merging`).
 10. Native save/load; OBJ/glTF export. Later: `.skp` import via the C SDK, cut lists.
 11. Line tool and face splitting, Offset, Circle, Tape Measure + guides (see backlog)

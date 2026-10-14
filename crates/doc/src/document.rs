@@ -4,7 +4,9 @@ use std::collections::BTreeSet;
 
 use glam::{DAffine3, DVec3};
 
-use crate::scene::{Container, DefinitionKind, Instance, InstanceId, Scene, TagId, View};
+use crate::scene::{
+    Container, DefinitionKind, Instance, InstanceId, Material, MaterialId, MaterialKind, Scene, TagId, View,
+};
 use crate::{Entity, FaceId, Model, MoveError, PushPullError};
 
 /// Snapshots kept for undo. Models are small enough that whole-model snapshots are cheap.
@@ -68,6 +70,8 @@ pub struct Document {
     /// The whole drawing flattened for picking, snapping and drawing; rebuilt on every change.
     view: View,
     model_version: u64,
+    /// The key of the last merging edit, while further edits with it join the same undo step.
+    coalescing: Option<String>,
     version: u64,
 }
 
@@ -75,7 +79,16 @@ impl Default for Document {
     fn default() -> Self {
         let state = State::default();
         let view = View::build(&state.scene, &state.path);
-        Self { state, selection: Selection::default(), undo: Vec::new(), redo: Vec::new(), view, model_version: 0, version: 0 }
+        Self {
+            state,
+            selection: Selection::default(),
+            undo: Vec::new(),
+            redo: Vec::new(),
+            view,
+            model_version: 0,
+            coalescing: None,
+            version: 0,
+        }
     }
 }
 
@@ -149,17 +162,35 @@ impl Document {
 
     /// Change the scene (e.g. adding definitions), as one undoable step.
     pub fn edit_scene<R>(&mut self, change: impl FnOnce(&mut Scene, &[InstanceId]) -> R) -> R {
-        self.undo.push(self.state.clone());
-        if self.undo.len() > MAX_UNDO {
-            self.undo.remove(0);
-        }
-        self.redo.clear();
+        self.coalescing = None;
+        self.push_undo();
         let result = change(&mut self.state.scene, &self.state.path);
         self.changed();
         result
     }
 
+    /// Like [`Self::edit_scene`], but consecutive edits with the same `key` (e.g. dragging a
+    /// color picker) merge into one undo step.
+    pub fn edit_scene_merging<R>(&mut self, key: &str, change: impl FnOnce(&mut Scene, &[InstanceId]) -> R) -> R {
+        if self.coalescing.as_deref() != Some(key) || !self.redo.is_empty() {
+            self.push_undo();
+        }
+        self.coalescing = Some(key.to_owned());
+        let result = change(&mut self.state.scene, &self.state.path);
+        self.changed();
+        result
+    }
+
+    fn push_undo(&mut self) {
+        self.undo.push(self.state.clone());
+        if self.undo.len() > MAX_UNDO {
+            self.undo.remove(0);
+        }
+        self.redo.clear();
+    }
+
     pub fn undo(&mut self) -> bool {
+        self.coalescing = None;
         let Some(previous) = self.undo.pop() else { return false };
         self.redo.push(std::mem::replace(&mut self.state, previous));
         self.changed();
@@ -167,6 +198,7 @@ impl Document {
     }
 
     pub fn redo(&mut self) -> bool {
+        self.coalescing = None;
         let Some(next) = self.redo.pop() else { return false };
         self.undo.push(std::mem::replace(&mut self.state, next));
         self.changed();
@@ -324,6 +356,97 @@ impl Document {
             }
         });
         instances.len()
+    }
+
+    /// Add a material of `kind` with woodworking defaults (name, color, grain, thickness).
+    pub fn add_material(&mut self, kind: MaterialKind) -> MaterialId {
+        let count = self.state.scene.materials().count();
+        // Wood tones first; the palette cycles.
+        const PALETTE: [[u8; 3]; 8] = [
+            [222, 184, 135], // pine
+            [196, 152, 96],  // oak
+            [110, 74, 46],   // walnut
+            [235, 210, 160], // maple
+            [168, 92, 60],   // cherry
+            [214, 188, 140], // birch plywood
+            [165, 140, 110], // MDF
+            [150, 150, 155], // steel
+        ];
+        let (base, color, grained, thickness) = match kind {
+            MaterialKind::SolidWood => ("Wood", PALETTE[count % 5], true, None),
+            MaterialKind::SheetGood => ("Plywood", PALETTE[5], true, Some(0.75)),
+            MaterialKind::DimensionalLumber => ("Lumber", PALETTE[0], true, Some(1.5)),
+            MaterialKind::Hardware => ("Hardware", PALETTE[7], false, None),
+            MaterialKind::Other => ("Material", PALETTE[6], false, None),
+        };
+        let taken = |name: &str| self.state.scene.materials().any(|(_, m)| m.name == name);
+        let name = std::iter::once(base.to_owned())
+            .chain((2..).map(|i| format!("{base} {i}")))
+            .find(|n| !taken(n))
+            .expect("some name is free");
+        self.edit_scene(|scene, _| scene.add_material(Material { name, color, kind, grained, thickness }))
+    }
+
+    /// Change a material. Consecutive edits of the same material merge into one undo step.
+    pub fn edit_material(&mut self, id: MaterialId, change: impl FnOnce(&mut Material)) {
+        let Some(mut edited) = self.state.scene.material(id).cloned() else { return };
+        change(&mut edited);
+        if self.state.scene.material(id) == Some(&edited) {
+            return;
+        }
+        self.edit_scene_merging(&format!("material {id:?}"), |scene, _| {
+            if let Some(m) = scene.material_mut(id) {
+                *m = edited;
+            }
+        });
+    }
+
+    /// Delete a material; everything painted with it goes back to the default.
+    pub fn delete_material(&mut self, id: MaterialId) {
+        if self.state.scene.material(id).is_some() {
+            self.edit_scene(|scene, _| scene.remove_material(id));
+        }
+    }
+
+    /// Paint faces and groups/components of the container being edited (`None` = default).
+    /// Edges can't be painted. Returns how many were painted.
+    pub fn paint(&mut self, entities: &[Entity], material: Option<MaterialId>) -> usize {
+        let paintable: Vec<Entity> =
+            entities.iter().copied().filter(|e| !matches!(e, Entity::Edge(_)) && self.container().contains(*e)).collect();
+        if paintable.is_empty() {
+            return 0;
+        }
+        self.edit_container(|container| {
+            for &entity in &paintable {
+                match entity {
+                    Entity::Face(id) => container.model.set_face_material(id, material),
+                    Entity::Instance(id) => {
+                        if let Some(inst) = container.instance_mut(id) {
+                            inst.material = material;
+                        }
+                    }
+                    Entity::Edge(_) => {}
+                }
+            }
+        });
+        paintable.len()
+    }
+
+    /// The material painted directly on a face or group/component of the edited container.
+    pub fn material_of(&self, entity: Entity) -> Option<MaterialId> {
+        match entity {
+            Entity::Face(id) => self.model().face(id)?.material,
+            Entity::Instance(id) => self.container().instance(id)?.material,
+            Entity::Edge(_) => None,
+        }
+    }
+
+    /// The material shared by every selected face and group: `Some(material)` if they agree
+    /// (`Some(None)` for the default), `None` if mixed or nothing paintable is selected.
+    pub fn selection_material(&self) -> Option<Option<MaterialId>> {
+        let mut materials = self.selection.iter().filter(|e| !matches!(e, Entity::Edge(_))).map(|e| self.material_of(e));
+        let first = materials.next()?;
+        materials.all(|m| m == first).then_some(first)
     }
 
     /// Make the selection a group (or component) and select it. `None` if nothing's selected.
@@ -578,5 +701,83 @@ mod tests {
         doc.tag_selection(Some(tag));
         doc.selection_mut().extend([Entity::Instance(b)]);
         assert_eq!(doc.selection_tag(), None);
+    }
+
+    #[test]
+    fn painting_a_group_colors_its_faces_through_the_view() {
+        let mut doc = Document::default();
+        let (a, b) = two_groups(&mut doc);
+        let oak = doc.add_material(MaterialKind::SolidWood);
+        assert_eq!(doc.scene().material(oak).unwrap().name, "Wood");
+        assert_eq!(doc.paint(&[Entity::Instance(a)], Some(oak)), 1);
+        let view = doc.view();
+        let painted = view.model().faces().filter(|(id, _)| view.face_material(*id) == Some(oak)).count();
+        assert_eq!(painted, 6, "only board a's faces show oak");
+        assert_eq!(doc.material_of(Entity::Instance(b)), None);
+    }
+
+    #[test]
+    fn a_face_painted_inside_overrides_the_group() {
+        let mut doc = Document::default();
+        let (a, _) = two_groups(&mut doc);
+        let wood = doc.add_material(MaterialKind::SolidWood);
+        let edge_band = doc.add_material(MaterialKind::Other);
+        doc.paint(&[Entity::Instance(a)], Some(wood));
+        doc.enter(a);
+        let top = doc.model().faces().find(|(_, f)| f.normal.z > 0.5).map(|(id, _)| id).unwrap();
+        doc.paint(&[Entity::Face(top)], Some(edge_band));
+        let view = doc.view();
+        // Inside, the group's faces still inherit wood, except the painted top.
+        assert_eq!(view.face_material(top), Some(edge_band));
+        let wood_faces = view.model().faces().filter(|(id, _)| view.face_material(*id) == Some(wood)).count();
+        assert_eq!(wood_faces, 5);
+    }
+
+    #[test]
+    fn push_pull_keeps_the_painted_face_on_the_moved_end() {
+        let mut doc = Document::default();
+        let face = profile(&mut doc);
+        let ply = doc.add_material(MaterialKind::SheetGood);
+        doc.paint(&[Entity::Face(face)], Some(ply));
+        doc.push_pull(face, 0.75, false).unwrap();
+        let painted: Vec<_> = doc.model().faces().filter(|(_, f)| f.material == Some(ply)).map(|(_, f)| f.normal).collect();
+        // The original face (now the bottom) and the new top keep the paint; walls don't.
+        assert_eq!(painted.len(), 2);
+        assert_eq!(doc.scene().material(ply).unwrap().thickness, Some(0.75));
+    }
+
+    #[test]
+    fn deleting_a_material_unpaints_everything() {
+        let mut doc = Document::default();
+        let (a, _) = two_groups(&mut doc);
+        let wood = doc.add_material(MaterialKind::SolidWood);
+        doc.paint(&[Entity::Instance(a)], Some(wood));
+        doc.delete_material(wood);
+        assert_eq!(doc.material_of(Entity::Instance(a)), None);
+        assert_eq!(doc.scene().materials().count(), 0);
+    }
+
+    #[test]
+    fn dragging_a_color_is_one_undo_step() {
+        let mut doc = Document::default();
+        let wood = doc.add_material(MaterialKind::SolidWood);
+        for shade in 0..20u8 {
+            doc.edit_material(wood, |m| m.color = [shade, shade, shade]);
+        }
+        assert_eq!(doc.scene().material(wood).unwrap().color, [19, 19, 19]);
+        doc.undo();
+        assert_ne!(doc.scene().material(wood).unwrap().color, [0, 0, 0], "back to before the drag");
+        assert!(doc.scene().material(wood).is_some(), "the material itself wasn't undone");
+        doc.undo();
+        assert!(doc.scene().material(wood).is_none());
+    }
+
+    #[test]
+    fn default_names_count_up() {
+        let mut doc = Document::default();
+        let a = doc.add_material(MaterialKind::SheetGood);
+        let b = doc.add_material(MaterialKind::SheetGood);
+        assert_eq!(doc.scene().material(a).unwrap().name, "Plywood");
+        assert_eq!(doc.scene().material(b).unwrap().name, "Plywood 2");
     }
 }

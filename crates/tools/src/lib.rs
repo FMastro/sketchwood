@@ -3,6 +3,7 @@
 
 pub mod pick;
 mod move_tool;
+mod paint;
 mod push_pull;
 mod rotate;
 mod rectangle;
@@ -15,6 +16,7 @@ use sketchcraft_view::OrbitCamera;
 pub use pick::{Snap, SnapKind};
 use pick::Screen;
 use move_tool::MoveTool;
+use paint::PaintTool;
 use push_pull::PushPullTool;
 use rotate::RotateTool;
 use rectangle::RectangleTool;
@@ -125,6 +127,7 @@ impl ToolId {
                 | Self::PushPull
                 | Self::Move
                 | Self::Rotate
+                | Self::PaintBucket
                 | Self::Orbit
                 | Self::Pan
                 | Self::Zoom
@@ -136,6 +139,7 @@ impl ToolId {
 pub struct Modifiers {
     pub shift: bool,
     pub ctrl: bool,
+    pub alt: bool,
 }
 
 /// Left-button pointer input in viewport coordinates (points, origin top-left).
@@ -312,6 +316,9 @@ pub struct Tools {
     push_pull: PushPullTool,
     move_tool: MoveTool,
     rotate: RotateTool,
+    paint: PaintTool,
+    /// The material the Paint Bucket applies; `None` is the default material.
+    pub active_material: Option<sketchcraft_doc::MaterialId>,
     /// A grip rotation started by press-and-drag; finishes on release.
     grip_dragging: bool,
     /// Move just rotated with a grip, so typed angles and arrays go to that rotation.
@@ -331,6 +338,8 @@ impl Default for Tools {
             push_pull: PushPullTool::default(),
             move_tool: MoveTool::default(),
             rotate: RotateTool::default(),
+            paint: PaintTool::default(),
+            active_material: None,
             grip_dragging: false,
             grip_rotated: false,
             typed: String::new(),
@@ -491,6 +500,13 @@ impl Tools {
             }
             (ToolId::Rotate, PointerEvent::DragStart { origin }) => self.rotate.drag_start(doc, screen, origin),
             (ToolId::Rotate, PointerEvent::DragEnd { pos, .. }) => self.rotate.drag_end(doc, screen, pos),
+            (ToolId::PaintBucket, PointerEvent::Move(pos)) => {
+                self.paint.hover(doc, screen, pos);
+                Ok(())
+            }
+            (ToolId::PaintBucket, PointerEvent::Click { pos, mods, .. }) => {
+                self.paint.click(doc, screen, pos, mods, &mut self.active_material)
+            }
             _ => Ok(()),
         };
         if let Err(message) = result {
@@ -617,6 +633,7 @@ impl Tools {
             ToolId::Move if self.rotate.is_busy() => self.rotate.status(),
             ToolId::Move => self.move_tool.status(),
             ToolId::Rotate => self.rotate.status(),
+            ToolId::PaintBucket => self.paint.status().into(),
             ToolId::Orbit => "Drag to orbit.".into(),
             ToolId::Pan => "Drag to pan.".into(),
             ToolId::Zoom => "Drag up to zoom in, down to zoom out.".into(),
@@ -659,6 +676,7 @@ impl Tools {
             ToolId::Move if self.rotate.is_busy() => self.rotate.overlay(doc, &mut overlay),
             ToolId::Move => self.move_tool.overlay(doc, &mut overlay),
             ToolId::Rotate => self.rotate.overlay(doc, &mut overlay),
+            ToolId::PaintBucket => self.paint.overlay(doc, &mut overlay),
             _ => {}
         }
         overlay.into_world(&doc.context_transform())

@@ -148,6 +148,7 @@ impl Model {
             let outer = moved(&face.outer);
             let holes: Vec<Vec<DVec3>> = face.holes.iter().map(|h| moved(h)).collect();
             if let Some(copy) = self.add_face_with_holes(&outer, &holes) {
+                self.set_face_material(copy, face.material);
                 copies.push(Entity::Face(copy));
             }
         }

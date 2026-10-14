@@ -122,7 +122,10 @@ impl Model {
         let cap_outer = orient(loops[0].iter().map(|&p| p + offset).collect(), cap_normal);
         let cap_holes: Vec<Vec<DVec3>> =
             loops[1..].iter().map(|h| orient(h.iter().map(|&p| p + offset).collect(), -cap_normal)).collect();
-        self.add_face_with_holes(&cap_outer, &cap_holes);
+        // The moved end keeps the original face's paint; new walls start unpainted (SketchUp).
+        if let Some(cap) = self.add_face_with_holes(&cap_outer, &cap_holes) {
+            self.set_face_material(cap, original.material);
+        }
 
         if attached {
             // The base is now inside the solid (or open to the pocket).

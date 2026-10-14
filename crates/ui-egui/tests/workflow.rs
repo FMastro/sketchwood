@@ -353,7 +353,8 @@ fn tag_a_board_and_hide_it_from_the_tags_panel() {
     board(&mut harness);
 
     // "+" adds a tag and starts renaming it.
-    harness.get_by_label(ph::PLUS).click();
+    // The first "+" is the Tags panel's (the Materials panel has one too).
+    harness.get_all_by_label(ph::PLUS).next().expect("Tags + button").click();
     harness.run();
     harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
     type_text(&mut harness, "Legs");
@@ -370,8 +371,8 @@ fn tag_a_board_and_hide_it_from_the_tags_panel() {
     type_text(&mut harness, " ");
     harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
     harness.run();
-    // The Entity Info dropdown is the only combo box.
-    harness.get_by_role(egui::accesskit::Role::ComboBox).click();
+    // Entity Info has a material dropdown, then the tag dropdown.
+    harness.get_all_by_role(egui::accesskit::Role::ComboBox).last().expect("tag dropdown").click();
     harness.run();
     snapshot(&mut harness, "tag_dropdown");
     harness.run();
@@ -388,6 +389,36 @@ fn tag_a_board_and_hide_it_from_the_tags_panel() {
     assert_eq!(doc.view().model().faces().count(), 0);
     assert!(doc.selection().is_empty());
     snapshot(&mut harness, "tag_hidden");
+}
+
+#[test]
+fn paint_a_board_with_a_new_plywood_material() {
+    use egui_kittest::kittest::Queryable;
+    use egui_phosphor::regular as ph;
+
+    let mut harness = app();
+    board(&mut harness);
+    let (lo, hi) = harness.state().document().bounds().unwrap();
+
+    // Materials' "+" (after the Tags panel's) opens a menu of material types.
+    harness.get_all_by_label(ph::PLUS).last().expect("Materials + button").click();
+    harness.run();
+    harness.get_by_label("Sheet good").click();
+    harness.run();
+    let state = harness.state();
+    assert_eq!(state.tools().active(), ToolId::PaintBucket, "picking a material switches to the Paint Bucket");
+    let plywood = state.tools().active_material.expect("the new material is active");
+    let material = state.document().scene().material(plywood).unwrap();
+    assert_eq!((material.name.as_str(), material.thickness), ("Plywood", Some(0.75)));
+
+    // Click the board: the whole group gets the material.
+    let side = harness.state().to_window(glam::DVec3::new((lo.x + hi.x) * 0.5, lo.y, (lo.z + hi.z) * 0.5)).unwrap();
+    click(&mut harness, side);
+    let doc = harness.state().document();
+    let (board, _) = doc.container().instances().next().unwrap();
+    assert_eq!(doc.material_of(sketchcraft_doc::Entity::Instance(board)), Some(plywood));
+    type_text(&mut harness, "Z");
+    snapshot(&mut harness, "painted");
 }
 
 #[test]

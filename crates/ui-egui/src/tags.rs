@@ -101,6 +101,7 @@ pub fn entity_info(ui: &mut egui::Ui, doc: &mut Document, tools: &mut Tools) {
         (n, 0) => format!("{n} loose entities"),
         (n, i) => format!("{n} selected ({i} groups/components)"),
     });
+    crate::materials::entity_info_material(ui, doc, tools);
     if instances == 0 {
         ui.weak("Tags go on groups and components. Group this first (Ctrl+G).");
         return;

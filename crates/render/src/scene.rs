@@ -1,7 +1,7 @@
 //! CPU-side geometry the renderer draws: the reference grid and axes, plus the model.
 
 use glam::{DAffine3, DVec3, Vec3};
-use sketchcraft_doc::{Entity, Owner, Selection, View};
+use sketchcraft_doc::{Entity, Owner, Scene as SceneData, Selection, View};
 
 /// Linear-space RGBA. The render target is sRGB, so colors are converted from sRGB on creation.
 pub type Color = [f32; 4];
@@ -77,7 +77,7 @@ impl Scene {
     /// container's coordinates, which `to_world` maps to the world. The selection is
     /// highlighted in blue (whole groups when they're selected); while editing inside a group,
     /// everything outside it is faded, as in SketchUp.
-    pub fn add_view(&mut self, view: &View, selection: &Selection, to_world: &DAffine3) {
+    pub fn add_view(&mut self, view: &View, selection: &Selection, to_world: &DAffine3, scene: &SceneData) {
         let model = view.model();
         let edge = srgb(0, 0, 0);
         let selected_edge = srgb(0, 64, 255);
@@ -96,6 +96,9 @@ impl Scene {
 
         for (id, face) in model.faces() {
             let entity = Entity::Face(id);
+            // A painted face (or one in a painted group) shows the material on both sides.
+            let painted = view.face_material(id).and_then(|m| scene.material(m)).map(|m| srgb(m.color[0], m.color[1], m.color[2]));
+            let (front, back) = painted.map_or((front, back), |c| (c, c));
             let (front, back) = match view.owner(entity) {
                 Owner::Outside => (fade(front), fade(back)),
                 _ if is_selected(entity) => (tint(front), tint(back)),
@@ -143,7 +146,7 @@ mod tests {
     fn groups_and_loose_geometry_both_draw() {
         let (doc, _) = two_boards();
         let mut scene = Scene::default();
-        scene.add_view(doc.view(), doc.selection(), &doc.context_transform());
+        scene.add_view(doc.view(), doc.selection(), &doc.context_transform(), doc.scene());
         assert_eq!(scene.faces.len(), 2 * 6 * 6); // two boards x 6 faces x 2 triangles x 3
         assert_eq!(scene.lines.len(), 2 * 12 * 2);
     }
@@ -153,7 +156,7 @@ mod tests {
         let (mut doc, group) = two_boards();
         let plain = |doc: &Document| {
             let mut scene = Scene::default();
-            scene.add_view(doc.view(), doc.selection(), &doc.context_transform());
+            scene.add_view(doc.view(), doc.selection(), &doc.context_transform(), doc.scene());
             scene
         };
         let before = plain(&doc);
@@ -168,12 +171,12 @@ mod tests {
         let (mut doc, group) = two_boards();
         let world_before = {
             let mut scene = Scene::default();
-            scene.add_view(doc.view(), doc.selection(), &doc.context_transform());
+            scene.add_view(doc.view(), doc.selection(), &doc.context_transform(), doc.scene());
             scene.faces.iter().map(|v| [v[0], v[1], v[2]]).collect::<Vec<_>>()
         };
         doc.enter(group);
         let mut scene = Scene::default();
-        scene.add_view(doc.view(), doc.selection(), &doc.context_transform());
+        scene.add_view(doc.view(), doc.selection(), &doc.context_transform(), doc.scene());
         let mut world_after: Vec<_> = scene.faces.iter().map(|v| [v[0], v[1], v[2]]).collect();
         let mut sorted_before = world_before.clone();
         let key = |p: &[f32; 3]| (p[0].to_bits(), p[1].to_bits(), p[2].to_bits());

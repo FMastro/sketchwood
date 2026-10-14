@@ -58,7 +58,7 @@ impl Viewport {
         let Some(render_state) = frame.wgpu_render_state() else { return };
         if self.scene_version != Some(doc.version()) {
             let mut scene = Scene::reference();
-            scene.add_view(doc.view(), doc.selection(), &doc.context_transform());
+            scene.add_view(doc.view(), doc.selection(), &doc.context_transform(), doc.scene());
             self.renderer.set_scene(&render_state.device, &scene);
             self.scene_version = Some(doc.version());
         }
@@ -131,7 +131,7 @@ impl Viewport {
     ) {
         let local = |p: egui::Pos2| to_vec2(p - rect.min);
         let (mods, press_origin, latest) = ui.input(|i| {
-            let mods = Modifiers { shift: i.modifiers.shift, ctrl: i.modifiers.command };
+            let mods = Modifiers { shift: i.modifiers.shift, ctrl: i.modifiers.command, alt: i.modifiers.alt };
             (mods, i.pointer.press_origin(), i.pointer.latest_pos())
         });
         let mut send = |event| tools.pointer(event, doc, &mut self.camera, size);

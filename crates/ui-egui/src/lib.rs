@@ -2,6 +2,7 @@
 
 mod icons;
 mod keys;
+mod materials;
 mod outliner;
 mod tags;
 mod viewport;
@@ -17,6 +18,7 @@ pub struct SketchCraftApp {
     tools: Tools,
     keyboard: keys::Keyboard,
     tags: tags::TagsPanel,
+    materials: materials::MaterialsPanel,
     viewport: Viewport,
 }
 
@@ -32,6 +34,7 @@ impl SketchCraftApp {
             tools: Tools::default(),
             keyboard: keys::Keyboard::default(),
             tags: tags::TagsPanel::default(),
+            materials: materials::MaterialsPanel::default(),
             viewport: Viewport::new(render_state),
         }
     }
@@ -116,6 +119,8 @@ impl eframe::App for SketchCraftApp {
                 outliner::show(ui, &mut self.doc, &mut self.tools);
                 ui.separator();
                 self.tags.show(ui, &mut self.doc);
+                ui.separator();
+                self.materials.show(ui, &mut self.doc, &mut self.tools);
                 ui.separator();
                 tags::entity_info(ui, &mut self.doc, &mut self.tools);
             });

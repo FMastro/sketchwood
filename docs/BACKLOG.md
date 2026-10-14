@@ -33,6 +33,14 @@ each section. Remove items when they're done (mention them in the commit).
 - Copies of a group share a definition until opened (SketchUp's behavior); opening one gives
   it its own copy, which isn't an undo step by itself.
 
+## Materials
+- No textures (color only), so no visible grain direction; parts' grain is assumed along their
+  longest side for now (as OpenCutList does by default).
+- Dimensional lumber stores one thickness, not a section (e.g. 1.5" x 3.5"); no list of stock
+  thicknesses or sheet sizes yet (needed for cut optimization).
+- Paint Bucket has no Ctrl (paint connected faces) or Shift (replace everywhere) variants.
+- Painted color shows on both sides of a face; SketchUp paints front and back separately.
+
 ## Tags
 - Only groups and components can be tagged; loose geometry is always Untagged.
 - No tag colors or "color by tag", tag folders, dashed tag lines, or an "active tag" that new

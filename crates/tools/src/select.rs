@@ -225,11 +225,11 @@ mod tests {
         let mut tool = SelectTool::default();
         let (a, b) = (at(screen, 0.75, 1.75), at(screen, 10.75, 1.75));
         tool.click(&mut doc, screen, a, 1, Modifiers::default());
-        tool.click(&mut doc, screen, b, 1, Modifiers { ctrl: true, shift: false });
+        tool.click(&mut doc, screen, b, 1, Modifiers { ctrl: true, ..Default::default() });
         assert_eq!(doc.selection().len(), 2);
-        tool.click(&mut doc, screen, a, 1, Modifiers { ctrl: false, shift: true });
+        tool.click(&mut doc, screen, a, 1, Modifiers { shift: true, ..Default::default() });
         assert_eq!(doc.selection().len(), 1);
-        tool.click(&mut doc, screen, b, 1, Modifiers { ctrl: true, shift: true });
+        tool.click(&mut doc, screen, b, 1, Modifiers { ctrl: true, shift: true, ..Default::default() });
         assert!(doc.selection().is_empty());
     }
 

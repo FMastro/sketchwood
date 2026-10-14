@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 use glam::{DAffine3, DVec2, DVec3};
 
 use crate::arena::Arena;
-use crate::scene::InstanceId;
+use crate::scene::{InstanceId, MaterialId};
 
 /// Points closer than this, in inches, are the same point.
 pub const EPS: f64 = 1e-6;
@@ -54,6 +54,8 @@ pub struct Face {
     pub holes: Vec<Vec<VertexId>>,
     /// Unit normal; the front side faces this way.
     pub normal: DVec3,
+    /// Painted material; `None` shows the enclosing group's material, or the default.
+    pub material: Option<MaterialId>,
 }
 
 impl Face {
@@ -155,6 +157,7 @@ impl Model {
                 outer: map(&face.outer),
                 holes: face.holes.iter().map(|h| map(h)).collect(),
                 normal: transform.transform_vector3(face.normal).normalize(),
+                material: face.material,
             });
         }
     }
@@ -202,7 +205,7 @@ impl Model {
             return Some(existing);
         }
 
-        let mut face = Face { outer: ids.clone(), holes: Vec::new(), normal };
+        let mut face = Face { outer: ids.clone(), holes: Vec::new(), normal, material: None };
         let coplanar: Vec<FaceId> = self
             .faces()
             .filter(|(_, f)| {
@@ -261,6 +264,22 @@ impl Model {
     pub(crate) fn set_vertex(&mut self, id: VertexId, point: DVec3) {
         if let Some(p) = self.vertices.get_mut(id.0) {
             *p = point;
+        }
+    }
+
+    /// Paint a face (`None` goes back to the default / inherited material).
+    pub fn set_face_material(&mut self, id: FaceId, material: Option<MaterialId>) {
+        if let Some(face) = self.faces.get_mut(id.0) {
+            face.material = material;
+        }
+    }
+
+    /// Clear every face painted with `material`.
+    pub(crate) fn forget_material(&mut self, material: MaterialId) {
+        for face in self.faces.iter_mut() {
+            if face.material == Some(material) {
+                face.material = None;
+            }
         }
     }
 

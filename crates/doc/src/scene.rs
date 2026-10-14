@@ -46,6 +46,52 @@ pub struct Instance {
     pub transform: DAffine3,
     /// `None` is SketchUp's "Untagged", which is always visible.
     pub tag: Option<TagId>,
+    /// Painted material, shown on every face inside that has none of its own.
+    pub material: Option<MaterialId>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct MaterialId(u32);
+
+/// What a material is, for cut lists (the categories OpenCutList uses).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MaterialKind {
+    /// Boards milled from rough stock; has grain; parts listed with their thickness.
+    SolidWood,
+    /// Plywood, MDF and such, bought as sheets of a fixed thickness.
+    SheetGood,
+    /// Ready-milled lumber like a 2x4, bought by section and length.
+    DimensionalLumber,
+    /// Hinges, screws: counted, not cut.
+    Hardware,
+    Other,
+}
+
+impl MaterialKind {
+    pub const ALL: [Self; 5] = [Self::SolidWood, Self::SheetGood, Self::DimensionalLumber, Self::Hardware, Self::Other];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::SolidWood => "Solid wood",
+            Self::SheetGood => "Sheet good",
+            Self::DimensionalLumber => "Dimensional lumber",
+            Self::Hardware => "Hardware",
+            Self::Other => "Other",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Material {
+    pub name: String,
+    /// sRGB.
+    pub color: [u8; 3],
+    pub kind: MaterialKind,
+    /// Whether the material has a grain direction (solid wood, most plywood) that parts must
+    /// follow when laid out for cutting.
+    pub grained: bool,
+    /// Stock thickness in inches, for sheet goods and dimensional lumber.
+    pub thickness: Option<f64>,
 }
 
 /// A tag (SketchUp's renamed layers). Tags go on groups and components; hiding a tag hides
@@ -101,6 +147,7 @@ pub struct Scene {
     pub root: Container,
     definitions: Arena<Definition>,
     tags: Arena<Tag>,
+    materials: Arena<Material>,
     /// Counters for default names, like SketchUp's "Group#1", "Component#1".
     next_group: u32,
     next_component: u32,
@@ -147,6 +194,37 @@ impl Scene {
             }
         }
         Some(tag)
+    }
+
+    pub fn materials(&self) -> impl Iterator<Item = (MaterialId, &Material)> {
+        self.materials.iter().map(|(i, m)| (MaterialId(i), m))
+    }
+
+    pub fn material(&self, id: MaterialId) -> Option<&Material> {
+        self.materials.get(id.0)
+    }
+
+    pub fn material_mut(&mut self, id: MaterialId) -> Option<&mut Material> {
+        self.materials.get_mut(id.0)
+    }
+
+    pub fn add_material(&mut self, material: Material) -> MaterialId {
+        MaterialId(self.materials.insert(material))
+    }
+
+    /// Delete a material; everything painted with it goes back to the default.
+    pub fn remove_material(&mut self, id: MaterialId) -> Option<Material> {
+        let material = self.materials.remove(id.0)?;
+        let containers = std::iter::once(&mut self.root).chain(self.definitions.iter_mut().map(|d| &mut d.container));
+        for container in containers {
+            container.model.forget_material(id);
+            for instance in container.instances.iter_mut() {
+                if instance.material == Some(id) {
+                    instance.material = None;
+                }
+            }
+        }
+        Some(material)
     }
 
     /// Whether an instance is shown: Untagged, or its tag is visible.
@@ -230,7 +308,9 @@ impl Scene {
             let Some(face) = model.face(f) else { continue };
             let local = |ids: &[VertexId]| -> Vec<DVec3> { ids.iter().map(|&v| model.vertex(v) - origin).collect() };
             let holes: Vec<Vec<DVec3>> = face.holes.iter().map(|h| local(h)).collect();
-            inside.model.add_face_with_holes(&local(&face.outer), &holes);
+            if let Some(copy) = inside.model.add_face_with_holes(&local(&face.outer), &holes) {
+                inside.model.set_face_material(copy, face.material);
+            }
         }
         for &e in &edges {
             let Some(edge) = model.edge(e) else { continue };
@@ -264,7 +344,12 @@ impl Scene {
         for &id in &instances {
             container.remove_instance(id);
         }
-        Some(container.add_instance(Instance { definition, transform: DAffine3::from_translation(origin), tag: None }))
+        Some(container.add_instance(Instance {
+            definition,
+            transform: DAffine3::from_translation(origin),
+            tag: None,
+            material: None,
+        }))
     }
 
     /// Replace `instance` (in the container at `path`) with its definition's contents, placed
@@ -358,47 +443,71 @@ pub enum Owner {
 #[derive(Clone, Debug, Default)]
 pub struct View {
     model: Model,
-    /// Where each owner's appended geometry starts: (first vertex, first edge, first face).
-    segments: Vec<((VertexId, EdgeId, FaceId), Owner)>,
+    /// Where each owner's appended geometry starts (first vertex, first edge, first face), who
+    /// owns it, and the material it inherits from its enclosing groups.
+    segments: Vec<Segment>,
+    /// The material the edited container's own geometry inherits (from the open groups).
+    active_paint: Option<MaterialId>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Segment {
+    start: (VertexId, EdgeId, FaceId),
+    owner: Owner,
+    paint: Option<MaterialId>,
 }
 
 impl View {
     pub fn build(scene: &Scene, path: &Path) -> Self {
         let Some(active) = scene.container(path) else { return Self::default() };
-        let mut view = Self { model: active.model.clone(), segments: Vec::new() };
+        // What each depth of the open-group path inherits: the innermost painted group wins.
+        let mut inherited = vec![None; path.len() + 1];
+        for depth in 0..path.len() {
+            let own = scene.container(&path[..depth]).and_then(|c| c.instance(path[depth])).and_then(|i| i.material);
+            inherited[depth + 1] = own.or(inherited[depth]);
+        }
+        let mut view = Self { model: active.model.clone(), segments: Vec::new(), active_paint: inherited[path.len()] };
         for (id, inst) in active.instances() {
-            view.append_instance(scene, inst, &DAffine3::IDENTITY, Owner::Instance(id));
+            view.append_instance(scene, inst, &DAffine3::IDENTITY, Owner::Instance(id), view.active_paint);
         }
         // Everything outside, brought into the edited container's coordinates.
         let to_local = scene.transform(path).inverse();
         for depth in 0..path.len() {
             let Some(container) = scene.container(&path[..depth]) else { break };
             let transform = to_local * scene.transform(&path[..depth]);
-            view.append_model(&container.model, &transform, Owner::Outside);
+            view.append_model(&container.model, &transform, Owner::Outside, inherited[depth]);
             for (id, inst) in container.instances() {
                 if id != path[depth] {
-                    view.append_instance(scene, inst, &transform, Owner::Outside);
+                    view.append_instance(scene, inst, &transform, Owner::Outside, inherited[depth]);
                 }
             }
         }
         view
     }
 
-    fn append_model(&mut self, model: &Model, transform: &DAffine3, owner: Owner) {
-        self.segments.push((self.model.next_ids(), owner));
+    fn append_model(&mut self, model: &Model, transform: &DAffine3, owner: Owner, paint: Option<MaterialId>) {
+        self.segments.push(Segment { start: self.model.next_ids(), owner, paint });
         self.model.append(model, transform);
     }
 
     /// Hidden instances (tag turned off) are left out entirely: not drawn, picked or snapped to.
-    fn append_instance(&mut self, scene: &Scene, instance: &Instance, parent: &DAffine3, owner: Owner) {
+    fn append_instance(
+        &mut self,
+        scene: &Scene,
+        instance: &Instance,
+        parent: &DAffine3,
+        owner: Owner,
+        inherited: Option<MaterialId>,
+    ) {
         if !scene.is_visible(instance) {
             return;
         }
         let Some(definition) = scene.definition(instance.definition) else { return };
         let transform = *parent * instance.transform;
-        self.append_model(&definition.container.model, &transform, owner);
+        let paint = instance.material.or(inherited);
+        self.append_model(&definition.container.model, &transform, owner, paint);
         for (_, nested) in definition.container.instances() {
-            self.append_instance(scene, nested, &transform, owner);
+            self.append_instance(scene, nested, &transform, owner, paint);
         }
     }
 
@@ -406,9 +515,21 @@ impl View {
         &self.model
     }
 
-    fn owner_where(&self, is_past: impl Fn(&(VertexId, EdgeId, FaceId)) -> bool) -> Owner {
-        self.segments.iter().rev().find(|(start, _)| is_past(start)).map_or(Owner::Active, |(_, owner)| *owner)
+    fn segment_where(&self, is_past: impl Fn(&(VertexId, EdgeId, FaceId)) -> bool) -> Option<&Segment> {
+        self.segments.iter().rev().find(|s| is_past(&s.start))
     }
+
+    fn owner_where(&self, is_past: impl Fn(&(VertexId, EdgeId, FaceId)) -> bool) -> Owner {
+        self.segment_where(is_past).map_or(Owner::Active, |s| s.owner)
+    }
+
+    /// The material a face shows: its own paint, else its enclosing group's, else `None` (the
+    /// default material).
+    pub fn face_material(&self, id: FaceId) -> Option<MaterialId> {
+        let own = self.model.face(id)?.material;
+        own.or_else(|| self.segment_where(|start| id >= start.2).map_or(self.active_paint, |s| s.paint))
+    }
+
 
     pub fn vertex_owner(&self, id: VertexId) -> Owner {
         self.owner_where(|start| id >= start.0)

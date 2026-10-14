@@ -1,8 +1,10 @@
 //! Slot storage with stable ids.
 
+use serde::{Deserialize, Serialize};
+
 /// Ids are never reused, so they stay valid in undo snapshots and can be compared across
 /// clones (a clone keeps every id).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct Arena<T>(Vec<Option<T>>);
 
 impl<T> Default for Arena<T> {

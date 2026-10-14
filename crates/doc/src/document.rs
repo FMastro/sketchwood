@@ -93,6 +93,14 @@ impl Default for Document {
 }
 
 impl Document {
+    /// A document for a drawing just opened: top level, nothing selected, no undo history.
+    pub fn from_scene(scene: Scene) -> Self {
+        let mut doc = Self::default();
+        doc.state.scene = scene;
+        doc.changed();
+        doc
+    }
+
     pub fn scene(&self) -> &Scene {
         &self.state.scene
     }

@@ -8,6 +8,7 @@ rust-version.workspace = true
 
 [dependencies]
 sketchcraft-doc.workspace = true
+rfd.workspace = true
 sketchcraft-tools.workspace = true
 sketchcraft-view.workspace = true
 sketchcraft-render.workspace = true

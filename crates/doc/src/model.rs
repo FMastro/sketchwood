@@ -3,6 +3,7 @@
 //! Units are inches. Edges are shared between the faces they bound. A face drawn inside an
 //! existing coplanar face is cut into it as a hole, the way SketchUp does. Not handled yet:
 //! faces that partially overlap, and edges that split faces (both arrive with the Line tool).
+use serde::{Deserialize, Serialize};
 
 use std::collections::BTreeSet;
 
@@ -15,15 +16,15 @@ use crate::scene::{InstanceId, MaterialId};
 pub const EPS: f64 = 1e-6;
 
 /// A vertex in a [`Model`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct VertexId(u32);
 
 /// An edge in a [`Model`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct EdgeId(u32);
 
 /// A face in a [`Model`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct FaceId(u32);
 
 /// Anything the user can select. Edges and faces belong to a [`Model`]; instances (groups and
@@ -35,7 +36,7 @@ pub enum Entity {
     Instance(InstanceId),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Edge {
     pub a: VertexId,
     pub b: VertexId,
@@ -47,7 +48,7 @@ impl Edge {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Face {
     /// Boundary vertices, counter-clockwise around `normal`.
     pub outer: Vec<VertexId>,
@@ -73,7 +74,7 @@ impl Face {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Model {
     vertices: Arena<DVec3>,
     edges: Arena<Edge>,

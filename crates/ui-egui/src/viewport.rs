@@ -352,3 +352,16 @@ impl Viewport {
         self.camera.project(point.as_vec3(), size).map(|s| self.rect.min + egui::vec2(s.x, s.y))
     }
 }
+
+impl Viewport {
+    /// A different drawing was opened (or a new one started): rebuild everything and frame it.
+    pub fn document_replaced(&mut self, doc: &Document) {
+        self.scene_version = None;
+        self.last_hover = None;
+        if doc.bounds().is_some() {
+            self.zoom_extents_pending = true;
+        } else {
+            self.camera = OrbitCamera::default();
+        }
+    }
+}

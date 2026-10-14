@@ -14,9 +14,19 @@ fn main() -> eframe::Result {
         renderer: eframe::Renderer::Wgpu,
         ..Default::default()
     };
+    // `sketchcraft drawing.scraft` opens that drawing.
+    let open = std::env::args_os().nth(1).map(std::path::PathBuf::from);
     eframe::run_native(
         "SketchCraft",
         options,
-        Box::new(|cc| Ok(Box::new(SketchCraftApp::new(cc)))),
+        Box::new(move |cc| {
+            let mut app = SketchCraftApp::new(cc);
+            if let Some(path) = open
+                && let Err(error) = app.open_path(&path)
+            {
+                app.show_error(error);
+            }
+            Ok(Box::new(app))
+        }),
     )
 }

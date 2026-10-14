@@ -75,5 +75,8 @@ add it there; when you finish an item, remove it.
    faces show their own paint, else the nearest painted group's (`View::face_material`). Paint
    Bucket (B, Alt samples), Materials panel (clicking one activates the Paint Bucket), Entity
    Info material picker. Material edits merge into one undo step (`edit_scene_merging`).
-10. Native save/load; OBJ/glTF export. Later: `.skp` import via the C SDK, cut lists.
+10. Save/open (done): `.scraft` JSON (`doc::file`, versioned header, serde derives on the scene),
+   File menu + Ctrl+N/O/S/Shift+S, native dialogs (`rfd`), title shows `*` when unsaved,
+   "Save changes?" before New/Open/Close, `sketchcraft file.scraft` opens a file.
+   Next: OBJ/glTF export, cut list. Later: `.skp` import via the C SDK.
 11. Line tool and face splitting, Offset, Circle, Tape Measure + guides (see backlog)

@@ -23,9 +23,12 @@ egui-wgpu = "0.36"
 egui_kittest = "0.36"
 # Must stay on the same major version egui-wgpu uses, or the device types won't match.
 wgpu = "30"
-glam = { version = "0.34", features = ["bytemuck"] }
+glam = { version = "0.34", features = ["bytemuck", "serde"] }
 bytemuck = "1"
 earcut = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rfd = "0.17"
 log = "0.4"
 env_logger = "0.11"
 

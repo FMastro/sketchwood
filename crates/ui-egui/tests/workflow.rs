@@ -422,6 +422,73 @@ fn paint_a_board_with_a_new_plywood_material() {
 }
 
 #[test]
+fn save_new_and_reopen_a_drawing() {
+    let dir = std::env::temp_dir().join(format!("sketchcraft-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("bench.scraft");
+
+    let mut harness = app();
+    board(&mut harness);
+    assert!(harness.state().is_dirty());
+    let bounds = harness.state().document().bounds();
+    harness.state_mut().save_to(&path).unwrap();
+    harness.run();
+    assert!(!harness.state().is_dirty());
+    assert_eq!(harness.state().file_path(), Some(path.as_path()));
+
+    harness.state_mut().new_document();
+    harness.run();
+    assert_eq!(harness.state().document().bounds(), None);
+
+    harness.state_mut().open_path(&path).unwrap();
+    harness.run();
+    assert_eq!(harness.state().document().bounds(), bounds);
+    assert_eq!(harness.state().document().container().instances().count(), 1, "the board is still a group");
+    assert!(!harness.state().is_dirty());
+    snapshot(&mut harness, "reopened");
+
+    // Editing marks it dirty again.
+    type_text(&mut harness, " ");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    harness.key_press(Key::Delete);
+    harness.run();
+    assert!(harness.state().is_dirty());
+
+    // Opening something that isn't a drawing fails cleanly and keeps the current one.
+    let junk = dir.join("junk.scraft");
+    std::fs::write(&junk, "hello").unwrap();
+    let error = harness.state_mut().open_path(&junk).unwrap_err();
+    assert!(error.contains("isn't a SketchCraft drawing"), "{error}");
+    assert_eq!(harness.state().file_path(), Some(path.as_path()));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn new_asks_before_discarding_unsaved_work() {
+    use egui_kittest::kittest::Queryable;
+
+    let mut harness = app();
+    board(&mut harness);
+    harness.get_by_label("File").click();
+    harness.run();
+    harness.get_by_label_contains("New").click();
+    harness.run();
+    // The drawing is still there while the question is up.
+    assert!(harness.state().document().bounds().is_some());
+    snapshot(&mut harness, "save_changes");
+    harness.get_by_label("Cancel").click();
+    harness.run();
+    assert!(harness.state().document().bounds().is_some());
+
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::N);
+    harness.run();
+    harness.get_by_label("Don't Save").click();
+    harness.run();
+    assert_eq!(harness.state().document().bounds(), None);
+    assert!(!harness.state().is_dirty());
+}
+
+#[test]
 fn unavailable_tool_shortcut_explains() {
     let mut harness = app();
     type_text(&mut harness, "l");

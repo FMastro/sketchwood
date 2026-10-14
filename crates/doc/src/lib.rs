@@ -3,6 +3,7 @@
 
 mod arena;
 mod document;
+pub mod file;
 mod model;
 mod push_pull;
 mod scene;

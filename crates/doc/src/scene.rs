@@ -8,6 +8,7 @@
 //! The top level of a drawing and the inside of every definition are both a [`Container`]:
 //! loose geometry plus instances. A [`Path`] of instance ids from the root names the container
 //! being edited.
+use serde::{Deserialize, Serialize};
 
 use std::collections::BTreeSet;
 
@@ -17,29 +18,29 @@ use crate::arena::Arena;
 use crate::{EdgeId, Entity, FaceId, Model, VertexId};
 
 /// An instance within one [`Container`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct InstanceId(pub(crate) u32);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct DefinitionId(u32);
 
 /// Instances from the root down to the container being edited; empty for the top level.
 pub type Path = [InstanceId];
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DefinitionKind {
     Group,
     Component,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Definition {
     pub name: String,
     pub kind: DefinitionKind,
     pub container: Container,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct Instance {
     pub definition: DefinitionId,
     /// Definition coordinates → container coordinates. Rigid (rotation and translation).
@@ -50,11 +51,11 @@ pub struct Instance {
     pub material: Option<MaterialId>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct MaterialId(u32);
 
 /// What a material is, for cut lists (the categories OpenCutList uses).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MaterialKind {
     /// Boards milled from rough stock; has grain; parts listed with their thickness.
     SolidWood,
@@ -81,7 +82,7 @@ impl MaterialKind {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Material {
     pub name: String,
     /// sRGB.
@@ -96,17 +97,17 @@ pub struct Material {
 
 /// A tag (SketchUp's renamed layers). Tags go on groups and components; hiding a tag hides
 /// everything tagged with it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct TagId(u32);
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Tag {
     pub name: String,
     pub visible: bool,
 }
 
 /// Loose geometry plus placed instances.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Container {
     pub model: Model,
     instances: Arena<Instance>,
@@ -142,7 +143,7 @@ impl Container {
 }
 
 /// Everything in a drawing: the top-level container and all definitions.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Scene {
     pub root: Container,
     definitions: Arena<Definition>,

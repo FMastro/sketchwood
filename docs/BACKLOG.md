@@ -48,6 +48,14 @@ each section. Remove items when they're done (mention them in the commit).
 - Hidden groups are still listed in the Outliner (dimmed) but can't be selected there.
 - Toggling a tag's visibility is an undo step (SketchUp does the same).
 
+## Files
+- No autosave or crash recovery, no recent-files list, no Windows file association (double-
+  clicking a .scraft needs an installer or registry entry).
+- Saving writes the file in place; a crash mid-write could truncate it (write to a temp file and
+  rename instead).
+- File dialogs block the window while open (rfd's synchronous API).
+- No export yet (OBJ, glTF, STL) and no .skp import.
+
 ## UI
 - Keyboard focus never stays on buttons (it would swallow shortcuts and re-press the button
   on Space/Enter), so Tab-navigation between widgets isn't available.

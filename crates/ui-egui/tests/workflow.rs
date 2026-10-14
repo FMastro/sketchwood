@@ -488,6 +488,60 @@ fn new_asks_before_discarding_unsaved_work() {
     assert!(!harness.state().is_dirty());
 }
 
+/// A board `l` long, `w` wide, `t` thick standing at `at`, auto-grouped.
+fn add_board(doc: &mut sketchcraft_doc::Document, at: glam::DVec3, l: f64, w: f64, t: f64) -> sketchcraft_doc::Entity {
+    use glam::DVec3;
+    let face = doc.edit(|m| m.add_rectangle(at, DVec3::X * w, DVec3::Y * t, DVec3::Z)).unwrap();
+    sketchcraft_doc::Entity::Instance(doc.push_pull(face, l, true).unwrap().unwrap())
+}
+
+#[test]
+fn cut_list_shows_parts_and_cutting_diagrams() {
+    use egui_kittest::kittest::Queryable;
+    use egui_phosphor::regular as ph;
+    use glam::DVec3;
+    use sketchcraft_doc::MaterialKind;
+
+    let mut harness = app();
+    {
+        let doc = harness.state_mut().document_mut();
+        // A plywood cabinet carcass: 2 sides, top and bottom, a back.
+        let ply = doc.add_material(MaterialKind::SheetGood);
+        let mut carcass = Vec::new();
+        for i in 0..2 {
+            carcass.push(add_board(doc, DVec3::X * (25.0 * f64::from(i)), 30.0, 23.25, 0.75));
+            carcass.push(add_board(doc, DVec3::new(60.0 + 36.0 * f64::from(i), 0.0, 0.0), 34.5, 23.25, 0.75));
+        }
+        carcass.push(add_board(doc, DVec3::new(0.0, 40.0, 0.0), 34.5, 30.0, 0.75));
+        doc.paint(&carcass, Some(ply));
+        // A 2x4 frame: two studs and three short pieces.
+        let lumber = doc.add_material(MaterialKind::DimensionalLumber);
+        let mut frame = Vec::new();
+        for i in 0..2 {
+            frame.push(add_board(doc, DVec3::new(-20.0 - 6.0 * f64::from(i), 0.0, 0.0), 92.625, 3.5, 1.5));
+        }
+        for i in 0..3 {
+            frame.push(add_board(doc, DVec3::new(-40.0 - 6.0 * f64::from(i), 0.0, 0.0), 46.0, 3.5, 1.5));
+        }
+        doc.paint(&frame, Some(lumber));
+    }
+    harness.run();
+    type_text(&mut harness, "Z");
+
+    harness.get_by_label(ph::TABLE).click();
+    harness.run();
+    for label in ["Plywood", "Lumber", "A", "B", "C", "D", "E"] {
+        assert!(harness.query_all_by_label(label).next().is_some(), "{label} is listed");
+    }
+    snapshot(&mut harness, "cut_list_parts");
+
+    harness.get_by_label("Cutting diagrams").click();
+    harness.run();
+    assert!(harness.query_all_by_label_contains("× Sheet 96\" x 48\"").next().is_some(), "plywood shopping list");
+    assert!(harness.query_all_by_label_contains("× 2x4 x").next().is_some(), "lumber shopping list");
+    snapshot(&mut harness, "cut_list_diagrams");
+}
+
 #[test]
 fn unavailable_tool_shortcut_explains() {
     let mut harness = app();

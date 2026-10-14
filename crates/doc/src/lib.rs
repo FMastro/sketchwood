@@ -2,6 +2,8 @@
 //! No UI or GPU dependencies.
 
 mod arena;
+pub mod cutlist;
+pub mod cutplan;
 mod document;
 pub mod file;
 mod model;

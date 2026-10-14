@@ -33,6 +33,18 @@ each section. Remove items when they're done (mention them in the commit).
 - Copies of a group share a definition until opened (SketchUp's behavior); opening one gives
   it its own copy, which isn't an undo step by itself.
 
+## Cut list
+- Stock sizes and kerf live in the Cut List window only: not saved with the drawing, not per
+  material (OpenCutList keeps a list of stock sizes per material). Defaults are US sizes.
+- Grain always runs along a part's longest side; no per-part grain override, no edge banding,
+  no veneer or hardware counts beyond listing.
+- Packing is heuristic (several orders and rules, best kept), not provably optimal; no
+  offcut reuse across materials, no "use my leftover pieces first".
+- Solid wood assumes one board width per material (the narrowest standard width holding the
+  widest part); real hardwood comes in random widths.
+- Parts are named by their group's name ("Group#3"); rename groups to get "Left side".
+- No printable or PDF cut sheets yet; CSV export only.
+
 ## Materials
 - No textures (color only), so no visible grain direction; parts' grain is assumed along their
   longest side for now (as OpenCutList does by default).

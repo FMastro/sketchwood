@@ -1,5 +1,6 @@
 //! The SketchCraft window: toolbar, 3D viewport, status bar and Measurements box.
 
+mod cutlist;
 mod files;
 mod icons;
 mod keys;
@@ -24,6 +25,7 @@ pub struct SketchCraftApp {
     materials: materials::MaterialsPanel,
     viewport: Viewport,
     files: files::Files,
+    cut_list: cutlist::CutListWindow,
 }
 
 impl SketchCraftApp {
@@ -41,6 +43,7 @@ impl SketchCraftApp {
             materials: materials::MaterialsPanel::default(),
             viewport: Viewport::new(render_state),
             files: files::Files::default(),
+            cut_list: cutlist::CutListWindow::default(),
         }
     }
 
@@ -195,6 +198,11 @@ impl SketchCraftApp {
         &self.doc
     }
 
+    /// The drawing, for building test scenes directly.
+    pub fn document_mut(&mut self) -> &mut Document {
+        &mut self.doc
+    }
+
     pub fn tools(&self) -> &Tools {
         &self.tools
     }
@@ -248,6 +256,11 @@ impl eframe::App for SketchCraftApp {
                     }
                 }
                 ui.separator();
+                let open = self.cut_list.open;
+                if icon_button(ui, icons::CUT_LIST, open, true, "Cut List: parts and cutting diagrams") {
+                    self.cut_list.open = !open;
+                }
+                ui.separator();
                 if icon_button(ui, icons::UNDO, false, true, "Undo (Ctrl+Z)") {
                     self.tools.cancel();
                     self.doc.undo();
@@ -283,6 +296,8 @@ impl eframe::App for SketchCraftApp {
                 tags::entity_info(ui, &mut self.doc, &mut self.tools);
             });
         });
+
+        self.cut_list.show(&ctx, &self.doc);
 
         egui::CentralPanel::no_frame()
             .show(ui, |ui| self.viewport.show(ui, frame, &mut self.doc, &mut self.tools));

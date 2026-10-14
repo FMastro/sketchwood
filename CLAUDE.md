@@ -78,5 +78,10 @@ add it there; when you finish an item, remove it.
 10. Save/open (done): `.scraft` JSON (`doc::file`, versioned header, serde derives on the scene),
    File menu + Ctrl+N/O/S/Shift+S, native dialogs (`rfd`), title shows `*` when unsaved,
    "Save changes?" before New/Open/Close, `sketchcraft file.scraft` opens a file.
-   Next: OBJ/glTF export, cut list. Later: `.skp` import via the C SDK.
-11. Line tool and face splitting, Offset, Circle, Tape Measure + guides (see backlog)
+   Later: `.skp` import via the C SDK.
+11. Cut list (done): `doc::cutlist` (parts = visible groups/components with faces, grouped by
+   material + size, labeled A, B...; CSV) and `doc::cutplan` (sheet goods + solid wood: 2D
+   guillotine packing, grain-aware; lumber: smallest standard section, 1D packing over each
+   stock length, boards split when shorter ones cost no more). Cut List window (toolbar): Parts,
+   Cutting diagrams with shopping list, Stock & kerf settings.
+12. Line tool and face splitting, Offset, Circle, Tape Measure + guides; OBJ/STL export (see backlog)

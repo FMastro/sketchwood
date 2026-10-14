@@ -36,3 +36,4 @@ pub const ZOOM_EXTENTS: &str = ph::CORNERS_OUT;
 pub const ISO: &str = ph::CUBE;
 pub const UNDO: &str = ph::ARROW_U_UP_LEFT;
 pub const REDO: &str = ph::ARROW_U_UP_RIGHT;
+pub const CUT_LIST: &str = ph::TABLE;

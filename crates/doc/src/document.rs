@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 
 use glam::{DAffine3, DVec3};
 
-use crate::scene::{Container, DefinitionKind, Instance, InstanceId, Scene, View};
+use crate::scene::{Container, DefinitionKind, Instance, InstanceId, Scene, TagId, View};
 use crate::{Entity, FaceId, Model, MoveError, PushPullError};
 
 /// Snapshots kept for undo. Models are small enough that whole-model snapshots are cheap.
@@ -256,6 +256,76 @@ impl Document {
         Ok(copies)
     }
 
+    /// Add a tag named like SketchUp's defaults ("Tag", "Tag1", "Tag2", ...).
+    pub fn add_tag(&mut self) -> TagId {
+        let taken = |name: &str| self.state.scene.tags().any(|(_, t)| t.name == name);
+        let name = std::iter::once("Tag".to_owned())
+            .chain((1..).map(|i| format!("Tag{i}")))
+            .find(|n| !taken(n))
+            .expect("some name is free");
+        self.edit_scene(|scene, _| scene.add_tag(name))
+    }
+
+    pub fn rename_tag(&mut self, tag: TagId, name: &str) {
+        let name = name.trim();
+        if name.is_empty() || self.state.scene.tag(tag).is_none_or(|t| t.name == name) {
+            return;
+        }
+        self.edit_scene(|scene, _| {
+            if let Some(t) = scene.tag_mut(tag) {
+                t.name = name.to_owned();
+            }
+        });
+    }
+
+    /// Delete a tag; what had it becomes Untagged.
+    pub fn delete_tag(&mut self, tag: TagId) {
+        if self.state.scene.tag(tag).is_some() {
+            self.edit_scene(|scene, _| scene.remove_tag(tag));
+        }
+    }
+
+    /// Show or hide everything with this tag.
+    pub fn set_tag_visible(&mut self, tag: TagId, visible: bool) {
+        if self.state.scene.tag(tag).is_some_and(|t| t.visible != visible) {
+            self.edit_scene(|scene, _| {
+                if let Some(t) = scene.tag_mut(tag) {
+                    t.visible = visible;
+                }
+            });
+        }
+    }
+
+    /// The tag shared by every selected group or component: `Some(tag)` if they agree
+    /// (`Some(None)` for Untagged), `None` if mixed or nothing's selected.
+    pub fn selection_tag(&self) -> Option<Option<TagId>> {
+        let container = self.container();
+        let mut tags = self.selection.iter().filter_map(|e| match e {
+            Entity::Instance(id) => container.instance(id).map(|i| i.tag),
+            _ => None,
+        });
+        let first = tags.next()?;
+        tags.all(|t| t == first).then_some(first)
+    }
+
+    /// Tag the selected groups and components (loose geometry stays Untagged, as SketchUp
+    /// recommends). Returns how many were tagged.
+    pub fn tag_selection(&mut self, tag: Option<TagId>) -> usize {
+        let instances: Vec<InstanceId> =
+            self.selection.iter().filter_map(|e| if let Entity::Instance(i) = e { Some(i) } else { None }).collect();
+        if instances.is_empty() {
+            return 0;
+        }
+        self.edit_container(|container| {
+            for &id in &instances {
+                if let Some(inst) = container.instance_mut(id) {
+                    inst.tag = tag;
+                }
+            }
+        });
+        instances.len()
+    }
+
     /// Make the selection a group (or component) and select it. `None` if nothing's selected.
     pub fn group_selection(&mut self, kind: DefinitionKind) -> Option<InstanceId> {
         let entities: Vec<Entity> = self.selection.iter().collect();
@@ -317,8 +387,13 @@ impl Document {
         while self.state.scene.container(&self.state.path).is_none() {
             self.state.path.pop();
         }
-        let container = self.state.scene.container(&self.state.path).expect("the root always exists");
-        self.selection.0.retain(|&e| container.contains(e));
+        let scene = &self.state.scene;
+        let container = scene.container(&self.state.path).expect("the root always exists");
+        // Hidden groups (tag turned off) can't stay selected.
+        self.selection.0.retain(|&e| match e {
+            Entity::Instance(id) => container.instance(id).is_some_and(|i| scene.is_visible(i)),
+            _ => container.contains(e),
+        });
         self.context_changed();
     }
 }
@@ -436,5 +511,72 @@ mod tests {
         doc.select_all();
         assert!(doc.erase_selection());
         assert_eq!(doc.bounds(), None);
+    }
+
+    /// Two boards, each its own group.
+    fn two_groups(doc: &mut Document) -> (InstanceId, InstanceId) {
+        let a = doc.edit(|m| m.add_rectangle(DVec3::ZERO, DVec3::X * 1.5, DVec3::Y * 3.5, DVec3::Z)).unwrap();
+        let a = doc.push_pull(a, 10.0, true).unwrap().unwrap();
+        let b = doc.edit(|m| m.add_rectangle(DVec3::X * 10.0, DVec3::X * 1.5, DVec3::Y * 3.5, DVec3::Z)).unwrap();
+        let b = doc.push_pull(b, 10.0, true).unwrap().unwrap();
+        (a, b)
+    }
+
+    #[test]
+    fn hiding_a_tag_hides_its_groups_from_view_and_selection() {
+        let mut doc = Document::default();
+        let (a, b) = two_groups(&mut doc);
+        let legs = doc.add_tag();
+        doc.selection_mut().extend([Entity::Instance(a)]);
+        assert_eq!(doc.tag_selection(Some(legs)), 1);
+        assert_eq!(doc.selection_tag(), Some(Some(legs)));
+        assert_eq!(doc.view().model().faces().count(), 12);
+
+        doc.set_tag_visible(legs, false);
+        assert_eq!(doc.view().model().faces().count(), 6);
+        assert!(doc.selection().is_empty(), "hidden groups drop out of the selection");
+        // The other, untagged board is still there.
+        assert!(doc.view().resolve(Entity::Face(doc.view().model().faces().next().unwrap().0)) == Some(Entity::Instance(b)));
+
+        doc.undo();
+        assert_eq!(doc.view().model().faces().count(), 12);
+    }
+
+    #[test]
+    fn deleting_a_tag_untags_and_shows_its_groups() {
+        let mut doc = Document::default();
+        let (a, _) = two_groups(&mut doc);
+        let tag = doc.add_tag();
+        doc.selection_mut().extend([Entity::Instance(a)]);
+        doc.tag_selection(Some(tag));
+        doc.set_tag_visible(tag, false);
+        doc.delete_tag(tag);
+        assert_eq!(doc.scene().tags().count(), 0);
+        assert_eq!(doc.container().instance(a).unwrap().tag, None);
+        assert_eq!(doc.view().model().faces().count(), 12);
+    }
+
+    #[test]
+    fn tag_names_follow_sketchup_defaults_and_rename() {
+        let mut doc = Document::default();
+        let first = doc.add_tag();
+        let second = doc.add_tag();
+        assert_eq!(doc.scene().tag(first).unwrap().name, "Tag");
+        assert_eq!(doc.scene().tag(second).unwrap().name, "Tag1");
+        doc.rename_tag(first, "  Legs ");
+        assert_eq!(doc.scene().tag(first).unwrap().name, "Legs");
+        doc.rename_tag(first, "   ");
+        assert_eq!(doc.scene().tag(first).unwrap().name, "Legs");
+    }
+
+    #[test]
+    fn mixed_selection_has_no_single_tag() {
+        let mut doc = Document::default();
+        let (a, b) = two_groups(&mut doc);
+        let tag = doc.add_tag();
+        doc.selection_mut().extend([Entity::Instance(a)]);
+        doc.tag_selection(Some(tag));
+        doc.selection_mut().extend([Entity::Instance(b)]);
+        assert_eq!(doc.selection_tag(), None);
     }
 }

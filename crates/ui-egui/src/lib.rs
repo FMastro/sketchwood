@@ -3,6 +3,7 @@
 mod icons;
 mod keys;
 mod outliner;
+mod tags;
 mod viewport;
 
 use eframe::egui;
@@ -15,6 +16,7 @@ pub struct SketchCraftApp {
     doc: Document,
     tools: Tools,
     keyboard: keys::Keyboard,
+    tags: tags::TagsPanel,
     viewport: Viewport,
 }
 
@@ -29,6 +31,7 @@ impl SketchCraftApp {
             doc: Document::default(),
             tools: Tools::default(),
             keyboard: keys::Keyboard::default(),
+            tags: tags::TagsPanel::default(),
             viewport: Viewport::new(render_state),
         }
     }
@@ -108,9 +111,15 @@ impl eframe::App for SketchCraftApp {
             });
         });
 
-        egui::Panel::left("outliner")
-            .default_size(200.0)
-            .show(ui, |ui| outliner::show(ui, &mut self.doc, &mut self.tools));
+        egui::Panel::left("sidebar").default_size(210.0).show(ui, |ui| {
+            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                outliner::show(ui, &mut self.doc, &mut self.tools);
+                ui.separator();
+                self.tags.show(ui, &mut self.doc);
+                ui.separator();
+                tags::entity_info(ui, &mut self.doc, &mut self.tools);
+            });
+        });
 
         egui::CentralPanel::no_frame()
             .show(ui, |ui| self.viewport.show(ui, frame, &mut self.doc, &mut self.tools));

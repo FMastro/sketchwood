@@ -17,18 +17,23 @@ pub fn show(ui: &mut egui::Ui, doc: &mut Document, tools: &mut Tools) {
         .instances()
         .filter_map(|(id, inst)| {
             let def = scene.definition(inst.definition)?;
-            Some((id, def.name.clone(), def.kind))
+            Some((id, def.name.clone(), def.kind, scene.is_visible(inst)))
         })
         .collect();
     if rows.is_empty() {
         ui.weak("No groups or components here yet.");
     }
-    egui::ScrollArea::vertical().auto_shrink([false, true]).max_height(ui.available_height() - 140.0).show(ui, |ui| {
-        for (id, name, kind) in rows {
+    ui.vertical(|ui| {
+        for (id, name, kind, visible) in rows {
             let icon = match kind {
                 DefinitionKind::Group => ph::CUBE,
                 DefinitionKind::Component => ph::PUZZLE_PIECE,
             };
+            if !visible {
+                // Its tag is hidden: listed, but it can't be picked until shown again.
+                ui.weak(format!("{icon}  {name}  (hidden)"));
+                continue;
+            }
             let selected = doc.selection().contains(Entity::Instance(id));
             let response = ui.selectable_label(selected, format!("{icon}  {name}"));
             if response.double_clicked() {

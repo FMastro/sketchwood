@@ -44,6 +44,19 @@ pub struct Instance {
     pub definition: DefinitionId,
     /// Definition coordinates → container coordinates. Rigid (rotation and translation).
     pub transform: DAffine3,
+    /// `None` is SketchUp's "Untagged", which is always visible.
+    pub tag: Option<TagId>,
+}
+
+/// A tag (SketchUp's renamed layers). Tags go on groups and components; hiding a tag hides
+/// everything tagged with it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct TagId(u32);
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Tag {
+    pub name: String,
+    pub visible: bool,
 }
 
 /// Loose geometry plus placed instances.
@@ -87,6 +100,7 @@ impl Container {
 pub struct Scene {
     pub root: Container,
     definitions: Arena<Definition>,
+    tags: Arena<Tag>,
     /// Counters for default names, like SketchUp's "Group#1", "Component#1".
     next_group: u32,
     next_component: u32,
@@ -103,6 +117,41 @@ impl Scene {
 
     pub fn definitions(&self) -> impl Iterator<Item = (DefinitionId, &Definition)> {
         self.definitions.iter().map(|(i, d)| (DefinitionId(i), d))
+    }
+
+    pub fn tags(&self) -> impl Iterator<Item = (TagId, &Tag)> {
+        self.tags.iter().map(|(i, t)| (TagId(i), t))
+    }
+
+    pub fn tag(&self, id: TagId) -> Option<&Tag> {
+        self.tags.get(id.0)
+    }
+
+    pub fn tag_mut(&mut self, id: TagId) -> Option<&mut Tag> {
+        self.tags.get_mut(id.0)
+    }
+
+    pub fn add_tag(&mut self, name: impl Into<String>) -> TagId {
+        TagId(self.tags.insert(Tag { name: name.into(), visible: true }))
+    }
+
+    /// Delete a tag; everything that had it becomes Untagged (SketchUp's default choice).
+    pub fn remove_tag(&mut self, id: TagId) -> Option<Tag> {
+        let tag = self.tags.remove(id.0)?;
+        let containers = std::iter::once(&mut self.root).chain(self.definitions.iter_mut().map(|d| &mut d.container));
+        for container in containers {
+            for instance in container.instances.iter_mut() {
+                if instance.tag == Some(id) {
+                    instance.tag = None;
+                }
+            }
+        }
+        Some(tag)
+    }
+
+    /// Whether an instance is shown: Untagged, or its tag is visible.
+    pub fn is_visible(&self, instance: &Instance) -> bool {
+        instance.tag.and_then(|t| self.tag(t)).is_none_or(|t| t.visible)
     }
 
     /// How many instances of `definition` exist anywhere.
@@ -215,7 +264,7 @@ impl Scene {
         for &id in &instances {
             container.remove_instance(id);
         }
-        Some(container.add_instance(Instance { definition, transform: DAffine3::from_translation(origin) }))
+        Some(container.add_instance(Instance { definition, transform: DAffine3::from_translation(origin), tag: None }))
     }
 
     /// Replace `instance` (in the container at `path`) with its definition's contents, placed
@@ -340,7 +389,11 @@ impl View {
         self.model.append(model, transform);
     }
 
+    /// Hidden instances (tag turned off) are left out entirely: not drawn, picked or snapped to.
     fn append_instance(&mut self, scene: &Scene, instance: &Instance, parent: &DAffine3, owner: Owner) {
+        if !scene.is_visible(instance) {
+            return;
+        }
         let Some(definition) = scene.definition(instance.definition) else { return };
         let transform = *parent * instance.transform;
         self.append_model(&definition.container.model, &transform, owner);

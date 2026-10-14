@@ -17,9 +17,14 @@ pub struct Keyboard {
 
 impl Keyboard {
     pub fn handle(&mut self, ctx: &egui::Context, doc: &mut Document, tools: &mut Tools, viewport: &mut Viewport) {
-        // A focused text field gets the keyboard instead.
-        if ctx.egui_wants_keyboard_input() {
+        // The keyboard belongs to the drawing unless a text field is being typed in. Buttons
+        // and other widgets don't keep focus: a focused button would swallow shortcuts and
+        // re-press itself on Space or Enter.
+        if ctx.text_edit_focused() {
             return;
+        }
+        if let Some(focused) = ctx.memory(|m| m.focused()) {
+            ctx.memory_mut(|m| m.surrender_focus(focused));
         }
         let events = ctx.input(|i| i.events.clone());
         for event in events {

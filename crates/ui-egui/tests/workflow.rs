@@ -345,6 +345,52 @@ fn g_makes_a_component_from_loose_geometry() {
 }
 
 #[test]
+fn tag_a_board_and_hide_it_from_the_tags_panel() {
+    use egui_kittest::kittest::Queryable;
+    use egui_phosphor::regular as ph;
+
+    let mut harness = app();
+    board(&mut harness);
+
+    // "+" adds a tag and starts renaming it.
+    harness.get_by_label(ph::PLUS).click();
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    type_text(&mut harness, "Legs");
+    harness.key_press(Key::Enter);
+    harness.run();
+    let legs = {
+        let scene = harness.state().document().scene();
+        let (id, tag) = scene.tags().next().expect("a tag was added");
+        assert_eq!(tag.name, "Legs");
+        id
+    };
+
+    // Select the board and tag it from Entity Info.
+    type_text(&mut harness, " ");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    harness.run();
+    // The Entity Info dropdown is the only combo box.
+    harness.get_by_role(egui::accesskit::Role::ComboBox).click();
+    harness.run();
+    snapshot(&mut harness, "tag_dropdown");
+    harness.run();
+    harness.get_all_by_label("Legs").last().expect("Legs in the tag list").click();
+    harness.run();
+    assert_eq!(harness.state().document().selection_tag(), Some(Some(legs)));
+    snapshot(&mut harness, "tagged");
+
+    // The eye next to Legs hides the board.
+    harness.get_all_by_label(ph::EYE).last().expect("Legs's eye button").click();
+    harness.run();
+    let doc = harness.state().document();
+    assert!(!doc.scene().tag(legs).unwrap().visible);
+    assert_eq!(doc.view().model().faces().count(), 0);
+    assert!(doc.selection().is_empty());
+    snapshot(&mut harness, "tag_hidden");
+}
+
+#[test]
 fn unavailable_tool_shortcut_explains() {
     let mut harness = app();
     type_text(&mut harness, "l");

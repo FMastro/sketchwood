@@ -33,6 +33,17 @@ each section. Remove items when they're done (mention them in the commit).
 - Copies of a group share a definition until opened (SketchUp's behavior); opening one gives
   it its own copy, which isn't an undo step by itself.
 
+## Tags
+- Only groups and components can be tagged; loose geometry is always Untagged.
+- No tag colors or "color by tag", tag folders, dashed tag lines, or an "active tag" that new
+  groups get automatically.
+- Hidden groups are still listed in the Outliner (dimmed) but can't be selected there.
+- Toggling a tag's visibility is an undo step (SketchUp does the same).
+
+## UI
+- Keyboard focus never stays on buttons (it would swallow shortcuts and re-press the button
+  on Space/Enter), so Tab-navigation between widgets isn't available.
+
 ## Rotate / grips
 - Grips also appear around loose connected geometry (SketchUp shows them only on groups and
   components). Kept for now since it helps; revisit if it gets in the way.

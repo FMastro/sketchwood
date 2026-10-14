@@ -68,7 +68,9 @@ add it there; when you finish an item, remove it.
    Push/Pull auto-groups a board pulled from a free face (setting, on by default). Tools work
    in the edited container's coordinates via `Screen::in_context`; picking/snapping/drawing use
    the flattened `View` (edited geometry keeps its ids; picks resolve to instances).
-8. Tags (SketchUp's renamed Layers)
+8. Tags (done): on groups/components only (SketchUp best practice); hidden tags drop their
+   instances from the `View` (not drawn, picked or snapped). Tags panel (add, rename,
+   show/hide, delete → Untagged) and Entity Info tag picker in the left sidebar.
 9. Materials, with fields for OpenCutList-style cut lists (type, thickness, grain)
 10. Native save/load; OBJ/glTF export. Later: `.skp` import via the C SDK, cut lists.
 11. Line tool and face splitting, Offset, Circle, Tape Measure + guides (see backlog)

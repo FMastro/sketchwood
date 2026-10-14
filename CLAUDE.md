@@ -116,3 +116,6 @@ add it there; when you finish an item, remove it.
    on the box (corners even, edges two ways, faces one way), opposite grip fixed or Ctrl for the
    center, typed factors or sizes (`36"`), retyping changes it. A single group scales along its
    own axes into its transform; the cut list measures parts through their groups' scale.
+19. Eraser (done): `Document::erase`; tool (E) erases the edge, guide, group or component clicked, or
+   everything dragged over as one undo step; faces only go with their edges (a seam between
+   coplanar faces merges them). Every toolbar tool is now available.

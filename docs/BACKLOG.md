@@ -106,6 +106,8 @@ each section. Remove items when they're done (mention them in the commit).
   textures, no "export selection only", and each part isn't a separate STL file. No .skp import.
 
 ## UI
+- Eraser: no Shift (hide) or Ctrl (soften/smooth) variants; it can't erase a face by itself (select it
+  and press Delete).
 - Layout follows SketchUp's Windows defaults (menu bar, toolbar, Large Tool Set, Default Tray,
   Measurements at bottom right), but toolbars can't be moved or customized and tray panels
   can't be reordered or undocked. No Components, Styles or Scenes panels yet.

@@ -3,6 +3,7 @@
 
 mod arc;
 mod circle;
+mod eraser;
 mod line;
 pub mod pick;
 mod move_tool;
@@ -22,6 +23,7 @@ use sketchcraft_view::OrbitCamera;
 pub use pick::{Snap, SnapKind};
 use arc::ArcTool;
 use circle::CircleTool;
+use eraser::EraserTool;
 use line::LineTool;
 use pick::Screen;
 use move_tool::MoveTool;
@@ -132,24 +134,8 @@ impl ToolId {
     }
 
     pub fn is_available(self) -> bool {
-        matches!(
-            self,
-            Self::Select
-                | Self::Line
-                | Self::TapeMeasure
-                | Self::Offset
-                | Self::Arc
-                | Self::Circle
-                | Self::Scale
-                | Self::Rectangle
-                | Self::PushPull
-                | Self::Move
-                | Self::Rotate
-                | Self::PaintBucket
-                | Self::Orbit
-                | Self::Pan
-                | Self::Zoom
-        )
+        // Every toolbar tool works now; new ones can start out unavailable ("coming soon").
+        true
     }
 }
 
@@ -346,6 +332,7 @@ pub struct Tools {
     arc: ArcTool,
     circle: CircleTool,
     scale: ScaleTool,
+    eraser: EraserTool,
     rectangle: RectangleTool,
     push_pull: PushPullTool,
     move_tool: MoveTool,
@@ -374,6 +361,7 @@ impl Default for Tools {
             arc: ArcTool::default(),
             circle: CircleTool::default(),
             scale: ScaleTool::default(),
+            eraser: EraserTool::default(),
             rectangle: RectangleTool::default(),
             push_pull: PushPullTool::default(),
             move_tool: MoveTool::default(),
@@ -453,6 +441,7 @@ impl Tools {
         self.arc.cancel();
         self.circle.cancel();
         self.scale.cancel();
+        self.eraser.cancel();
         self.rectangle.cancel();
         self.push_pull.cancel();
         self.move_tool.cancel();
@@ -516,6 +505,19 @@ impl Tools {
                 Ok(())
             }
             (ToolId::Line, PointerEvent::DragEnd { pos, .. }) => self.line.drag_end(doc, screen, pos),
+            (ToolId::Eraser, PointerEvent::Move(pos) | PointerEvent::Drag { pos, .. }) => {
+                self.eraser.hover(doc, screen, pos);
+                Ok(())
+            }
+            (ToolId::Eraser, PointerEvent::Click { pos, .. }) => self.eraser.click(doc, screen, pos),
+            (ToolId::Eraser, PointerEvent::DragStart { origin }) => {
+                self.eraser.drag_start(doc, screen, origin);
+                Ok(())
+            }
+            (ToolId::Eraser, PointerEvent::DragEnd { pos, .. }) => {
+                self.eraser.drag_end(doc, screen, pos);
+                Ok(())
+            }
             (ToolId::Scale, PointerEvent::Move(pos) | PointerEvent::Drag { pos, .. }) => {
                 self.scale.hover(doc, screen, pos);
                 Ok(())
@@ -693,6 +695,7 @@ impl Tools {
             || self.arc.is_busy()
             || self.circle.is_busy()
             || self.scale.is_busy()
+            || self.eraser.is_busy()
             || self.rectangle.is_busy()
             || self.push_pull.is_busy()
             || self.move_tool.is_busy()
@@ -761,6 +764,7 @@ impl Tools {
             ToolId::Arc => self.arc.status(),
             ToolId::Circle => self.circle.status(),
             ToolId::Scale => self.scale.status(),
+            ToolId::Eraser => self.eraser.status().into(),
             ToolId::Rectangle => self.rectangle.status().into(),
             ToolId::PushPull => self.push_pull.status().into(),
             ToolId::Move if self.rotate.is_busy() => self.rotate.status(),
@@ -770,7 +774,6 @@ impl Tools {
             ToolId::Orbit => "Drag to orbit.".into(),
             ToolId::Pan => "Drag to pan.".into(),
             ToolId::Zoom => "Drag up to zoom in, down to zoom out.".into(),
-            _ => String::new(),
         }
     }
 
@@ -826,6 +829,7 @@ impl Tools {
             ToolId::Arc => self.arc.overlay(&mut overlay),
             ToolId::Circle => self.circle.overlay(&mut overlay),
             ToolId::Scale => self.scale.overlay(&mut overlay),
+            ToolId::Eraser => self.eraser.overlay(doc, &mut overlay),
             ToolId::Rectangle => self.rectangle.overlay(&mut overlay),
             ToolId::PushPull => self.push_pull.overlay(doc.model(), &mut overlay),
             ToolId::Move if self.rotate.is_busy() => self.rotate.overlay(doc, &mut overlay),
@@ -857,14 +861,13 @@ mod tests {
     }
 
     #[test]
-    fn unavailable_tools_explain_instead_of_switching() {
+    fn every_toolbar_tool_activates() {
         let mut tools = Tools::default();
-        tools.activate(ToolId::Eraser);
-        assert_eq!(tools.active(), ToolId::Select);
-        assert!(tools.status().contains("coming soon"));
-        tools.activate(ToolId::Rectangle);
-        assert_eq!(tools.active(), ToolId::Rectangle);
-        assert_eq!(tools.status(), "Select first corner.");
+        for tool in ToolId::ALL {
+            tools.activate(tool);
+            assert_eq!(tools.active(), tool, "{}", tool.name());
+            assert!(!tools.status().contains("coming soon"));
+        }
     }
 
     #[test]

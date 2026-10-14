@@ -542,13 +542,6 @@ fn cut_list_shows_parts_and_cutting_diagrams() {
     snapshot(&mut harness, "cut_list_diagrams");
 }
 
-#[test]
-fn unavailable_tool_shortcut_explains() {
-    let mut harness = app();
-    type_text(&mut harness, "e");
-    assert_eq!(harness.state().tools().active(), ToolId::Select);
-    assert!(harness.state().tools().status().contains("Eraser (E) is coming soon"));
-}
 
 #[test]
 fn draw_a_line_across_a_boards_top_and_push_down_a_rabbet() {
@@ -793,4 +786,25 @@ fn rename_a_board_in_entity_info_for_the_cut_list() {
     harness.state_mut().document_mut().undo();
     let doc = harness.state().document();
     assert_eq!(doc.instance_name(board), Some("Group#1"));
+}
+
+#[test]
+fn erase_a_splitting_line_with_the_eraser() {
+    use glam::DVec3;
+    let mut harness = app();
+    harness.state_mut().document_mut().edit(|m| {
+        m.add_rectangle(DVec3::ZERO, DVec3::X * 24.0, DVec3::Y * 12.0, DVec3::Z);
+        m.add_line(DVec3::new(8.0, 0.0, 0.0), DVec3::new(8.0, 12.0, 0.0));
+    });
+    harness.run();
+    type_text(&mut harness, "Z");
+    assert_eq!(harness.state().document().model().faces().count(), 2);
+
+    type_text(&mut harness, "e");
+    assert_eq!(harness.state().tools().active(), ToolId::Eraser);
+    let on_line = harness.state().to_window(DVec3::new(8.0, 7.0, 0.0)).unwrap();
+    click(&mut harness, on_line);
+    let model = harness.state().document().model();
+    assert_eq!(model.faces().count(), 1, "the two halves merged back into one face");
+    assert!(model.edges().all(|(id, _)| !model.edge_faces(id).is_empty()), "the line is gone");
 }

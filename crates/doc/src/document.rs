@@ -241,6 +241,13 @@ impl Document {
             return false;
         }
         let doomed: Vec<Entity> = self.selection.iter().collect();
+        self.erase(&doomed);
+        true
+    }
+
+    /// Erase entities of the edited container, as one undo step (the Eraser tool).
+    pub fn erase(&mut self, entities: &[Entity]) {
+        let doomed = entities.to_vec();
         self.edit_container(|container| {
             for &entity in &doomed {
                 if let Entity::Instance(id) = entity {
@@ -249,7 +256,6 @@ impl Document {
             }
             container.model.erase(doomed);
         });
-        true
     }
 
     pub fn select_all(&mut self) {

@@ -93,7 +93,8 @@ each section. Remove items when they're done (mention them in the commit).
 - Saving writes the file in place; a crash mid-write could truncate it (write to a temp file and
   rename instead).
 - File dialogs block the window while open (rfd's synchronous API).
-- No export yet (OBJ, glTF, STL) and no .skp import.
+- Export: OBJ (+ MTL colors) and ASCII STL only; no glTF, DAE or DXF/SVG (2D for CNC), no
+  textures, no "export selection only", and each part isn't a separate STL file. No .skp import.
 
 ## UI
 - Layout follows SketchUp's Windows defaults (menu bar, toolbar, Large Tool Set, Default Tray,

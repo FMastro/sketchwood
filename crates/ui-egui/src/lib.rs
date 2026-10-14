@@ -2,7 +2,7 @@
 
 mod chrome;
 mod cutlist;
-mod files;
+pub mod files;
 mod icons;
 mod keys;
 mod materials;
@@ -28,6 +28,8 @@ pub struct SketchCraftApp {
     cut_list: cutlist::CutListWindow,
     show_tray: bool,
     show_about: bool,
+    /// Units for File > Export.
+    export_units: sketchcraft_doc::export::ExportUnits,
 }
 
 impl SketchCraftApp {
@@ -49,6 +51,7 @@ impl SketchCraftApp {
             cut_list: cutlist::CutListWindow::default(),
             show_tray: true,
             show_about: false,
+            export_units: sketchcraft_doc::export::ExportUnits::Inches,
         }
     }
 
@@ -77,6 +80,11 @@ impl SketchCraftApp {
     }
 
     /// Save the drawing to `path`, which becomes its file.
+    /// Export the drawing to `path` in the File > Export units.
+    pub fn export_to(&self, path: &Path, format: files::ExportFormat) -> Result<(), String> {
+        files::export_to(&self.doc, path, format, self.export_units)
+    }
+
     pub fn save_to(&mut self, path: &Path) -> Result<(), String> {
         self.files.save_to(&self.doc, path)
     }

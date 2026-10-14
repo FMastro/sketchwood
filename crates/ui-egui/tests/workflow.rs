@@ -742,3 +742,28 @@ fn drill_a_dowel_hole_with_circle_and_push_pull() {
     assert_eq!(model.faces().count(), 6 + 24, "the board and the hole's 24 walls");
     snapshot(&mut harness, "dowel_hole");
 }
+
+#[test]
+fn export_obj_with_materials_and_stl() {
+    use egui_kittest::kittest::Queryable;
+    use sketchcraft_ui_egui::files::ExportFormat;
+    let dir = std::env::temp_dir().join(format!("sketchcraft-export-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut harness = app();
+    board(&mut harness);
+    harness.get_by_label("File").click();
+    harness.run();
+    harness.get_by_label_contains("Export").hover();
+    harness.run();
+    harness.get_by_label("Millimeters").click();
+    harness.run();
+
+    harness.state().export_to(&dir.join("bench.obj"), ExportFormat::Obj).unwrap();
+    harness.state().export_to(&dir.join("bench.stl"), ExportFormat::Stl).unwrap();
+    let obj = std::fs::read_to_string(dir.join("bench.obj")).unwrap();
+    assert!(obj.contains("mtllib bench.mtl") && obj.contains("units: millimeters"));
+    assert!(std::fs::read_to_string(dir.join("bench.mtl")).unwrap().contains("newmtl"));
+    let stl = std::fs::read_to_string(dir.join("bench.stl")).unwrap();
+    assert_eq!(stl.matches("facet normal").count(), 12, "a board: 6 faces, 12 triangles");
+    std::fs::remove_dir_all(&dir).ok();
+}

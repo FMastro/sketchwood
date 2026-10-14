@@ -105,4 +105,6 @@ add it there; when you finish an item, remove it.
    `Ns` to change, `Nr` for an arc radius), drawn as lines so they split faces. Push/Pull cuts
    through when pushed to the far face (dowel holes, rounded corners). Edges between faces
    meeting under 30° are drawn soft (hidden).
-16. OBJ/STL export (see backlog)
+16. Export (done): `doc::export` (visible geometry in world coordinates, triangles wound to their
+   front; OBJ named per group with an MTL of material colors; ASCII STL), File > Export with
+   inches or millimeters.

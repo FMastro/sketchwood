@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use eframe::egui;
 use sketchcraft_doc::Document;
+use sketchcraft_doc::export::{self, ExportUnits};
 use sketchcraft_doc::file::{self, EXTENSION};
 
 /// Something that would discard the drawing, waiting on the "save changes?" answer.
@@ -163,4 +164,50 @@ pub fn open_dialog(current: Option<&Path>) -> Option<PathBuf> {
         dialog = dialog.set_directory(dir);
     }
     dialog.pick_file()
+}
+
+/// A 3D export format (File > Export).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExportFormat {
+    Obj,
+    Stl,
+}
+
+impl ExportFormat {
+    fn extension(self) -> &'static str {
+        match self {
+            Self::Obj => "obj",
+            Self::Stl => "stl",
+        }
+    }
+}
+
+/// Write the drawing to `path` (an OBJ also gets its `.mtl` alongside).
+pub fn export_to(doc: &Document, path: &Path, format: ExportFormat, units: ExportUnits) -> Result<(), String> {
+    let fail = |e: std::io::Error| format!("Couldn't export {}: {e}", path.display());
+    match format {
+        ExportFormat::Stl => std::fs::write(path, export::to_stl(doc.scene(), units)).map_err(fail),
+        ExportFormat::Obj => {
+            let mtl_path = path.with_extension("mtl");
+            let mtl_name = mtl_path.file_name().map_or_else(|| "materials.mtl".into(), |n| n.to_string_lossy().into_owned());
+            let (obj, mtl) = export::to_obj(doc.scene(), units, &mtl_name);
+            std::fs::write(path, obj).map_err(fail)?;
+            std::fs::write(&mtl_path, mtl).map_err(fail)
+        }
+    }
+}
+
+/// The native dialog for choosing where to export, named after the drawing.
+pub fn export_dialog(current: Option<&Path>, format: ExportFormat) -> Option<PathBuf> {
+    let ext = format.extension();
+    let stem = current.and_then(Path::file_stem).map_or_else(|| "Untitled".into(), |s| s.to_string_lossy().into_owned());
+    let label = match format {
+        ExportFormat::Obj => "OBJ model",
+        ExportFormat::Stl => "STL model",
+    };
+    let mut dialog = rfd::FileDialog::new().add_filter(label, &[ext]).set_file_name(format!("{stem}.{ext}"));
+    if let Some(dir) = current.and_then(Path::parent) {
+        dialog = dialog.set_directory(dir);
+    }
+    dialog.save_file()
 }

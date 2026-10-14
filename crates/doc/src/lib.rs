@@ -6,6 +6,7 @@ pub mod curves;
 pub mod cutlist;
 pub mod cutplan;
 mod document;
+pub mod export;
 pub mod file;
 mod lines;
 mod model;

@@ -5,6 +5,7 @@
 
 use eframe::egui;
 use sketchcraft_doc::DefinitionKind;
+use sketchcraft_doc::export::ExportUnits;
 use sketchcraft_tools::{ToolId, Tools};
 use sketchcraft_view::StandardView;
 
@@ -78,6 +79,23 @@ impl SketchCraftApp {
                 ui.close();
                 self.save(true);
             }
+            ui.separator();
+            ui.menu_button("Export", |ui| {
+                for (label, format) in [("OBJ...", files::ExportFormat::Obj), ("STL...", files::ExportFormat::Stl)] {
+                    if ui.button(label).clicked() {
+                        ui.close();
+                        if let Some(path) = files::export_dialog(self.files.path.as_deref(), format)
+                            && let Err(error) = self.export_to(&path, format)
+                        {
+                            self.files.show_error(error);
+                        }
+                    }
+                }
+                ui.separator();
+                ui.label("Units");
+                ui.radio_value(&mut self.export_units, ExportUnits::Inches, "Inches");
+                ui.radio_value(&mut self.export_units, ExportUnits::Millimeters, "Millimeters");
+            });
             ui.separator();
             if ui.button("Exit").clicked() {
                 ui.close();

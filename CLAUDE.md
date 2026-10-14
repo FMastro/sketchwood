@@ -98,4 +98,7 @@ add it there; when you finish an item, remove it.
    the offset; from a point, a guide point; Ctrl measures only; typing places or moves the guide.
    Snapping: guide points, guide/edge and guide/guide intersections, on guide lines. Rectangle
    now draws through `Model::draw_polygon`, so it splits faces it overlaps.
-14. Offset, Circle, Arc; OBJ/STL export (see backlog)
+14. Offset (done): `Model::offset_outline` / `offset_face` (mitered corners, refuses outlines that
+   fold over), drawn through `draw_polygon` so an inward offset makes a frame and a panel. Tool (F):
+   click a face (or select one), move in or out, click or type; retyping changes it.
+15. Circle, Arc; OBJ/STL export (see backlog)

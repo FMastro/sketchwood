@@ -545,9 +545,9 @@ fn cut_list_shows_parts_and_cutting_diagrams() {
 #[test]
 fn unavailable_tool_shortcut_explains() {
     let mut harness = app();
-    type_text(&mut harness, "f");
+    type_text(&mut harness, "s");
     assert_eq!(harness.state().tools().active(), ToolId::Select);
-    assert!(harness.state().tools().status().contains("Offset (F) is coming soon"));
+    assert!(harness.state().tools().status().contains("Scale (S) is coming soon"));
 }
 
 #[test]
@@ -656,4 +656,50 @@ fn the_window_is_laid_out_like_sketchup() {
     harness.get_by_label("Front").click();
     harness.run();
     snapshot(&mut harness, "front_view");
+}
+
+#[test]
+fn offset_a_door_into_a_frame_and_recess_the_panel() {
+    use glam::DVec3;
+    let mut harness = app();
+    {
+        let doc = harness.state_mut().document_mut();
+        let face = doc.edit(|m| m.add_rectangle(DVec3::ZERO, DVec3::X * 24.0, DVec3::Y * 36.0, DVec3::Z)).unwrap();
+        doc.push_pull(face, 0.75, false).unwrap();
+    }
+    harness.run();
+    type_text(&mut harness, "Z");
+
+    type_text(&mut harness, "f");
+    assert_eq!(harness.state().tools().active(), ToolId::Offset);
+    let center = harness.state().to_window(DVec3::new(12.0, 18.0, 0.75)).unwrap();
+    click(&mut harness, center);
+    harness.hover_at(harness.state().to_window(DVec3::new(4.0, 18.0, 0.75)).unwrap());
+    harness.run();
+    type_text(&mut harness, "2 1/2");
+    harness.key_press(Key::Enter);
+    harness.run();
+    assert_eq!(harness.state().tools().measurement(), "2 1/2\"");
+
+    // Push the panel down 1/4" inside its frame.
+    type_text(&mut harness, "p");
+    click(&mut harness, center);
+    harness.hover_at(center + egui::vec2(0.0, 30.0));
+    harness.run();
+    type_text(&mut harness, "1/4");
+    harness.key_press(Key::Enter);
+    harness.run();
+    let model = harness.state().document().model();
+    let floor = model
+        .faces()
+        .find(|(_, f)| f.normal.z > 0.5 && (model.vertex(f.outer[0]).z - 0.5).abs() < 1e-9)
+        .map(|(id, _)| id)
+        .expect("a recessed panel at 1/2\"");
+    let (lo, hi) = model.loop_points(&model.face(floor).unwrap().outer).iter().fold(
+        (DVec3::splat(f64::MAX), DVec3::splat(f64::MIN)),
+        |(lo, hi), p| (lo.min(*p), hi.max(*p)),
+    );
+    assert!(lo.abs_diff_eq(DVec3::new(2.5, 2.5, 0.5), 1e-9) && hi.abs_diff_eq(DVec3::new(21.5, 33.5, 0.5), 1e-9));
+    type_text(&mut harness, "Z");
+    snapshot(&mut harness, "door_panel");
 }

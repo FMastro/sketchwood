@@ -4,6 +4,7 @@
 mod line;
 pub mod pick;
 mod move_tool;
+mod offset;
 mod paint;
 mod push_pull;
 mod rotate;
@@ -19,6 +20,7 @@ pub use pick::{Snap, SnapKind};
 use line::LineTool;
 use pick::Screen;
 use move_tool::MoveTool;
+use offset::OffsetTool;
 use paint::PaintTool;
 use push_pull::PushPullTool;
 use rotate::RotateTool;
@@ -129,6 +131,7 @@ impl ToolId {
             Self::Select
                 | Self::Line
                 | Self::TapeMeasure
+                | Self::Offset
                 | Self::Rectangle
                 | Self::PushPull
                 | Self::Move
@@ -330,6 +333,7 @@ pub struct Tools {
     select: SelectTool,
     line: LineTool,
     tape: TapeTool,
+    offset: OffsetTool,
     rectangle: RectangleTool,
     push_pull: PushPullTool,
     move_tool: MoveTool,
@@ -354,6 +358,7 @@ impl Default for Tools {
             select: SelectTool::default(),
             line: LineTool::default(),
             tape: TapeTool::default(),
+            offset: OffsetTool::default(),
             rectangle: RectangleTool::default(),
             push_pull: PushPullTool::default(),
             move_tool: MoveTool::default(),
@@ -429,6 +434,7 @@ impl Tools {
         self.select.cancel();
         self.line.cancel();
         self.tape.cancel();
+        self.offset.cancel();
         self.rectangle.cancel();
         self.push_pull.cancel();
         self.move_tool.cancel();
@@ -492,6 +498,14 @@ impl Tools {
                 Ok(())
             }
             (ToolId::Line, PointerEvent::DragEnd { pos, .. }) => self.line.drag_end(doc, screen, pos),
+            (ToolId::Offset, PointerEvent::Move(pos) | PointerEvent::Drag { pos, .. }) => {
+                self.offset.hover(doc, screen, pos);
+                Ok(())
+            }
+            (ToolId::Offset, PointerEvent::Click { pos, .. }) => {
+                self.typed.clear();
+                self.offset.click(doc, screen, pos)
+            }
             (ToolId::TapeMeasure, PointerEvent::Move(pos) | PointerEvent::Drag { pos, .. }) => {
                 self.tape.hover(doc, screen, pos);
                 Ok(())
@@ -608,6 +622,7 @@ impl Tools {
         let result = match self.active {
             ToolId::Line => self.line.enter(doc, &typed),
             ToolId::TapeMeasure => self.tape.enter(doc, &typed),
+            ToolId::Offset => self.offset.enter(doc, &typed),
             ToolId::Rectangle => self.rectangle.enter(doc, &typed),
             ToolId::PushPull => self.push_pull.enter(doc, &typed),
             ToolId::Move if self.grip_active() => self.rotate.enter(doc, &typed),
@@ -626,6 +641,7 @@ impl Tools {
         let busy = self.select.is_busy()
             || self.line.is_busy()
             || self.tape.is_busy()
+            || self.offset.is_busy()
             || self.rectangle.is_busy()
             || self.push_pull.is_busy()
             || self.move_tool.is_busy()
@@ -690,6 +706,7 @@ impl Tools {
                 .into(),
             ToolId::Line => self.line.status().into(),
             ToolId::TapeMeasure => self.tape.status(),
+            ToolId::Offset => self.offset.status().into(),
             ToolId::Rectangle => self.rectangle.status().into(),
             ToolId::PushPull => self.push_pull.status().into(),
             ToolId::Move if self.rotate.is_busy() => self.rotate.status(),
@@ -708,7 +725,7 @@ impl Tools {
             ToolId::Rectangle => "Dimensions",
             ToolId::Move if self.grip_active() => "Angle",
             ToolId::Line | ToolId::TapeMeasure => "Length",
-            ToolId::PushPull | ToolId::Move => "Distance",
+            ToolId::PushPull | ToolId::Move | ToolId::Offset => "Distance",
             ToolId::Rotate => "Angle",
             _ => "Measurements",
         }
@@ -722,6 +739,7 @@ impl Tools {
         match self.active {
             ToolId::Line => self.line.measurement(),
             ToolId::TapeMeasure => self.tape.measurement(),
+            ToolId::Offset => self.offset.measurement(),
             ToolId::Rectangle => self.rectangle.measurement(),
             ToolId::PushPull => self.push_pull.measurement(),
             ToolId::Move if self.grip_active() => self.rotate.measurement(),
@@ -744,6 +762,7 @@ impl Tools {
             ToolId::Select => self.select.overlay(&mut overlay),
             ToolId::Line => self.line.overlay(&mut overlay),
             ToolId::TapeMeasure => self.tape.overlay(&mut overlay),
+            ToolId::Offset => self.offset.overlay(doc, &mut overlay),
             ToolId::Rectangle => self.rectangle.overlay(&mut overlay),
             ToolId::PushPull => self.push_pull.overlay(doc.model(), &mut overlay),
             ToolId::Move if self.rotate.is_busy() => self.rotate.overlay(doc, &mut overlay),
@@ -777,7 +796,7 @@ mod tests {
     #[test]
     fn unavailable_tools_explain_instead_of_switching() {
         let mut tools = Tools::default();
-        tools.activate(ToolId::Offset);
+        tools.activate(ToolId::Scale);
         assert_eq!(tools.active(), ToolId::Select);
         assert!(tools.status().contains("coming soon"));
         tools.activate(ToolId::Rectangle);

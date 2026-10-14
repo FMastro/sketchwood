@@ -14,6 +14,12 @@ each section. Remove items when they're done (mention them in the commit).
 - **Move can't bend faces**: SketchUp folds a face that would become non-planar (adds a
   diagonal); we refuse the move instead.
 
+## Offset
+- Only a face's outer outline is offset; holes aren't (SketchUp offsets them too).
+- Can't offset a selection of connected edges (only faces), and the distance doesn't snap
+  to points the cursor passes over.
+- Corners are always mitered (sharp); no rounded outward corners.
+
 ## Guides (Tape Measure)
 - Only the edited group's guides are shown and snapped to; guides inside closed groups are
   hidden (SketchUp shows them all).

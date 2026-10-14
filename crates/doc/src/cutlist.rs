@@ -80,7 +80,7 @@ struct Found {
 
 pub fn cut_list(scene: &Scene) -> CutList {
     let mut found = Vec::new();
-    collect(scene, &scene.root, None, &mut found);
+    collect(scene, &scene.root, None, glam::DMat3::IDENTITY, &mut found);
 
     // Group identical parts: same material, same rounded size.
     let key = |v: f64| (v / SIZE_PRECISION).round() as i64;
@@ -133,21 +133,24 @@ pub fn cut_list(scene: &Scene) -> CutList {
     }
     CutList { materials, loose_faces: scene.root.model.faces().count() }
 }
-
 /// Walk instances, inheriting materials from enclosing groups.
-fn collect(scene: &Scene, container: &Container, inherited: Option<MaterialId>, found: &mut Vec<Found>) {
+/// Walk instances, inheriting materials from enclosing groups. `linear` is the enclosing
+/// groups' combined rotation and scale: a scaled group's part is measured at its scaled size.
+fn collect(scene: &Scene, container: &Container, inherited: Option<MaterialId>, linear: glam::DMat3, found: &mut Vec<Found>) {
     for (_, instance) in container.instances() {
         if !scene.is_visible(instance) {
             continue;
         }
         let Some(definition) = scene.definition(instance.definition) else { continue };
         let material = instance.material.or(inherited);
+        let linear = linear * instance.transform.matrix3;
         let model = &definition.container.model;
         if model.faces().next().is_some() {
             let points: Vec<DVec3> = model.vertices().map(|(_, p)| p).collect();
             let lo = points.iter().copied().reduce(DVec3::min).unwrap_or_default();
             let hi = points.iter().copied().reduce(DVec3::max).unwrap_or_default();
-            let mut size = (hi - lo).to_array();
+            // Each local axis stretched by the scale along it (rotation doesn't change sizes).
+            let mut size = [0, 1, 2].map(|i| (hi - lo)[i] * (linear * DVec3::AXES[i]).length());
             size.sort_by(f64::total_cmp);
             found.push(Found {
                 name: definition.name.clone(),
@@ -156,7 +159,7 @@ fn collect(scene: &Scene, container: &Container, inherited: Option<MaterialId>, 
                 size,
             });
         }
-        collect(scene, &definition.container, material, found);
+        collect(scene, &definition.container, material, linear, found);
     }
 }
 

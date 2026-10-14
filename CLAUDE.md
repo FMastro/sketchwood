@@ -112,3 +112,7 @@ add it there; when you finish an item, remove it.
    material can override them (`Material::stock`, `cutplan::plan_all`); Entity Info renames groups
    and components (the part name); `doc::cutsheet` writes a printable HTML cut sheet (parts, what
    to buy, SVG diagrams) that opens in the browser.
+18. Scale (done): `doc::scaling` (factors along three axes about an anchor); tool (S) with 26 grips
+   on the box (corners even, edges two ways, faces one way), opposite grip fixed or Ctrl for the
+   center, typed factors or sizes (`36"`), retyping changes it. A single group scales along its
+   own axes into its transform; the cut list measures parts through their groups' scale.

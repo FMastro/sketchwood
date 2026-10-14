@@ -187,6 +187,15 @@ pub fn rotation(center: DVec3, axis: DVec3, angle: f64) -> impl Fn(DVec3) -> DVe
     move |p| center + q * (p - center)
 }
 
+/// Scaling by `factors` along the three orthonormal `axes`, keeping `anchor` fixed. Scaling a
+/// group or component along its own axes keeps its transform free of shear, so the cut list
+/// can read its stretched size.
+pub fn scaling(axes: [DVec3; 3], anchor: DVec3, factors: DVec3) -> glam::DAffine3 {
+    let frame = glam::DMat3::from_cols(axes[0], axes[1], axes[2]);
+    let matrix3 = frame * glam::DMat3::from_diagonal(factors) * frame.transpose();
+    glam::DAffine3 { matrix3, translation: anchor - matrix3 * anchor }
+}
+
 #[cfg(test)]
 mod tests {
     use std::f64::consts::FRAC_PI_2;

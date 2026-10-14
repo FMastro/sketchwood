@@ -545,9 +545,9 @@ fn cut_list_shows_parts_and_cutting_diagrams() {
 #[test]
 fn unavailable_tool_shortcut_explains() {
     let mut harness = app();
-    type_text(&mut harness, "s");
+    type_text(&mut harness, "e");
     assert_eq!(harness.state().tools().active(), ToolId::Select);
-    assert!(harness.state().tools().status().contains("Scale (S) is coming soon"));
+    assert!(harness.state().tools().status().contains("Eraser (E) is coming soon"));
 }
 
 #[test]

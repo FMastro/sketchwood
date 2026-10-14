@@ -14,6 +14,14 @@ each section. Remove items when they're done (mention them in the commit).
 - **Move can't bend faces**: SketchUp folds a face that would become non-planar (adds a
   diagonal); we refuse the move instead.
 
+## Scale
+- No mirroring (negative factors are refused); no Shift to switch corner grips to non-uniform
+  or edge grips to uniform.
+- Several things scaled together use the red/green/blue axes; a rotated group among them gets
+  sheared, and the cut list then measures it only approximately.
+- Grips are drawn like Move's rotation grips (red crosses); SketchUp's are green boxes, and it
+  hides the ones facing away.
+
 ## Circles and arcs
 - Curves aren't one entity: a circle is 24 separate edges (SketchUp groups them, so one click
   selects the whole circle and Entity Info shows its radius and sides).

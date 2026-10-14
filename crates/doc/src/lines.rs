@@ -25,6 +25,12 @@ impl Model {
     /// Draw the edge from `a` to `b`, splitting it and the edges it meets, and splitting or
     /// making faces. Returns the edges the line became, in order from `a`.
     pub fn add_line(&mut self, a: DVec3, b: DVec3) -> Vec<EdgeId> {
+        self.add_line_facing(a, b, None)
+    }
+
+    /// Like [`Self::add_line`]; a face the line closes in free space faces `facing` (when it
+    /// isn't edge-on to it).
+    pub(crate) fn add_line_facing(&mut self, a: DVec3, b: DVec3, facing: Option<DVec3>) -> Vec<EdgeId> {
         let length = a.distance(b);
         if length <= EPS {
             return Vec::new();
@@ -76,8 +82,40 @@ impl Model {
                 }
             }
         }
-        self.heal_faces(&new);
+        self.heal_faces(&new, facing);
         pieces
+    }
+
+    /// Draw a closed polygon as lines, the way the Rectangle tool does: it splits faces and edges
+    /// it crosses and is split by them. A face it closes in free space faces `facing`. Returns
+    /// the face filling exactly the polygon, if one formed (not when it partly overlaps a face).
+    pub fn draw_polygon(&mut self, points: &[DVec3], facing: DVec3) -> Option<FaceId> {
+        let distinct = points.iter().enumerate().all(|(i, p)| points[i + 1..].iter().all(|q| p.distance(*q) > EPS));
+        if points.len() < 3 || !distinct || crate::model::newell_normal(points).length() <= EPS {
+            return None;
+        }
+        let n = points.len();
+        for i in 0..n {
+            self.add_line_facing(points[i], points[(i + 1) % n], Some(facing));
+        }
+        let corners: Vec<VertexId> = points.iter().map(|&p| self.vertex_at(p)).collect::<Option<_>>()?;
+        let on_outline = |p: DVec3| {
+            (0..n).any(|i| {
+                let (a, b) = (points[i], points[(i + 1) % n]);
+                p.distance(a) <= TOL || p.distance(b) <= TOL || strictly_on_segment(p, a, b)
+            })
+        };
+        self.faces()
+            .find(|(_, f)| {
+                corners.iter().all(|c| f.outer.contains(c)) && f.outer.iter().all(|&v| on_outline(self.vertex(v)))
+            })
+            .map(|(id, _)| id)
+    }
+
+    /// [`Self::draw_polygon`] for the rectangle `corner`, `corner + u`, `corner + u + v`,
+    /// `corner + v`.
+    pub fn draw_rectangle(&mut self, corner: DVec3, u: DVec3, v: DVec3, facing: DVec3) -> Option<FaceId> {
+        self.draw_polygon(&[corner, corner + u, corner + u + v, corner + v], facing)
     }
 
     /// Merge the two coplanar faces on either side of `edge` by erasing it. Returns `false`
@@ -93,12 +131,12 @@ impl Model {
             return false;
         }
         self.remove_edge(edge);
-        self.rebuild_plane(normal, origin, &[], &BTreeSet::from([f, g]));
+        self.rebuild_plane(normal, origin, &[], &BTreeSet::from([f, g]), None);
         true
     }
 
     /// Rebuild faces in every plane a new edge could split or close a face in.
-    fn heal_faces(&mut self, new: &[EdgeId]) {
+    fn heal_faces(&mut self, new: &[EdgeId], facing: Option<DVec3>) {
         let mut planes: Vec<(DVec3, DVec3)> = Vec::new();
         for &id in new {
             let Some(&edge) = self.edge(id) else { continue };
@@ -146,7 +184,7 @@ impl Model {
                 })
                 .map(|(id, _)| id)
                 .collect();
-            self.rebuild_plane(normal, origin, &new_here, &affected);
+            self.rebuild_plane(normal, origin, &new_here, &affected, facing);
         }
     }
 
@@ -156,7 +194,14 @@ impl Model {
 
     /// Recompute the faces of one plane. `affected` faces are replaced by the regions inside
     /// them; regions bounded by a `new` edge outside every face become new faces.
-    fn rebuild_plane(&mut self, normal: DVec3, origin: DVec3, new: &[EdgeId], affected: &BTreeSet<FaceId>) {
+    fn rebuild_plane(
+        &mut self,
+        normal: DVec3,
+        origin: DVec3,
+        new: &[EdgeId],
+        affected: &BTreeSet<FaceId>,
+        facing: Option<DVec3>,
+    ) {
         let u = normal.any_orthonormal_vector();
         let v = normal.cross(u);
         let flat = |p: DVec3| DVec2::new((p - origin).dot(u), (p - origin).dot(v));
@@ -214,7 +259,7 @@ impl Model {
                     if !bounded_by_new || in_opening {
                         continue;
                     }
-                    (preferred_side(normal), None)
+                    (preferred_side(normal, facing), None)
                 }
             };
             // Regions wind counter-clockwise around `normal`; faces wind around their front.
@@ -281,9 +326,12 @@ impl Model {
     }
 }
 
-/// The front side for a face made from loose edges: up, else toward the front view (-Y), else
-/// toward the right view (+X).
-fn preferred_side(normal: DVec3) -> DVec3 {
+/// The front side for a face made from loose edges: toward `facing` if given, else up, else
+/// toward the front view (-Y), else toward the right view (+X).
+fn preferred_side(normal: DVec3, facing: Option<DVec3>) -> DVec3 {
+    if let Some(f) = facing.filter(|f| f.dot(normal).abs() > 1e-9) {
+        return normal * f.dot(normal).signum();
+    }
     let key = [normal.z, -normal.y, normal.x];
     let sign = key.iter().find(|c| c.abs() > 1e-9).map_or(1.0, |c| c.signum());
     normal * sign
@@ -648,6 +696,34 @@ mod tests {
         let edge = model.face_edges(base)[0];
         model.erase([Entity::Edge(edge)]);
         assert_eq!(model.faces().count(), 4);
+    }
+
+    #[test]
+    fn overlapping_rectangles_split_into_three_faces() {
+        let mut model = Model::default();
+        let first = model.draw_rectangle(DVec3::ZERO, DVec3::X * 10.0, DVec3::Y * 10.0, DVec3::Z).unwrap();
+        let second = model.draw_rectangle(p(6.0, 6.0), DVec3::X * 10.0, DVec3::Y * 10.0, DVec3::Z);
+        assert_eq!(second, None, "no single face fills an overlapping rectangle");
+        let mut areas: Vec<f64> = model.faces().map(|(id, _)| area(&model, id)).collect();
+        areas.sort_by(f64::total_cmp);
+        assert_eq!(areas.len(), 3);
+        assert!((areas[0] - 16.0).abs() < 1e-9, "{areas:?}");
+        assert!((areas[1] - 84.0).abs() < 1e-9 && (areas[2] - 84.0).abs() < 1e-9, "{areas:?}");
+        assert!(model.face(first).is_some());
+        assert!(model.faces().all(|(_, f)| f.normal.abs_diff_eq(DVec3::Z, 1e-12) && f.holes.is_empty()));
+        assert_wound(&model);
+    }
+
+    #[test]
+    fn a_drawn_rectangle_faces_the_way_asked() {
+        let mut model = Model::default();
+        let face = model.draw_rectangle(DVec3::ZERO, DVec3::X * 2.0, DVec3::Y * 3.0, -DVec3::Z).unwrap();
+        assert!(model.face(face).unwrap().normal.abs_diff_eq(-DVec3::Z, 1e-12));
+        assert!((area(&model, face) - 6.0).abs() < 1e-9);
+        // Drawn again over itself: the same face.
+        assert_eq!(model.draw_rectangle(p(2.0, 3.0), -DVec3::X * 2.0, -DVec3::Y * 3.0, DVec3::Z), Some(face));
+        assert_eq!(model.faces().count(), 1);
+        assert_wound(&model);
     }
 
     #[test]

@@ -548,6 +548,8 @@ impl View {
             Entity::Edge(id) => self.owner_where(|start| id >= start.1),
             Entity::Face(id) => self.owner_where(|start| id >= start.2),
             Entity::Instance(id) => Owner::Instance(id),
+            // Only the edited container's guides are in the view.
+            Entity::Guide(_) => Owner::Active,
         }
     }
 

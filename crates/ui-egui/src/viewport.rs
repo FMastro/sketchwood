@@ -236,6 +236,50 @@ fn draw_protractor(
     }
 }
 
+/// Guides: dashed endless lines and small crosses, blue when selected.
+fn draw_guides(
+    painter: &egui::Painter,
+    camera: &OrbitCamera,
+    screen: &impl Fn(DVec3) -> Option<egui::Pos2>,
+    overlay: &Overlay,
+) {
+    // How far guide lines reach either side of the camera, in inches; far beyond any furniture.
+    const REACH: f64 = 20_000.0;
+    let eye = camera.eye().as_dvec3();
+    let forward = camera.forward().as_dvec3();
+    let near = f64::from(camera.distance) * 0.02;
+    for &(guide, selected) in &overlay.guides {
+        let color = if selected { egui::Color32::from_rgb(0, 90, 255) } else { egui::Color32::from_gray(60) };
+        let stroke = egui::Stroke::new(if selected { 1.5 } else { 1.0 }, color);
+        match guide {
+            sketchcraft_doc::Guide::Line { point, dir } => {
+                // The stretch of the line nearest the eye, cut where it passes behind the camera.
+                let middle = point + dir * (eye - point).dot(dir);
+                let (mut a, mut b) = (middle - dir * REACH, middle + dir * REACH);
+                let (da, db) = ((a - eye).dot(forward) - near, (b - eye).dot(forward) - near);
+                if da < 0.0 && db < 0.0 {
+                    continue;
+                }
+                if da < 0.0 {
+                    a = a + (b - a) * (da / (da - db));
+                } else if db < 0.0 {
+                    b = a + (b - a) * (da / (da - db));
+                }
+                if let (Some(a), Some(b)) = (screen(a), screen(b)) {
+                    painter.extend(egui::Shape::dashed_line(&[a, b], stroke, 6.0, 4.0));
+                }
+            }
+            sketchcraft_doc::Guide::Point(p) => {
+                if let Some(p) = screen(p) {
+                    let r = 4.0;
+                    painter.line_segment([p - egui::vec2(r, r), p + egui::vec2(r, r)], stroke);
+                    painter.line_segment([p - egui::vec2(r, -r), p + egui::vec2(r, -r)], stroke);
+                }
+            }
+        }
+    }
+}
+
 /// A SketchUp-style inference tooltip below-right of `pos`.
 fn tooltip(painter: &egui::Painter, pos: egui::Pos2, label: &str) {
     let galley = painter.layout_no_wrap(label.into(), egui::FontId::proportional(12.0), egui::Color32::BLACK);
@@ -254,6 +298,8 @@ fn tooltip(painter: &egui::Painter, pos: egui::Pos2, label: &str) {
 /// tooltip, and the selection window.
 fn draw_overlay(painter: &egui::Painter, rect: egui::Rect, camera: &OrbitCamera, size: Vec2, overlay: &Overlay) {
     let screen = |p: DVec3| camera.project(p.as_vec3(), size).map(|s| rect.min + egui::vec2(s.x, s.y));
+
+    draw_guides(painter, camera, &screen, overlay);
 
     let highlight = egui::Stroke::new(3.0, egui::Color32::from_rgb(0, 90, 255));
     for [a, b] in &overlay.highlight {
@@ -316,6 +362,8 @@ fn draw_overlay(painter: &egui::Painter, rect: egui::Rect, camera: &OrbitCamera,
             SnapKind::Origin => egui::Color32::from_rgb(230, 170, 0),
             SnapKind::Midpoint => egui::Color32::from_rgb(0, 190, 210),
             SnapKind::OnEdge => egui::Color32::from_rgb(220, 0, 0),
+            SnapKind::GuidePoint | SnapKind::Intersection => egui::Color32::from_gray(20),
+            SnapKind::OnGuide => egui::Color32::from_gray(110),
             SnapKind::OnFace => egui::Color32::from_rgb(0, 90, 255),
             SnapKind::OnPlane | SnapKind::OnGround => egui::Color32::from_gray(90),
         };

@@ -45,7 +45,7 @@ impl SelectTool {
                 doc.enter(id);
                 return;
             }
-            Entity::Instance(_) => vec![entity],
+            Entity::Instance(_) | Entity::Guide(_) => vec![entity],
             _ if count >= 3 => model.connected(entity).into_iter().collect(),
             Entity::Face(id) if count == 2 => {
                 std::iter::once(Entity::Face(id)).chain(model.face_edges(id).into_iter().map(Entity::Edge)).collect()

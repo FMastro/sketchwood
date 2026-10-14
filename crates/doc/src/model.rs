@@ -2,8 +2,9 @@
 //!
 //! Units are inches. Edges are shared between the faces they bound. A face drawn inside an
 //! existing coplanar face is cut into it as a hole, the way SketchUp does. Lines that split
-//! faces and loops that close into faces live in `lines.rs`. Not handled yet: faces that
-//! partially overlap when added whole with `add_face`.
+//! faces and loops that close into faces live in `lines.rs`. (`add_face`, used by
+//! Push/Pull, doesn't split faces it partly overlaps; the drawing tools go through
+//! `draw_polygon` and `add_line`, which do.)
 use serde::{Deserialize, Serialize};
 
 use std::collections::BTreeSet;
@@ -28,13 +29,27 @@ pub struct EdgeId(u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct FaceId(u32);
 
-/// Anything the user can select. Edges and faces belong to a [`Model`]; instances (groups and
-/// components) to the [`crate::Container`] around it.
+/// A guide (construction line or point) in a [`Model`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct GuideId(u32);
+
+/// Anything the user can select. Edges, faces and guides belong to a [`Model`]; instances
+/// (groups and components) to the [`crate::Container`] around it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Entity {
     Edge(EdgeId),
     Face(FaceId),
     Instance(InstanceId),
+    Guide(GuideId),
+}
+
+/// SketchUp's guides, made with the Tape Measure: dashed reference geometry to snap to while
+/// laying out (an offset from an edge, a point at a measured distance). Not part of any solid.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum Guide {
+    /// An endless line through `point` along unit `dir`.
+    Line { point: DVec3, dir: DVec3 },
+    Point(DVec3),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -80,11 +95,35 @@ pub struct Model {
     vertices: Arena<DVec3>,
     edges: Arena<Edge>,
     faces: Arena<Face>,
+    /// Older files have none.
+    #[serde(default)]
+    guides: Arena<Guide>,
 }
 
 impl Model {
     pub fn is_empty(&self) -> bool {
-        self.edges.iter().next().is_none() && self.faces.iter().next().is_none()
+        self.edges.iter().next().is_none() && self.faces.iter().next().is_none() && self.guides.iter().next().is_none()
+    }
+
+    pub fn guide(&self, id: GuideId) -> Option<&Guide> {
+        self.guides.get(id.0)
+    }
+
+    pub fn guides(&self) -> impl Iterator<Item = (GuideId, &Guide)> {
+        self.guides.iter().map(|(i, g)| (GuideId(i), g))
+    }
+
+    pub fn add_guide(&mut self, guide: Guide) -> GuideId {
+        GuideId(self.guides.insert(guide))
+    }
+
+    /// Erase every guide (SketchUp's Delete Guides). Returns whether there were any.
+    pub fn delete_guides(&mut self) -> bool {
+        let ids: Vec<u32> = self.guides.iter().map(|(i, _)| i).collect();
+        for &i in &ids {
+            self.guides.remove(i);
+        }
+        !ids.is_empty()
     }
 
     pub fn vertex(&self, id: VertexId) -> DVec3 {
@@ -103,6 +142,7 @@ impl Model {
         match entity {
             Entity::Edge(id) => self.edge(id).is_some(),
             Entity::Face(id) => self.face(id).is_some(),
+            Entity::Guide(id) => self.guide(id).is_some(),
             Entity::Instance(_) => false,
         }
     }
@@ -123,6 +163,7 @@ impl Model {
         self.edges()
             .map(|(id, _)| Entity::Edge(id))
             .chain(self.faces().map(|(id, _)| Entity::Face(id)))
+            .chain(self.guides().map(|(id, _)| Entity::Guide(id)))
     }
 
     pub fn edge_points(&self, edge: &Edge) -> [DVec3; 2] {
@@ -370,6 +411,9 @@ impl Model {
             match entity {
                 // Instances live in the container, not the model.
                 Entity::Instance(_) => {}
+                Entity::Guide(id) => {
+                    self.guides.remove(id.0);
+                }
                 Entity::Face(id) => {
                     self.faces.remove(id.0);
                 }
@@ -416,7 +460,7 @@ impl Model {
         let mut reached: BTreeSet<VertexId> = match start {
             Entity::Edge(id) => self.edge(id).map(|e| [e.a, e.b].into()).unwrap_or_default(),
             Entity::Face(id) => self.face(id).map(|f| f.outer[..1].iter().copied().collect()).unwrap_or_default(),
-            Entity::Instance(_) => BTreeSet::new(),
+            Entity::Instance(_) | Entity::Guide(_) => BTreeSet::new(),
         };
         loop {
             let before = reached.len();

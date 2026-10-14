@@ -40,7 +40,7 @@ impl Model {
         for entity in entities {
             match entity {
                 Entity::Edge(id) => vertices.extend(self.edge(id).into_iter().flat_map(|e| [e.a, e.b])),
-                Entity::Instance(_) => {}
+                Entity::Instance(_) | Entity::Guide(_) => {}
                 Entity::Face(id) => {
                     vertices.extend(self.face(id).into_iter().flat_map(|f| f.loops().flatten().copied()))
                 }

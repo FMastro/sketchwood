@@ -1,7 +1,7 @@
 //! Turning cursor positions into model entities and snapped points.
 
 use glam::{DAffine3, DVec3, Vec2};
-use sketchcraft_doc::{EdgeId, Entity, FaceId, Model, VertexId};
+use sketchcraft_doc::{EdgeId, Entity, FaceId, Guide, GuideId, Model, VertexId};
 use sketchcraft_view::OrbitCamera;
 
 use crate::Axis;
@@ -120,10 +120,11 @@ pub fn hit_edge(model: &Model, screen: Screen<'_>, cursor: Vec2) -> Option<EdgeI
         .map(|(id, _)| id)
 }
 
-/// What's under the cursor: edges take priority over the faces they border, as in SketchUp.
+/// What's under the cursor: edges, then guides, then faces, as in SketchUp.
 pub fn pick_entity(model: &Model, screen: Screen<'_>, cursor: Vec2) -> Option<Entity> {
     hit_edge(model, screen, cursor)
         .map(Entity::Edge)
+        .or_else(|| hit_guide(model, screen, cursor).map(Entity::Guide))
         .or_else(|| hit_face(model, &screen.ray(cursor)).map(|(id, _)| Entity::Face(id)))
 }
 
@@ -131,8 +132,12 @@ pub fn pick_entity(model: &Model, screen: Screen<'_>, cursor: Vec2) -> Option<En
 pub enum SnapKind {
     Endpoint,
     Origin,
+    GuidePoint,
+    /// Where a guide line crosses an edge or another guide line.
+    Intersection,
     Midpoint,
     OnEdge,
+    OnGuide,
     OnFace,
     /// On the plane a tool is drawing in.
     OnPlane,
@@ -145,8 +150,11 @@ impl SnapKind {
         match self {
             Self::Endpoint => Some("Endpoint"),
             Self::Origin => Some("Origin"),
+            Self::GuidePoint => Some("Guide Point"),
+            Self::Intersection => Some("Intersection"),
             Self::Midpoint => Some("Midpoint"),
             Self::OnEdge => Some("On Edge"),
+            Self::OnGuide => Some("On Guide"),
             Self::OnFace => Some("On Face"),
             Self::OnPlane | Self::OnGround => None,
         }
@@ -154,7 +162,16 @@ impl SnapKind {
 
     /// A point on existing geometry (as opposed to a surface or the drawing plane).
     pub fn is_feature(self) -> bool {
-        matches!(self, Self::Endpoint | Self::Origin | Self::Midpoint | Self::OnEdge)
+        matches!(
+            self,
+            Self::Endpoint
+                | Self::Origin
+                | Self::GuidePoint
+                | Self::Intersection
+                | Self::Midpoint
+                | Self::OnEdge
+                | Self::OnGuide
+        )
     }
 }
 
@@ -164,6 +181,8 @@ pub struct Snap {
     pub kind: SnapKind,
     /// Normal of the surface the point is on; tools draw in this plane.
     pub normal: DVec3,
+    /// For a point on an edge or guide line, the line's direction.
+    pub line: Option<DVec3>,
 }
 
 /// The point the cursor indicates. With a `plane` (point, normal), the result is always on
@@ -185,17 +204,18 @@ pub fn snap(
     match (snap_feature(model, screen, cursor, |_| false), plane) {
         // Snapped points off the drawing plane are projected onto it.
         (Some(s), Some((origin, normal))) => {
-            Some(Snap { point: s.point - normal * (s.point - origin).dot(normal), kind: s.kind, normal })
+            Some(Snap { point: s.point - normal * (s.point - origin).dot(normal), normal, ..s })
         }
         (Some(s), None) => Some(Snap { normal: surface.map_or(DVec3::Z, |s| s.1), ..s }),
-        (None, _) => surface.map(|(point, normal, kind)| Snap { point, kind, normal }),
+        (None, _) => surface.map(|(point, normal, kind)| Snap { point, kind, normal, line: None }),
     }
 }
 
-/// The geometry feature the cursor is on, in SketchUp's priority: an endpoint (or the origin)
+/// The geometry feature the cursor is on, in SketchUp's priority: an endpoint, guide point or
+/// the origin within [`SNAP_RADIUS`], else where a guide line crosses an edge or another guide
 /// within [`SNAP_RADIUS`], else an edge midpoint within [`SNAP_RADIUS`], else the nearest point
-/// on an edge within [`EDGE_RADIUS`]. Hidden features, and those of edges touching vertices
-/// `exclude` accepts, are skipped. The snap's normal is +Z.
+/// on an edge or guide line within [`EDGE_RADIUS`]. Hidden features, and those of edges
+/// touching vertices `exclude` accepts, are skipped. The snap's normal is +Z.
 pub fn snap_feature(
     model: &Model,
     screen: Screen<'_>,
@@ -203,13 +223,20 @@ pub fn snap_feature(
     exclude: impl Fn(VertexId) -> bool,
 ) -> Option<Snap> {
     let eye = screen.eye();
-    let nearest = |candidates: Vec<(f32, DVec3, SnapKind)>| {
+    let nearest = |candidates: Vec<(f32, DVec3, SnapKind, Option<DVec3>)>| {
         candidates
             .into_iter()
             .min_by(|a, b| a.0.total_cmp(&b.0))
-            .map(|(_, point, kind)| Snap { point, kind, normal: DVec3::Z })
+            .map(|(_, point, kind, line)| Snap { point, kind, normal: DVec3::Z, line })
     };
     let near = |point: DVec3, radius: f32| screen.project(point).map(|s| s.distance(cursor)).filter(|&d| d <= radius);
+    let guide_lines: Vec<(DVec3, DVec3)> = model
+        .guides()
+        .filter_map(|(_, g)| match *g {
+            Guide::Line { point, dir } => Some((point, dir)),
+            Guide::Point(_) => None,
+        })
+        .collect();
 
     let endpoints = model
         .vertices()
@@ -217,9 +244,13 @@ pub fn snap_feature(
         .filter_map(|(id, point)| {
             let distance = near(point, SNAP_RADIUS)?;
             let hidden = occluded(model, eye, point, |f| model.face(f).is_some_and(|face| face.uses_vertex(id)));
-            (!hidden).then_some((distance, point, SnapKind::Endpoint))
+            (!hidden).then_some((distance, point, SnapKind::Endpoint, None))
         })
-        .chain(near(DVec3::ZERO, SNAP_RADIUS).map(|d| (d, DVec3::ZERO, SnapKind::Origin)))
+        .chain(model.guides().filter_map(|(_, g)| match *g {
+            Guide::Point(p) => near(p, SNAP_RADIUS).map(|d| (d, p, SnapKind::GuidePoint, None)),
+            Guide::Line { .. } => None,
+        }))
+        .chain(near(DVec3::ZERO, SNAP_RADIUS).map(|d| (d, DVec3::ZERO, SnapKind::Origin, None)))
         .collect();
     if let Some(snap) = nearest(endpoints) {
         return Some(snap);
@@ -230,13 +261,39 @@ pub fn snap_feature(
         !occluded(model, eye, point, |f| model.face(f).is_some_and(|face| face.uses_edge(edge)))
     };
 
+    // Guide lines crossing edges and each other.
+    let mut crossings = Vec::new();
+    for (i, &(p, d)) in guide_lines.iter().enumerate() {
+        for edge in &edges {
+            let [a, b] = model.edge_points(edge);
+            let length = a.distance(b);
+            if let Some((s, point)) = line_crossing(a, (b - a) / length, p, d)
+                && (-1e-9..=length + 1e-9).contains(&s)
+                && let Some(distance) = near(point, SNAP_RADIUS)
+                && visible(point, edge)
+            {
+                crossings.push((distance, point, SnapKind::Intersection, None));
+            }
+        }
+        for &(q, e) in &guide_lines[i + 1..] {
+            if let Some((_, point)) = line_crossing(q, e, p, d)
+                && let Some(distance) = near(point, SNAP_RADIUS)
+            {
+                crossings.push((distance, point, SnapKind::Intersection, None));
+            }
+        }
+    }
+    if let Some(snap) = nearest(crossings) {
+        return Some(snap);
+    }
+
     let midpoints = edges
         .iter()
         .filter_map(|edge| {
             let [a, b] = model.edge_points(edge);
             let mid = (a + b) * 0.5;
             let distance = near(mid, SNAP_RADIUS)?;
-            visible(mid, edge).then_some((distance, mid, SnapKind::Midpoint))
+            visible(mid, edge).then_some((distance, mid, SnapKind::Midpoint, None))
         })
         .collect();
     if let Some(snap) = nearest(midpoints) {
@@ -257,10 +314,48 @@ pub fn snap_feature(
             let dir = (b - a) / length;
             let t = closest_on_line(a, dir, &ray)?.clamp(0.0, length);
             let point = a + dir * t;
-            visible(point, edge).then_some((distance, point, SnapKind::OnEdge))
+            visible(point, edge).then_some((distance, point, SnapKind::OnEdge, Some(dir)))
         })
+        .chain(guide_lines.iter().filter_map(|&(p, d)| {
+            let point = p + d * closest_on_line(p, d, &ray)?;
+            let distance = near(point, EDGE_RADIUS)?;
+            Some((distance, point, SnapKind::OnGuide, Some(d)))
+        }))
         .collect();
     nearest(on_edge)
+}
+
+/// Where the line `p + s * d` (unit `d`) crosses the line through `q` along unit `e`: the
+/// parameter `s` and the point. `None` for parallel or skew lines.
+fn line_crossing(p: DVec3, d: DVec3, q: DVec3, e: DVec3) -> Option<(f64, DVec3)> {
+    let b = d.dot(e);
+    let denom = 1.0 - b * b;
+    if denom < 1e-9 {
+        return None;
+    }
+    let w = p - q;
+    let s = (b * e.dot(w) - d.dot(w)) / denom;
+    let t = (e.dot(w) - b * d.dot(w)) / denom;
+    let (x, y) = (p + d * s, q + e * t);
+    (x.distance(y) <= 1e-6).then_some((s, x))
+}
+
+/// The guide nearest the cursor: a guide point within [`SNAP_RADIUS`] or a guide line within
+/// [`EDGE_RADIUS`].
+pub fn hit_guide(model: &Model, screen: Screen<'_>, cursor: Vec2) -> Option<GuideId> {
+    let ray = screen.ray(cursor);
+    model
+        .guides()
+        .filter_map(|(id, g)| {
+            let (point, radius) = match *g {
+                Guide::Point(p) => (p, SNAP_RADIUS),
+                Guide::Line { point, dir } => (point + dir * closest_on_line(point, dir, &ray)?, EDGE_RADIUS),
+            };
+            let distance = screen.project(point)?.distance(cursor);
+            (distance <= radius).then_some((id, distance))
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(id, _)| id)
 }
 
 /// The parameter `t` of the point on the line `anchor + t * dir` (unit `dir`) closest to `ray`,

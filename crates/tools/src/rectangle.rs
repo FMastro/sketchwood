@@ -176,7 +176,7 @@ impl RectangleTool {
 
     fn draw(&mut self, doc: &mut Document, frame: Frame, extents: (f64, f64)) {
         doc.edit(|model| {
-            model.add_rectangle(frame.corner, frame.u * extents.0, frame.v * extents.1, frame.normal)
+            model.draw_rectangle(frame.corner, frame.u * extents.0, frame.v * extents.1, frame.normal)
         });
         self.last = Some(Drawn { frame, extents, model_version: doc.model_version() });
     }

@@ -590,3 +590,47 @@ fn draw_a_line_across_a_boards_top_and_push_down_a_rabbet() {
     assert_eq!((hi - lo).to_array(), [10.0, 4.0, 2.0]);
     snapshot(&mut harness, "rabbet");
 }
+
+#[test]
+fn tape_a_guide_off_an_edge_then_draw_from_where_it_crosses() {
+    use egui_kittest::kittest::Queryable;
+    use glam::DVec3;
+    use sketchcraft_doc::Guide;
+    let mut harness = app();
+    harness
+        .state_mut()
+        .document_mut()
+        .edit(|m| m.add_rectangle(DVec3::ZERO, DVec3::X * 24.0, DVec3::Y * 12.0, DVec3::Z));
+    harness.run();
+    type_text(&mut harness, "Z");
+
+    type_text(&mut harness, "t");
+    assert_eq!(harness.state().tools().active(), ToolId::TapeMeasure);
+    let on_edge = harness.state().to_window(DVec3::new(6.0, 0.0, 0.0)).unwrap();
+    click(&mut harness, on_edge);
+    harness.hover_at(harness.state().to_window(DVec3::new(6.0, 4.0, 0.0)).unwrap());
+    harness.run();
+    type_text(&mut harness, "3 1/2");
+    harness.key_press(Key::Enter);
+    harness.run();
+    let guides: Vec<Guide> = harness.state().document().model().guides().map(|(_, g)| *g).collect();
+    let [Guide::Line { point, dir }] = guides[..] else { panic!("{guides:?}") };
+    assert!((point.y - 3.5).abs() < 1e-9 && dir.cross(DVec3::X).length() < 1e-9, "{point} {dir}");
+    snapshot(&mut harness, "tape_guide");
+
+    // A line from where the guide crosses the left edge splits off a 3 1/2" strip.
+    type_text(&mut harness, "l");
+    let left = harness.state().to_window(DVec3::new(0.0, 3.5, 0.0)).unwrap();
+    click(&mut harness, left + egui::vec2(3.0, 2.0));
+    let right = harness.state().to_window(DVec3::new(24.0, 3.5, 0.0)).unwrap();
+    click(&mut harness, right + egui::vec2(-3.0, 2.0));
+    let model = harness.state().document().model();
+    assert_eq!(model.faces().count(), 2);
+    assert!(model.vertices().any(|(_, p)| p.abs_diff_eq(DVec3::new(0.0, 3.5, 0.0), 1e-9)));
+
+    harness.get_by_label("Edit").click();
+    harness.run();
+    harness.get_by_label("Delete Guides").click();
+    harness.run();
+    assert_eq!(harness.state().document().model().guides().count(), 0);
+}

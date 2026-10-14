@@ -157,6 +157,26 @@ impl SketchCraftApp {
         });
     }
 
+    fn edit_menu(&mut self, ui: &mut egui::Ui) {
+        ui.menu_button("Edit", |ui| {
+            if ui.add(egui::Button::new("Undo").shortcut_text("Ctrl+Z")).clicked() {
+                ui.close();
+                self.tools.cancel();
+                self.doc.undo();
+            }
+            if ui.add(egui::Button::new("Redo").shortcut_text("Ctrl+Y")).clicked() {
+                ui.close();
+                self.tools.cancel();
+                self.doc.redo();
+            }
+            ui.separator();
+            if ui.button("Delete Guides").clicked() {
+                ui.close();
+                self.tools.delete_guides(&mut self.doc);
+            }
+        });
+    }
+
     /// The File menu's shortcuts and dialogs, and the window title.
     fn handle_files(&mut self, ctx: &egui::Context) {
         if ctx.input(|i| i.viewport().close_requested()) {
@@ -225,6 +245,7 @@ impl eframe::App for SketchCraftApp {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
                 self.file_menu(ui);
+                self.edit_menu(ui);
                 ui.separator();
                 for (i, group) in TOOL_GROUPS.iter().enumerate() {
                     if i > 0 {

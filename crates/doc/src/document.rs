@@ -433,7 +433,7 @@ impl Document {
                             inst.material = material;
                         }
                     }
-                    Entity::Edge(_) => {}
+                    Entity::Edge(_) | Entity::Guide(_) => {}
                 }
             }
         });
@@ -445,7 +445,7 @@ impl Document {
         match entity {
             Entity::Face(id) => self.model().face(id)?.material,
             Entity::Instance(id) => self.container().instance(id)?.material,
-            Entity::Edge(_) => None,
+            Entity::Edge(_) | Entity::Guide(_) => None,
         }
     }
 

@@ -90,4 +90,9 @@ add it there; when you finish an item, remove it.
    Push/Pull cuts a rabbet or notch when a wall is flush with a side face (and extends that
    side when pulling). Line tool (L): chains points, axis inference and arrow locks, typed
    lengths or `x,y,z`; ends when a face forms, on a repeated click, or with Esc.
-13. Offset, Circle, Tape Measure + guides; OBJ/STL export (see backlog)
+13. Tape Measure + guides (done): `Guide` (endless line or point) entities in the model, saved,
+   selectable and erasable; Edit > Delete Guides. Tape (T): from an edge, a parallel guide line at
+   the offset; from a point, a guide point; Ctrl measures only; typing places or moves the guide.
+   Snapping: guide points, guide/edge and guide/guide intersections, on guide lines. Rectangle
+   now draws through `Model::draw_polygon`, so it splits faces it overlaps.
+14. Offset, Circle, Arc; OBJ/STL export (see backlog)

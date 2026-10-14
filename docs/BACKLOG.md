@@ -9,13 +9,19 @@ each section. Remove items when they're done (mention them in the commit).
 - **Coplanar face merging**: two faces on one plane that share an edge stay separate (a seam
   edge remains, e.g. boards glued end to end). Erasing the seam merges them, and Push/Pull
   merges walls flush with a side, but nothing merges automatically otherwise.
-- **Partial overlaps**: a rectangle that partly overlaps a coplanar face doesn't split it;
-  the two faces overlap and z-fight. `Model::add_line` splits faces now; route the Rectangle
-  tool through it (four lines) instead of `add_face`.
 - **Collinear leftovers**: merging faces (erasing a splitting line, pulling part of a top up
   flush with a side) keeps the extra vertex where an edge was split; SketchUp heals those.
 - **Move can't bend faces**: SketchUp folds a face that would become non-planar (adds a
   diagonal); we refuse the move instead.
+
+## Guides (Tape Measure)
+- Only the edited group's guides are shown and snapped to; guides inside closed groups are
+  hidden (SketchUp shows them all).
+- Guides are drawn over the model without depth, so faces don't hide them.
+- Move and Rotate don't move selected guides; guides can't be made from a point toward a
+  direction (SketchUp makes a guide line when the tape starts on a point with Ctrl).
+- No Protractor guides (angled guide lines), no "hide guides" toggle (only Delete Guides).
+- Guide lines snap where they cross edges and other guides, but not where they cross faces.
 
 ## Inference / snapping
 - Line tool: no parallel/perpendicular-to-edge inference and no "from point" alignment; a

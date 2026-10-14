@@ -9,6 +9,7 @@ mod push_pull;
 mod rotate;
 mod rectangle;
 mod select;
+mod tape;
 
 use glam::{DAffine3, DVec3, Vec2};
 use sketchcraft_doc::Document;
@@ -23,6 +24,7 @@ use push_pull::PushPullTool;
 use rotate::RotateTool;
 use rectangle::RectangleTool;
 use select::SelectTool;
+use tape::TapeTool;
 
 /// Every tool on the toolbar, with SketchUp's default shortcuts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -126,6 +128,7 @@ impl ToolId {
             self,
             Self::Select
                 | Self::Line
+                | Self::TapeMeasure
                 | Self::Rectangle
                 | Self::PushPull
                 | Self::Move
@@ -170,6 +173,8 @@ pub struct Overlay {
     pub grips: Vec<(DVec3, bool)>,
     /// The inference point under the cursor.
     pub snap: Option<Snap>,
+    /// The drawing's guides (and one being placed), and whether each is selected.
+    pub guides: Vec<(sketchcraft_doc::Guide, bool)>,
     pub window: Option<SelectionWindow>,
 }
 
@@ -262,6 +267,8 @@ pub(crate) fn highlight_entity(view: &sketchcraft_doc::View, entity: sketchcraft
                 }
             }
         }
+        // Guides are drawn with the rest of the guides (`Overlay::guides`), highlighted when selected.
+        Entity::Guide(_) => {}
     }
 }
 
@@ -290,6 +297,12 @@ impl Overlay {
         for (grip, _) in &mut self.grips {
             *grip = p(*grip);
         }
+        for (guide, _) in &mut self.guides {
+            *guide = match *guide {
+                sketchcraft_doc::Guide::Line { point, dir } => sketchcraft_doc::Guide::Line { point: p(point), dir: n(dir) },
+                sketchcraft_doc::Guide::Point(point) => sketchcraft_doc::Guide::Point(p(point)),
+            };
+        }
         self
     }
 }
@@ -316,6 +329,7 @@ pub struct Tools {
     active: ToolId,
     select: SelectTool,
     line: LineTool,
+    tape: TapeTool,
     rectangle: RectangleTool,
     push_pull: PushPullTool,
     move_tool: MoveTool,
@@ -339,6 +353,7 @@ impl Default for Tools {
             active: ToolId::Select,
             select: SelectTool::default(),
             line: LineTool::default(),
+            tape: TapeTool::default(),
             rectangle: RectangleTool::default(),
             push_pull: PushPullTool::default(),
             move_tool: MoveTool::default(),
@@ -413,6 +428,7 @@ impl Tools {
         self.message = None;
         self.select.cancel();
         self.line.cancel();
+        self.tape.cancel();
         self.rectangle.cancel();
         self.push_pull.cancel();
         self.move_tool.cancel();
@@ -476,6 +492,14 @@ impl Tools {
                 Ok(())
             }
             (ToolId::Line, PointerEvent::DragEnd { pos, .. }) => self.line.drag_end(doc, screen, pos),
+            (ToolId::TapeMeasure, PointerEvent::Move(pos) | PointerEvent::Drag { pos, .. }) => {
+                self.tape.hover(doc, screen, pos);
+                Ok(())
+            }
+            (ToolId::TapeMeasure, PointerEvent::Click { pos, .. }) => {
+                self.typed.clear();
+                self.tape.click(doc, screen, pos)
+            }
             (ToolId::Rectangle, PointerEvent::Move(pos) | PointerEvent::Drag { pos, .. }) => {
                 self.rectangle.hover(doc, screen, pos);
                 Ok(())
@@ -539,6 +563,7 @@ impl Tools {
             ToolId::Move if self.rotate.is_busy() => self.rotate.toggle_copy(),
             ToolId::Move => self.move_tool.toggle_copy(),
             ToolId::Rotate => self.rotate.toggle_copy(),
+            ToolId::TapeMeasure => self.tape.toggle_guides(),
             _ => {}
         }
     }
@@ -547,6 +572,7 @@ impl Tools {
     pub fn lock_axis(&mut self, axis: Axis) {
         match self.active {
             ToolId::Line => self.line.lock_axis(axis),
+            ToolId::TapeMeasure => self.tape.lock_axis(axis),
             ToolId::Move => self.move_tool.lock_axis(axis),
             ToolId::Rotate => self.rotate.lock_axis(axis),
             _ => {}
@@ -581,6 +607,7 @@ impl Tools {
         }
         let result = match self.active {
             ToolId::Line => self.line.enter(doc, &typed),
+            ToolId::TapeMeasure => self.tape.enter(doc, &typed),
             ToolId::Rectangle => self.rectangle.enter(doc, &typed),
             ToolId::PushPull => self.push_pull.enter(doc, &typed),
             ToolId::Move if self.grip_active() => self.rotate.enter(doc, &typed),
@@ -598,6 +625,7 @@ impl Tools {
     pub fn escape(&mut self, doc: &mut Document) {
         let busy = self.select.is_busy()
             || self.line.is_busy()
+            || self.tape.is_busy()
             || self.rectangle.is_busy()
             || self.push_pull.is_busy()
             || self.move_tool.is_busy()
@@ -634,6 +662,16 @@ impl Tools {
         }
     }
 
+    /// Erase every guide in the group being edited (SketchUp's Edit > Delete Guides).
+    pub fn delete_guides(&mut self, doc: &mut Document) {
+        self.cancel();
+        if doc.model().guides().next().is_none() {
+            self.message = Some("There are no guides to delete.".into());
+            return;
+        }
+        doc.edit(|m| m.delete_guides());
+    }
+
     /// Explode the selected groups and components back into loose geometry.
     pub fn explode(&mut self, doc: &mut Document) {
         self.cancel();
@@ -651,6 +689,7 @@ impl Tools {
                                Drag right for window, left for crossing selection."
                 .into(),
             ToolId::Line => self.line.status().into(),
+            ToolId::TapeMeasure => self.tape.status(),
             ToolId::Rectangle => self.rectangle.status().into(),
             ToolId::PushPull => self.push_pull.status().into(),
             ToolId::Move if self.rotate.is_busy() => self.rotate.status(),
@@ -668,7 +707,7 @@ impl Tools {
         match self.active {
             ToolId::Rectangle => "Dimensions",
             ToolId::Move if self.grip_active() => "Angle",
-            ToolId::Line => "Length",
+            ToolId::Line | ToolId::TapeMeasure => "Length",
             ToolId::PushPull | ToolId::Move => "Distance",
             ToolId::Rotate => "Angle",
             _ => "Measurements",
@@ -682,6 +721,7 @@ impl Tools {
         }
         match self.active {
             ToolId::Line => self.line.measurement(),
+            ToolId::TapeMeasure => self.tape.measurement(),
             ToolId::Rectangle => self.rectangle.measurement(),
             ToolId::PushPull => self.push_pull.measurement(),
             ToolId::Move if self.grip_active() => self.rotate.measurement(),
@@ -694,9 +734,16 @@ impl Tools {
     /// What to draw over the viewport, in world coordinates.
     pub fn overlay(&self, doc: &Document) -> Overlay {
         let mut overlay = Overlay::default();
+        let selection = doc.selection();
+        overlay.guides = doc
+            .model()
+            .guides()
+            .map(|(id, g)| (*g, selection.contains(sketchcraft_doc::Entity::Guide(id))))
+            .collect();
         match self.active {
             ToolId::Select => self.select.overlay(&mut overlay),
             ToolId::Line => self.line.overlay(&mut overlay),
+            ToolId::TapeMeasure => self.tape.overlay(&mut overlay),
             ToolId::Rectangle => self.rectangle.overlay(&mut overlay),
             ToolId::PushPull => self.push_pull.overlay(doc.model(), &mut overlay),
             ToolId::Move if self.rotate.is_busy() => self.rotate.overlay(doc, &mut overlay),

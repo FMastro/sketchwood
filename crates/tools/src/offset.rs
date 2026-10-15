@@ -43,7 +43,13 @@ impl OffsetTool {
 
     pub fn hover(&mut self, doc: &Document, screen: Screen<'_>, cursor: Vec2) {
         let Some(op) = &mut self.op else {
-            self.hover = target(doc, screen, cursor);
+            // A face inside a closed group highlights too: clicking it opens the group first.
+            let view = doc.view();
+            self.hover = target(doc, screen, cursor).or_else(|| {
+                crate::pick::hit_face(view.model(), &screen.ray(cursor))
+                    .map(|(id, _)| id)
+                    .filter(|&id| view.owner(Entity::Face(id)) != sketchcraft_doc::Owner::Outside)
+            });
             return;
         };
         let model = doc.model();

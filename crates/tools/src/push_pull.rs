@@ -58,7 +58,11 @@ impl PushPullTool {
 
     pub fn hover(&mut self, doc: &Document, screen: Screen<'_>, cursor: Vec2) {
         let Some(op) = &mut self.op else {
-            self.hover = active_face(doc, screen, cursor).ok().flatten().map(|(id, _)| id);
+            // Faces inside closed groups highlight too: clicking one opens its group first.
+            let view = doc.view();
+            self.hover = hit_face(view.model(), &screen.ray(cursor))
+                .map(|(id, _)| id)
+                .filter(|&id| view.owner(Entity::Face(id)) != Owner::Outside);
             return;
         };
         let (model, view) = (doc.model(), doc.view().model());
@@ -203,8 +207,8 @@ impl PushPullTool {
     }
 }
 
-/// The face of the container being edited under the cursor, and where it was hit. Faces inside
-/// groups can't be pushed without opening the group first (as in SketchUp).
+/// The face of the container being edited under the cursor, and where it was hit. (Clicking a
+/// closed group's face opens the group first; see `Tools::open_group_to_draw_on`.)
 fn active_face(doc: &Document, screen: Screen<'_>, cursor: Vec2) -> Result<Option<(FaceId, DVec3)>, String> {
     let view = doc.view();
     match hit_face(view.model(), &screen.ray(cursor)) {

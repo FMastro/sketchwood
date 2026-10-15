@@ -50,14 +50,13 @@ each section. Remove items when they're done (mention them in the commit).
 - Snapping only considers screen distance; no "sticky" preference for the last inference.
 
 ## Groups and components
-- Deliberate difference from SketchUp: starting Line, Rectangle, Circle or Arc on a closed
-  group's face opens the group, so drawings cut into the board. Push/Pull, Offset and Paint
-  still need the group opened first (or work on the whole group).
+- Deliberate difference from SketchUp: starting Line, Rectangle, Circle, Arc, Push/Pull or
+  Offset on a closed group's face opens the group, so the work goes into the board. (Paint
+  still paints the whole group, as in SketchUp.)
 - Selected groups are tinted; SketchUp instead draws their bounding box in blue.
 - No renaming in the Outliner, no nested tree (only the current level is listed), no
   "make unique" command for components, no component browser to place more instances.
-- Push/Pull and Move stretching don't reach into groups from outside; open the group first
-  (same as SketchUp, but a "scale this board's length" shortcut would help woodworking).
+- Move stretching doesn't reach into groups from outside (Move moves the whole group).
 - Undo snapshots copy every definition; fine now, heavy for big furniture assemblies.
 - Copies of a group share a definition until opened (SketchUp's behavior); opening one gives
   it its own copy, which isn't an undo step by itself.

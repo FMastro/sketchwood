@@ -634,13 +634,26 @@ impl Tools {
         }
     }
 
-    /// Starting a drawing tool on a face of a closed group or component opens it (as a
+    /// Starting a drawing tool, Push/Pull or Offset on a face of a closed group or component
+    /// opens it (as a
     /// double-click would), so what's drawn becomes part of that board: a circle on a board's
     /// top then pushes through as a hole. SketchUp instead draws loose geometry on top of the
     /// group, which surprises people; the faded surroundings show the group is open.
     fn open_group_to_draw_on(&mut self, doc: &mut Document, camera: &OrbitCamera, size: Vec2, cursor: Vec2) {
-        let drawing = matches!(self.active, ToolId::Line | ToolId::Rectangle | ToolId::Circle | ToolId::Arc);
-        let busy = self.line.is_busy() || self.rectangle.is_busy() || self.circle.is_busy() || self.arc.is_busy();
+        // Offset works on a selected face where one is selected.
+        let offsetting_selection = self.active == ToolId::Offset
+            && doc.selection().len() == 1
+            && doc.selection().iter().all(|e| matches!(e, sketchcraft_doc::Entity::Face(_)));
+        let drawing = matches!(
+            self.active,
+            ToolId::Line | ToolId::Rectangle | ToolId::Circle | ToolId::Arc | ToolId::PushPull | ToolId::Offset
+        ) && !offsetting_selection;
+        let busy = self.line.is_busy()
+            || self.rectangle.is_busy()
+            || self.circle.is_busy()
+            || self.arc.is_busy()
+            || self.push_pull.is_busy()
+            || self.offset.is_busy();
         if !drawing || busy {
             return;
         }
@@ -654,7 +667,7 @@ impl Tools {
             if !doc.enter(instance) {
                 return;
             }
-            self.message = Some(format!("Opened {name} to draw on it. Esc or click outside closes it."));
+            self.message = Some(format!("Opened {name} to work on it. Esc or click outside closes it."));
         }
     }
 
@@ -878,7 +891,7 @@ impl Tools {
             ToolId::Scale => self.scale.overlay(&mut overlay),
             ToolId::Eraser => self.eraser.overlay(doc, &mut overlay),
             ToolId::Rectangle => self.rectangle.overlay(&mut overlay),
-            ToolId::PushPull => self.push_pull.overlay(doc.model(), &mut overlay),
+            ToolId::PushPull => self.push_pull.overlay(doc.view().model(), &mut overlay),
             ToolId::Move if self.rotate.is_busy() => self.rotate.overlay(doc, &mut overlay),
             ToolId::Move => self.move_tool.overlay(doc, &mut overlay),
             ToolId::Rotate => self.rotate.overlay(doc, &mut overlay),

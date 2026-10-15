@@ -986,3 +986,50 @@ fn line_infers_parallel_to_a_hovered_edge() {
     assert_eq!(overlay.guide.and_then(|g| g.along), Some(sketchcraft_tools::infer::Along::Parallel));
     snapshot(&mut harness, "parallel_inference");
 }
+
+#[test]
+fn push_pull_and_offset_open_a_closed_board() {
+    use glam::DVec3;
+    let mut harness = app();
+    let board = {
+        let doc = harness.state_mut().document_mut();
+        let face = doc.edit(|m| m.add_rectangle(DVec3::ZERO, DVec3::X * 12.0, DVec3::Y * 8.0, DVec3::Z)).unwrap();
+        doc.push_pull(face, 0.75, true).unwrap().unwrap()
+    };
+    harness.run();
+    type_text(&mut harness, "Z");
+
+    // Pull the closed board's top up to 1 1/2" thick, straight from outside the group.
+    type_text(&mut harness, "p");
+    let top = harness.state().to_window(DVec3::new(6.0, 4.0, 0.75)).unwrap();
+    harness.hover_at(top);
+    harness.run();
+    assert!(!harness.state().tools().overlay(harness.state().document()).highlight.is_empty(), "the face highlights");
+    click(&mut harness, top);
+    assert_eq!(harness.state().document().path(), &[board], "the board opened");
+    harness.hover_at(top - egui::vec2(0.0, 30.0));
+    harness.run();
+    type_text(&mut harness, "3/4");
+    harness.key_press(Key::Enter);
+    harness.run();
+    let (lo, hi) = harness.state().document().bounds().unwrap();
+    assert!(((hi - lo).z - 1.5).abs() < 1e-9, "{}", hi - lo);
+
+    // Close it, then Offset its top from outside: a 1" frame.
+    harness.key_press(Key::Escape);
+    harness.run();
+    harness.key_press(Key::Escape);
+    harness.run();
+    assert!(harness.state().document().path().is_empty());
+    type_text(&mut harness, "f");
+    let top = harness.state().to_window(DVec3::new(6.0, 4.0, 1.5)).unwrap();
+    click(&mut harness, top);
+    assert_eq!(harness.state().document().path(), &[board]);
+    harness.hover_at(harness.state().to_window(DVec3::new(2.0, 4.0, 1.5)).unwrap());
+    harness.run();
+    type_text(&mut harness, "1");
+    harness.key_press(Key::Enter);
+    harness.run();
+    let model = harness.state().document().model();
+    assert_eq!(model.faces().filter(|(_, f)| f.normal.z > 0.5).count(), 2, "frame and panel on the top");
+}

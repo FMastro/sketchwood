@@ -86,13 +86,13 @@ impl SettingsText {
 }
 
 /// A material's own sizes as typed; blank fields use the drawing's.
-struct StockText {
-    first: String,
-    second: String,
+pub(crate) struct StockText {
+    pub first: String,
+    pub second: String,
 }
 
 impl StockText {
-    fn from(kind: MaterialKind, stock: &StockOverride) -> Self {
+    pub(crate) fn from(kind: MaterialKind, stock: &StockOverride) -> Self {
         match kind {
             MaterialKind::SheetGood => Self {
                 first: stock.sheet.map(|s| format_length(s.0)).unwrap_or_default(),
@@ -106,7 +106,7 @@ impl StockText {
     }
 
     /// The override, or `None` if something typed doesn't parse.
-    fn parse(&self, kind: MaterialKind) -> Option<StockOverride> {
+    pub(crate) fn parse(&self, kind: MaterialKind) -> Option<StockOverride> {
         let blank = |s: &str| s.trim().is_empty();
         Some(match kind {
             MaterialKind::SheetGood => StockOverride {

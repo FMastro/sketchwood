@@ -95,6 +95,16 @@ pub fn plan_all(scene: &Scene, list: &crate::cutlist::CutList) -> Vec<Option<Pla
 const LUMBER_THICKNESSES: [(f64, u32); 3] = [(0.75, 1), (1.5, 2), (3.5, 4)];
 const LUMBER_WIDTHS: [(f64, u32); 7] = [(1.5, 2), (2.5, 3), (3.5, 4), (5.5, 6), (7.25, 8), (9.25, 10), (11.25, 12)];
 
+/// The standard dimensional lumber sizes: nominal name (`2x4`) and actual thickness and width.
+pub fn lumber_sizes() -> Vec<(String, f64, f64)> {
+    LUMBER_THICKNESSES
+        .iter()
+        .flat_map(|&(t, nt)| {
+            LUMBER_WIDTHS.iter().filter(move |&&(w, _)| w >= t).map(move |&(w, nw)| (format!("{nt}x{nw}"), t, w))
+        })
+        .collect()
+}
+
 /// A part placed on a piece of stock. `x` runs along the stock's length, `y` across its width.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Placement {
@@ -582,6 +592,15 @@ mod tests {
         let reloaded = crate::file::from_str(&crate::file::to_string(doc.scene())).unwrap();
         assert_eq!(reloaded.cut_settings.kerf, 0.09375);
         assert_eq!(reloaded.material(ply).unwrap().stock.sheet, Some((60.0, 60.0)));
+    }
+
+    #[test]
+    fn standard_lumber_sizes_are_listed() {
+        let sizes = lumber_sizes();
+        assert!(sizes.contains(&("2x4".to_owned(), 1.5, 3.5)));
+        assert!(sizes.contains(&("1x12".to_owned(), 0.75, 11.25)));
+        assert!(sizes.contains(&("4x4".to_owned(), 3.5, 3.5)));
+        assert!(!sizes.iter().any(|(name, _, _)| name == "4x2"), "never narrower than thick");
     }
 
     #[test]

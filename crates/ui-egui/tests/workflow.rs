@@ -400,16 +400,20 @@ fn paint_a_board_with_a_new_plywood_material() {
     board(&mut harness);
     let (lo, hi) = harness.state().document().bounds().unwrap();
 
-    // Materials' "+" (above the Tags panel's) opens a menu of material types.
+    // A new drawing has no materials; the panel says how to add one.
+    assert!(harness.query_by_label_contains("No materials yet").is_some());
+    // Materials' "+" (above the Tags panel's) opens the library.
     harness.get_all_by_label(ph::PLUS).next().expect("Materials + button").click();
     harness.run();
-    harness.get_by_label("Sheet good").click();
+    harness.get_by_label("Plywood 3/4\"").click();
     harness.run();
     let state = harness.state();
     assert_eq!(state.tools().active(), ToolId::PaintBucket, "picking a material switches to the Paint Bucket");
     let plywood = state.tools().active_material.expect("the new material is active");
     let material = state.document().scene().material(plywood).unwrap();
-    assert_eq!((material.name.as_str(), material.thickness), ("Plywood", Some(0.75)));
+    assert_eq!((material.name.as_str(), material.thickness), ("Plywood 3/4\"", Some(0.75)));
+    // Its editor shows, with the sheet size it's cut from.
+    assert!(harness.query_by_label("Sheet length").is_some());
 
     // Click the board: the whole group gets the material.
     let side = harness.state().to_window(glam::DVec3::new((lo.x + hi.x) * 0.5, lo.y, (lo.z + hi.z) * 0.5)).unwrap();

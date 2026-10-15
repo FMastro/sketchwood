@@ -9,6 +9,7 @@ pub mod cutsheet;
 mod document;
 pub mod export;
 pub mod file;
+pub mod library;
 mod lines;
 mod model;
 mod offset;

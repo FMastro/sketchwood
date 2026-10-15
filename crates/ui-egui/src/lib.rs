@@ -45,7 +45,7 @@ impl SketchCraftApp {
             tools: Tools::default(),
             keyboard: keys::Keyboard::default(),
             tags: tags::TagsPanel::default(),
-            materials: materials::MaterialsPanel::default(),
+            materials: materials::MaterialsPanel,
             viewport: Viewport::new(render_state),
             files: files::Files::default(),
             cut_list: cutlist::CutListWindow::default(),
@@ -61,7 +61,7 @@ impl SketchCraftApp {
         self.tools.cancel();
         self.tools.active_material = None;
         self.tags = tags::TagsPanel::default();
-        self.materials = materials::MaterialsPanel::default();
+        self.materials = materials::MaterialsPanel;
         self.viewport.document_replaced(&self.doc);
         self.files.path = path;
         self.files.mark_saved(&self.doc);

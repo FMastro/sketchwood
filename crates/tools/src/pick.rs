@@ -198,7 +198,7 @@ pub struct Snap {
     pub kind: SnapKind,
     /// Normal of the surface the point is on; tools draw in this plane.
     pub normal: DVec3,
-    /// For a point on an edge or guide line, the line's direction.
+    /// For a point on an edge or guide line (or an edge's midpoint), the line's direction.
     pub line: Option<DVec3>,
 }
 
@@ -310,7 +310,7 @@ pub fn snap_feature(
             let [a, b] = model.edge_points(edge);
             let mid = (a + b) * 0.5;
             let distance = near(mid, SNAP_RADIUS)?;
-            visible(mid, edge).then_some((distance, mid, SnapKind::Midpoint, None))
+            visible(mid, edge).then_some((distance, mid, SnapKind::Midpoint, Some((b - a).normalize())))
         })
         .collect();
     if let Some(snap) = nearest(midpoints) {

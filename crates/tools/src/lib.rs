@@ -4,6 +4,7 @@
 mod arc;
 mod circle;
 mod eraser;
+pub mod infer;
 mod line;
 pub mod pick;
 mod move_tool;
@@ -173,6 +174,9 @@ pub struct Overlay {
     pub snap: Option<Snap>,
     /// A short note shown beside the mouse pointer, like SketchUp's "+" on the Tape Measure.
     pub cursor_note: Option<&'static str>,
+    /// "From Point": a dotted line from the remembered point to where the cursor lines up with
+    /// it, in the axis color.
+    pub alignment: Option<(DVec3, DVec3, Axis)>,
     /// Dashed lines: the box around the group being edited.
     pub dashed: Vec<[DVec3; 2]>,
     /// Guides to preview or highlight (the drawing's own guides are drawn by the renderer), and
@@ -291,6 +295,10 @@ impl Overlay {
             guide.from = p(guide.from);
             guide.to = p(guide.to);
         }
+        if let Some((from, to, _)) = &mut self.alignment {
+            *from = p(*from);
+            *to = p(*to);
+        }
         if let Some(protractor) = &mut self.protractor {
             protractor.center = p(protractor.center);
             protractor.normal = n(protractor.normal);
@@ -314,7 +322,8 @@ impl Overlay {
 pub struct Guide {
     pub from: DVec3,
     pub to: DVec3,
-    pub axis: Option<Axis>,
+    /// What it follows: an axis (in its color), or parallel/perpendicular to an edge (magenta).
+    pub along: Option<infer::Along>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -647,6 +656,13 @@ impl Tools {
             }
             self.message = Some(format!("Opened {name} to draw on it. Esc or click outside closes it."));
         }
+    }
+
+    /// Whether Shift is held: drawing tools lock the direction showing while it is.
+    pub fn set_shift(&mut self, shift: bool) {
+        self.line.set_shift(shift);
+        self.move_tool.set_shift(shift);
+        self.tape.set_shift(shift);
     }
 
     /// A tap of Ctrl on its own: toggles copying in Move.

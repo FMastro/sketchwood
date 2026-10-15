@@ -117,7 +117,7 @@ impl CircleTool {
                 overlay.lines.push([points[i], points[(i + 1) % points.len()]]);
             }
             if let Some(hover) = self.hover {
-                overlay.guide = Some(crate::Guide { from: center, to: hover.point, axis: None });
+                overlay.guide = Some(crate::Guide { from: center, to: hover.point, along: None });
             }
         }
     }

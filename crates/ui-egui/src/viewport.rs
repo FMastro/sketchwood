@@ -5,6 +5,7 @@ use eframe::egui;
 use glam::{DVec3, Vec2};
 use sketchcraft_doc::Document;
 use sketchcraft_render::{Scene, ViewportRenderer};
+use sketchcraft_tools::infer::Along;
 use sketchcraft_tools::{Axis, Modifiers, Overlay, PointerEvent, SnapKind, Tools};
 use sketchcraft_view::OrbitCamera;
 
@@ -169,6 +170,7 @@ impl Viewport {
             let mods = Modifiers { shift: i.modifiers.shift, ctrl: i.modifiers.command, alt: i.modifiers.alt };
             (mods, i.pointer.press_origin(), i.pointer.latest_pos())
         });
+        tools.set_shift(mods.shift);
         let mut send = |event| tools.pointer(event, doc, &mut self.camera, size);
 
         if let Some(pos) = response.hover_pos().map(local)
@@ -392,26 +394,35 @@ fn draw_overlay(painter: &egui::Painter, rect: egui::Rect, camera: &OrbitCamera,
         draw_protractor(painter, camera, size, &screen, protractor);
     }
 
-    // The rubber band from the base point: in the axis's color when following one, as in
-    // SketchUp, otherwise dashed grey.
+    // The rubber band from the base point: in the axis's color when following one, magenta when
+    // parallel or perpendicular to an edge (as in SketchUp), otherwise dashed grey.
     let mut axis_label = None;
     if let Some(guide) = &overlay.guide
         && let (Some(from), Some(to)) = (screen(guide.from), screen(guide.to))
     {
-        match guide.axis {
-            Some(axis) => {
-                let color = match axis {
-                    Axis::X => egui::Color32::from_rgb(220, 0, 0),
-                    Axis::Y => egui::Color32::from_rgb(0, 160, 0),
-                    Axis::Z => egui::Color32::from_rgb(0, 0, 230),
+        match guide.along {
+            Some(along) => {
+                let color = match along {
+                    Along::Axis(axis) => axis_color(axis),
+                    Along::Parallel | Along::Perpendicular => egui::Color32::from_rgb(200, 0, 200),
                 };
                 painter.line_segment([from, to], egui::Stroke::new(2.0, color));
-                axis_label = Some((to, axis.label()));
+                axis_label = Some((to, along.label()));
             }
             None => {
                 let stroke = egui::Stroke::new(1.0, egui::Color32::from_gray(80));
                 painter.extend(egui::Shape::dashed_line(&[from, to], stroke, 5.0, 4.0));
             }
+        }
+    }
+    // "From Point": dotted in the axis color from the remembered point to where the cursor
+    // lines up with it.
+    if let Some((anchor, point, axis)) = overlay.alignment
+        && let (Some(a), Some(b)) = (screen(anchor), screen(point))
+    {
+        painter.extend(egui::Shape::dotted_line(&[a, b], axis_color(axis), 4.0, 1.2));
+        if axis_label.is_none() {
+            axis_label = Some((b, "From Point"));
         }
     }
 
@@ -474,5 +485,14 @@ impl Viewport {
         } else {
             self.camera = OrbitCamera::default();
         }
+    }
+}
+
+/// SketchUp's axis colors.
+fn axis_color(axis: Axis) -> egui::Color32 {
+    match axis {
+        Axis::X => egui::Color32::from_rgb(220, 0, 0),
+        Axis::Y => egui::Color32::from_rgb(0, 160, 0),
+        Axis::Z => egui::Color32::from_rgb(0, 0, 230),
     }
 }

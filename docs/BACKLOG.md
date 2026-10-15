@@ -42,12 +42,10 @@ each section. Remove items when they're done (mention them in the commit).
 - Guide lines snap where they cross edges and other guides, but not where they cross faces.
 
 ## Inference / snapping
-- Line tool: no parallel/perpendicular-to-edge inference and no "from point" alignment; a
-  typed length can't be changed after the line is drawn.
+- Line: a typed length can't be changed after the line is drawn. Rectangle, Arc and Circle
+  don't use parallel/perpendicular or "From Point" inference yet (Line, Move and Tape do).
 - Faces closed from loose lines face up, else toward the front, else to the right; SketchUp
   orients them to match connected faces. No Reverse Faces command yet.
-- Parallel / perpendicular inference, "from point" (dotted alignment to a hovered point),
-  and Shift to lock the current inference.
 - Rectangle: square and golden-ratio diagonal hints; drawing rectangles off the axes.
 - Snapping only considers screen distance; no "sticky" preference for the last inference.
 

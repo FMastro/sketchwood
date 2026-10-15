@@ -174,7 +174,7 @@ impl ArcTool {
         match self.stage {
             Stage::Start => {}
             Stage::End { a, end, .. } => {
-                overlay.guide = Some(Guide { from: a, to: end, axis: None });
+                overlay.guide = Some(Guide { from: a, to: end, along: None });
             }
             Stage::Bulge { a, b, normal, bulge } => {
                 for w in points(a, b, normal, bulge, self.segments).windows(2) {

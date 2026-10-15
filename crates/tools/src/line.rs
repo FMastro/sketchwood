@@ -2,9 +2,10 @@
 //! face forms, you click the last point again (or double-click), or press Esc. Press-drag-release
 //! draws a single line.
 //!
-//! - Inference: endpoints, midpoints and edges snap; near a red/green/blue line through the
-//!   start point the line follows that axis. Arrow keys lock an axis: Right = red, Left =
-//!   green, Up/Down = blue.
+//! - Inference ([`crate::infer`]): endpoints, midpoints and edges snap; near a red/green/blue line,
+//!   or one parallel or perpendicular to the last edge hovered, the line follows it; it lines up
+//!   with the last point hovered ("From Point"). Hold Shift to lock the direction showing.
+//!   Arrow keys lock an axis: Right = red, Left = green, Up/Down = blue.
 //! - Type a length (along the current direction), a relative `x,y,z` / `<x,y,z>` or an absolute
 //!   `[x,y,z]` to place the next point exactly.
 
@@ -12,8 +13,9 @@ use glam::{DVec3, Vec2};
 use sketchcraft_doc::units::format_length;
 use sketchcraft_doc::{Document, EPS};
 
+use crate::infer::{self, Direction, Hints, Query, Target};
 use crate::move_tool::parse_offset;
-use crate::pick::{Screen, Snap, closest_on_line, infer_axis, snap, snap_feature};
+use crate::pick::{Screen, Snap, snap};
 use crate::{Axis, Guide, Overlay};
 
 #[derive(Default)]
@@ -21,9 +23,15 @@ pub struct LineTool {
     /// The point the next line starts from, while drawing.
     start: Option<Start>,
     hover: Option<Snap>,
-    /// Where the line under the cursor ends, and the axis it follows.
-    end: Option<(DVec3, Option<Axis>)>,
-    lock: Option<Axis>,
+    /// Where the line under the cursor ends, and why.
+    end: Option<Target>,
+    /// Locked with an arrow key.
+    lock: Option<Direction>,
+    /// Locked by holding Shift while a direction showed.
+    shift_lock: Option<Direction>,
+    shift: bool,
+    /// The edge and point the cursor last passed over.
+    hints: Hints,
 }
 
 #[derive(Clone, Copy)]
@@ -44,47 +52,54 @@ impl LineTool {
         self.start = None;
         self.end = None;
         self.lock = None;
+        self.shift_lock = None;
     }
 
     pub fn lock_axis(&mut self, axis: Axis) {
-        self.lock = if self.lock == Some(axis) { None } else { Some(axis) };
+        let direction = Direction::axis(axis);
+        self.lock = if self.lock == Some(direction) { None } else { Some(direction) };
+    }
+
+    /// Holding Shift locks the direction showing (an axis, or parallel or perpendicular to an
+    /// edge); letting go unlocks it.
+    pub fn set_shift(&mut self, shift: bool) {
+        self.shift = shift;
+        if !shift {
+            self.shift_lock = None;
+        }
     }
 
     pub fn hover(&mut self, doc: &Document, screen: Screen<'_>, cursor: Vec2) {
         let model = doc.view().model();
         let Some(start) = self.start else {
             self.hover = snap(model, screen, cursor, None);
+            self.hints.note(self.hover.as_ref());
             self.end = None;
             return;
         };
         let base = start.point;
-        let ray = screen.ray(cursor);
-        let feature = snap_feature(model, screen, cursor, |_| false);
-        let (point, axis, shown) = if let Some(axis) = self.lock {
-            let dir = axis.dir();
-            let t = match &feature {
-                Some(s) => Some((s.point - base).dot(dir)),
-                None => closest_on_line(base, dir, &ray),
-            };
-            let current = self.end.map_or(0.0, |(p, _)| (p - base).dot(dir));
-            (base + dir * t.unwrap_or(current), Some(axis), feature)
-        } else if let Some(s) = feature {
-            (s.point, None, Some(s))
-        } else if let Some((point, axis)) = infer_axis(screen, base, cursor) {
-            (point, Some(axis), None)
-        } else {
+        let query = Query {
+            base,
+            hints: &self.hints,
+            lock: self.lock.or(self.shift_lock),
+            plane_normal: start.normal,
+            current: self.end.map_or(base, |t| t.point),
+        };
+        let target = infer::target(model, screen, cursor, &query, |_| false, |ray| {
             // On a face under the cursor, else in the plane the chain started on, else facing
             // the camera.
-            let surface = snap(model, screen, cursor, None).filter(|s| s.kind == crate::SnapKind::OnFace);
-            let point = surface
-                .map(|s| s.point)
-                .or_else(|| ray.hit_plane(base, start.normal))
-                .or_else(|| ray.hit_plane(base, -screen.forward()))
-                .unwrap_or(base);
-            (point, None, surface)
-        };
-        self.hover = shown;
-        self.end = Some((point, axis));
+            snap(model, screen, cursor, None)
+                .filter(|s| s.kind == crate::SnapKind::OnFace)
+                .map(|s| (s.point, Some(s)))
+                .or_else(|| ray.hit_plane(base, start.normal).map(|p| (p, None)))
+                .or_else(|| ray.hit_plane(base, -screen.forward()).map(|p| (p, None)))
+        });
+        if self.shift && self.shift_lock.is_none() {
+            self.shift_lock = target.direction;
+        }
+        self.hints.note(target.snap.as_ref());
+        self.hover = target.snap;
+        self.end = Some(target);
     }
 
     pub fn click(&mut self, doc: &mut Document, screen: Screen<'_>, cursor: Vec2) -> Result<(), String> {
@@ -95,7 +110,7 @@ impl LineTool {
                 Ok(())
             }
             Some(start) => {
-                let end = self.end.map_or(start.point, |(p, _)| p);
+                let end = self.end.map_or(start.point, |t| t.point);
                 // Clicking the last point again (or double-clicking) ends the chain.
                 if end.distance(start.point) < EPS {
                     self.cancel();
@@ -119,7 +134,7 @@ impl LineTool {
             return Ok(());
         }
         self.hover(doc, screen, cursor);
-        let Some((end, _)) = self.end else { return Ok(()) };
+        let Some(end) = self.end.map(|t| t.point) else { return Ok(()) };
         if self.start.is_some_and(|s| end.distance(s.point) < EPS) {
             self.cancel();
             return Ok(());
@@ -134,11 +149,11 @@ impl LineTool {
         let Some(start) = self.start else {
             return Err("Click the start point, then type the length".into());
         };
-        // Along an axis, use its exact direction so typed lengths come out exact.
+        // Along an inferred direction, use it exactly so typed lengths come out exact.
         let direction = match self.end {
-            Some((p, Some(axis))) if (p - start.point).dot(axis.dir()) < 0.0 => -axis.dir(),
-            Some((_, Some(axis))) => axis.dir(),
-            Some((p, None)) => p - start.point,
+            Some(Target { point, direction: Some(d), .. }) if (point - start.point).dot(d.dir) < 0.0 => -d.dir,
+            Some(Target { direction: Some(d), .. }) => d.dir,
+            Some(t) => t.point - start.point,
             None => DVec3::ZERO,
         };
         let offset = parse_offset(typed, direction, start.point)?;
@@ -151,7 +166,7 @@ impl LineTool {
 
     pub fn status(&self) -> &'static str {
         if self.start.is_some() {
-            "Select end point or enter value. Arrow keys lock an axis; Esc ends the line."
+            "Select end point or enter value. Hold Shift or press an arrow key to lock a direction; Esc ends the line."
         } else {
             "Select start point."
         }
@@ -159,16 +174,17 @@ impl LineTool {
 
     pub fn measurement(&self) -> String {
         match (self.start, self.end) {
-            (Some(start), Some((end, _))) => format_length(start.point.distance(end)),
+            (Some(start), Some(end)) => format_length(start.point.distance(end.point)),
             _ => String::new(),
         }
     }
 
     pub fn overlay(&self, overlay: &mut Overlay) {
         overlay.snap = self.hover;
-        if let (Some(start), Some((end, axis))) = (self.start, self.end) {
-            overlay.lines.push([start.point, end]);
-            overlay.guide = Some(Guide { from: start.point, to: end, axis });
+        if let (Some(start), Some(end)) = (self.start, self.end) {
+            overlay.lines.push([start.point, end.point]);
+            overlay.guide = Some(Guide { from: start.point, to: end.point, along: end.direction.map(|d| d.along) });
+            overlay.alignment = end.from.map(|(anchor, axis)| (anchor, end.point, axis));
         }
     }
 
@@ -188,7 +204,7 @@ impl LineTool {
             self.cancel();
         } else {
             self.start = Some(Start { point: end, ..start });
-            self.end = Some((end, None));
+            self.end = Some(Target { point: end, ..Target::default() });
         }
     }
 }
@@ -237,7 +253,7 @@ mod tests {
         tool.click(&mut doc, screen, at(screen, 0.0, 0.0)).unwrap();
         // Close to the red axis, a little off it.
         tool.hover(&doc, screen, at(screen, 3.0, 0.1));
-        assert_eq!(tool.end.unwrap().1, Some(Axis::X));
+        assert_eq!(tool.end.unwrap().direction.map(|d| d.along), Some(infer::Along::Axis(Axis::X)));
         tool.enter(&mut doc, "36").unwrap();
         tool.lock_axis(Axis::Y);
         tool.hover(&doc, screen, at(screen, 20.0, 5.0));
@@ -286,6 +302,46 @@ mod tests {
         tool.drag_end(&mut doc, screen, at(screen, 4.0, 3.0)).unwrap();
         assert_eq!(doc.model().edges().count(), 1);
         assert!(!tool.is_busy());
+    }
+
+    #[test]
+    fn holding_shift_keeps_the_direction_showing() {
+        let mut doc = Document::default();
+        let camera = camera();
+        let screen = Screen::new(&camera, SIZE);
+        let mut tool = LineTool::default();
+        tool.click(&mut doc, screen, at(screen, 0.0, 0.0)).unwrap();
+        tool.hover(&doc, screen, at(screen, 4.0, 0.1));
+        assert_eq!(tool.end.unwrap().direction, Some(Direction::axis(Axis::X)));
+        tool.set_shift(true);
+        tool.hover(&doc, screen, at(screen, 4.0, 0.1));
+        // Far off the axis, it still follows red while Shift is down.
+        tool.hover(&doc, screen, at(screen, 6.0, 5.0));
+        let end = tool.end.unwrap();
+        assert!(end.point.y.abs() < 1e-9 && end.point.x > 5.0, "{}", end.point);
+        tool.set_shift(false);
+        tool.hover(&doc, screen, at(screen, 6.0, 5.0));
+        assert!(tool.end.unwrap().point.y > 4.0, "free again");
+    }
+
+    #[test]
+    fn a_line_parallel_to_a_slanted_edge() {
+        let mut doc = Document::default();
+        // A slanted edge, hovered on the way to the start point.
+        doc.edit(|m| m.add_line(DVec3::new(0.0, 0.0, 0.0), DVec3::new(6.0, 3.0, 0.0)));
+        let camera = camera();
+        let screen = Screen::new(&camera, SIZE);
+        let mut tool = LineTool::default();
+        tool.hover(&doc, screen, at(screen, 4.0, 2.0) + Vec2::new(0.0, 1.0));
+        tool.click(&mut doc, screen, at(screen, 0.0, 6.0)).unwrap();
+        let along = DVec3::new(6.0, 3.0, 0.0).normalize();
+        let near = DVec3::new(0.0, 6.0, 0.0) + along * 5.0;
+        tool.hover(&doc, screen, at(screen, near.x + 0.05, near.y - 0.05));
+        assert_eq!(tool.end.unwrap().direction.map(|d| d.along), Some(infer::Along::Parallel));
+        tool.enter(&mut doc, "4").unwrap();
+        let (_, edge) = doc.model().edges().last().unwrap();
+        let [a, b] = doc.model().edge_points(edge);
+        assert!((b - a).cross(along).length() < 1e-9 && ((b - a).length() - 4.0).abs() < 1e-9);
     }
 
     #[test]

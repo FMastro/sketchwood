@@ -14,7 +14,8 @@ use glam::{DAffine3, DVec3, Vec2};
 use sketchcraft_doc::units::{format_length, parse_length, parse_lengths};
 use sketchcraft_doc::{Document, EPS, Entity, Model, VertexId};
 
-use crate::pick::{Screen, Snap, closest_on_line, infer_axis, snap_feature};
+use crate::infer::{self, Direction, Hints, Query, Target};
+use crate::pick::{Screen, Snap};
 use crate::{Array, Axis, Guide, Overlay, Protractor, highlight_entity, parse_array, pick_resolved};
 
 /// How close, in points, the cursor must be to a rotation grip.
@@ -45,8 +46,13 @@ pub struct MoveTool {
     hover: Option<Entity>,
     grips: Option<Grips>,
     snap: Option<Snap>,
-    /// Axis locked with the arrow keys.
-    lock: Option<Axis>,
+    /// Locked with an arrow key.
+    lock: Option<Direction>,
+    /// Locked by holding Shift while a direction showed.
+    shift_lock: Option<Direction>,
+    shift: bool,
+    /// The edge and point the cursor last passed over.
+    hints: Hints,
     copy: bool,
     last: Option<Done>,
 }
@@ -56,8 +62,10 @@ struct Op {
     vertices: BTreeSet<VertexId>,
     base: DVec3,
     offset: DVec3,
-    /// The axis the move currently follows, by inference or lock.
-    axis: Option<Axis>,
+    /// The direction the move currently follows, by inference or lock.
+    direction: Option<Direction>,
+    /// "From Point": the remembered point the move lines up with.
+    from: Option<(DVec3, Axis)>,
     dragging: bool,
 }
 
@@ -78,8 +86,17 @@ impl MoveTool {
         self.op = None;
         self.snap = None;
         self.lock = None;
+        self.shift_lock = None;
         self.last = None;
         self.grips = None;
+    }
+
+    /// Holding Shift locks the direction showing; letting go unlocks it.
+    pub fn set_shift(&mut self, shift: bool) {
+        self.shift = shift;
+        if !shift {
+            self.shift_lock = None;
+        }
     }
 
     pub fn toggle_copy(&mut self) {
@@ -88,7 +105,8 @@ impl MoveTool {
 
     /// Lock moves to `axis`, or unlock if it's already locked.
     pub fn lock_axis(&mut self, axis: Axis) {
-        self.lock = if self.lock == Some(axis) { None } else { Some(axis) };
+        let direction = Direction::axis(axis);
+        self.lock = if self.lock == Some(direction) { None } else { Some(direction) };
     }
 
     pub fn hover(&mut self, doc: &Document, screen: Screen<'_>, cursor: Vec2) {
@@ -104,6 +122,7 @@ impl MoveTool {
             }
             self.hover = if doc.selection().is_empty() { pick_resolved(doc, screen, cursor) } else { None };
             self.snap = crate::pick::snap(view.model(), screen, cursor, None);
+            self.hints.note(self.snap.as_ref());
             let target: Vec<Entity> = match self.hover {
                 Some(Entity::Instance(id)) => vec![Entity::Instance(id)],
                 // Loose geometry: grips go around the whole connected piece, like a board.
@@ -116,11 +135,16 @@ impl MoveTool {
             }
             return;
         }
-        let (target, axis, snap) = self.target(view.model(), screen, cursor);
-        self.snap = snap;
+        let target = self.target(view.model(), screen, cursor);
+        if self.shift && self.shift_lock.is_none() {
+            self.shift_lock = target.direction;
+        }
+        self.hints.note(target.snap.as_ref());
+        self.snap = target.snap;
         if let Some(op) = &mut self.op {
-            op.offset = target - op.base;
-            op.axis = axis;
+            op.offset = target.point - op.base;
+            op.direction = target.direction;
+            op.from = target.from;
         }
     }
 
@@ -181,9 +205,9 @@ impl MoveTool {
 
         if let Some(op) = &self.op {
             // Along an axis, use its exact direction so typed lengths come out exact.
-            let direction = match op.axis {
-                Some(axis) if op.offset.dot(axis.dir()) < 0.0 => -axis.dir(),
-                Some(axis) => axis.dir(),
+            let direction = match op.direction {
+                Some(d) if op.offset.dot(d.dir) < 0.0 => -d.dir,
+                Some(d) => d.dir,
                 None => op.offset,
             };
             let offset = parse_offset(typed, direction, op.base)?;
@@ -243,7 +267,8 @@ impl MoveTool {
             }
             return;
         };
-        overlay.guide = Some(Guide { from: op.base, to: op.base + op.offset, axis: op.axis });
+        overlay.guide = Some(Guide { from: op.base, to: op.base + op.offset, along: op.direction.map(|d| d.along) });
+        overlay.alignment = op.from.map(|(anchor, axis)| (anchor, op.base + op.offset, axis));
         // Preview: every edge touching a moved vertex, with those ends moved. When copying,
         // only the copied geometry moves.
         for (_, edge) in model.edges() {
@@ -277,38 +302,27 @@ impl MoveTool {
         let vertices = doc.view().vertices_of(&entities);
         self.last = None;
         self.hover = None;
-        self.op = Some(Op { entities, vertices, base, offset: DVec3::ZERO, axis: self.lock, dragging });
+        self.op = Some(Op { entities, vertices, base, offset: DVec3::ZERO, direction: self.lock, from: None, dragging });
         Ok(())
     }
 
-    /// Where the cursor puts the moved base point: locked axis, else a snapped endpoint, else
-    /// an inferred axis, else the horizontal plane through the base point.
-    fn target(&self, model: &Model, screen: Screen<'_>, cursor: Vec2) -> (DVec3, Option<Axis>, Option<Snap>) {
+    /// Where the cursor puts the moved base point ([`crate::infer`]): a lock, a snapped point,
+    /// an inferred direction, else the horizontal plane through the base point; lined up with
+    /// the last point hovered.
+    fn target(&self, model: &Model, screen: Screen<'_>, cursor: Vec2) -> Target {
         let op = self.op.as_ref().expect("only called while moving");
         let base = op.base;
-        let ray = screen.ray(cursor);
+        let query = Query {
+            base,
+            hints: &self.hints,
+            lock: self.lock.or(self.shift_lock),
+            plane_normal: DVec3::Z,
+            current: base + op.offset,
+        };
         // Don't snap to the geometry being moved, unless copying (the original stays put).
-        let snap = snap_feature(model, screen, cursor, |v| !self.copy && op.vertices.contains(&v));
-
-        if let Some(axis) = self.lock {
-            let dir = axis.dir();
-            let t = match &snap {
-                Some(s) => Some((s.point - base).dot(dir)),
-                None => closest_on_line(base, dir, &ray),
-            };
-            return (base + dir * t.unwrap_or(op.offset.dot(dir)), Some(axis), snap);
-        }
-        if let Some(s) = snap {
-            return (s.point, None, Some(s));
-        }
-        if let Some((point, axis)) = infer_axis(screen, base, cursor) {
-            return (point, Some(axis), None);
-        }
-        let free = ray
-            .hit_plane(base, DVec3::Z)
-            .or_else(|| ray.hit_plane(base, -screen.forward()))
-            .unwrap_or(base + op.offset);
-        (free, None, None)
+        infer::target(model, screen, cursor, &query, |v| !self.copy && op.vertices.contains(&v), |ray| {
+            ray.hit_plane(base, DVec3::Z).or_else(|| ray.hit_plane(base, -screen.forward())).map(|p| (p, None))
+        })
     }
 
     fn finish(&mut self, doc: &mut Document, typed: Option<DVec3>) -> Result<(), String> {
@@ -511,7 +525,7 @@ mod tests {
         let mut tool = MoveTool::default();
         tool.click(&mut doc, screen, at(screen, DVec3::ZERO)).unwrap();
         tool.hover(&doc, screen, at(screen, DVec3::X * 20.0));
-        assert_eq!(tool.op.as_ref().unwrap().axis, Some(Axis::X));
+        assert_eq!(tool.op.as_ref().unwrap().direction, Some(Direction::axis(Axis::X)));
         tool.enter(&mut doc, "16").unwrap();
         assert_eq!(bounds(&doc), (DVec3::new(16.0, 0.0, 0.0), DVec3::new(17.5, 3.5, 96.0)));
         assert_eq!(doc.model().faces().count(), 6);

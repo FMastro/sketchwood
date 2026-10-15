@@ -12,16 +12,25 @@ use sketchcraft_doc::units::format_length;
 use sketchcraft_doc::{Document, EPS, Guide};
 
 use crate::move_tool::parse_offset;
-use crate::pick::{Screen, Snap, closest_on_line, infer_axis, snap, snap_feature};
+use crate::infer::{self, Direction, Hints, Query, Target};
+use crate::pick::{Screen, Snap, snap};
 use crate::{Axis, Overlay, SnapKind};
 
 #[derive(Default)]
 pub struct TapeTool {
     start: Option<Start>,
     hover: Option<Snap>,
-    /// Where the tape ends, and the axis it follows.
-    end: Option<(DVec3, Option<Axis>)>,
-    lock: Option<Axis>,
+    /// Where the tape ends, and why.
+    end: Option<Target>,
+    /// Locked with an arrow key.
+    lock: Option<Direction>,
+    /// Locked by holding Shift while a direction showed.
+    shift_lock: Option<Direction>,
+    shift: bool,
+    /// The edge and point the cursor last passed over.
+    hints: Hints,
+    /// The plane the tape started on (for "perpendicular").
+    plane: DVec3,
     /// Ctrl switched guide-making off.
     measure_only: bool,
     /// The last measurement or guide, which typing can still change.
@@ -53,6 +62,7 @@ impl TapeTool {
         self.start = None;
         self.end = None;
         self.lock = None;
+        self.shift_lock = None;
         self.last = None;
     }
 
@@ -61,44 +71,49 @@ impl TapeTool {
     }
 
     pub fn lock_axis(&mut self, axis: Axis) {
-        self.lock = if self.lock == Some(axis) { None } else { Some(axis) };
+        let direction = Direction::axis(axis);
+        self.lock = if self.lock == Some(direction) { None } else { Some(direction) };
+    }
+
+    /// Holding Shift locks the direction showing; letting go unlocks it.
+    pub fn set_shift(&mut self, shift: bool) {
+        self.shift = shift;
+        if !shift {
+            self.shift_lock = None;
+        }
     }
 
     pub fn hover(&mut self, doc: &Document, screen: Screen<'_>, cursor: Vec2) {
         let model = doc.view().model();
         let Some(start) = self.start else {
             self.hover = snap(model, screen, cursor, None);
+            self.hints.note(self.hover.as_ref());
             return;
         };
         let base = start.point;
-        let ray = screen.ray(cursor);
-        let feature = snap_feature(model, screen, cursor, |_| false);
-        let (point, axis, shown) = if let Some(axis) = self.lock {
-            let dir = axis.dir();
-            let t = match &feature {
-                Some(s) => Some((s.point - base).dot(dir)),
-                None => closest_on_line(base, dir, &ray),
-            };
-            let current = self.end.map_or(0.0, |(p, _)| (p - base).dot(dir));
-            (base + dir * t.unwrap_or(current), Some(axis), feature)
-        } else if let Some(s) = feature {
-            (s.point, None, Some(s))
-        } else if let Some((point, axis)) = infer_axis(screen, base, cursor).filter(|_| start.line.is_none()) {
-            (point, Some(axis), None)
-        } else {
+        let query = Query {
+            base,
+            hints: &self.hints,
+            lock: self.lock.or(self.shift_lock),
+            plane_normal: self.plane,
+            current: self.end.map_or(base, |t| t.point),
+        };
+        let target = infer::target(model, screen, cursor, &query, |_| false, |ray| {
             let surface = snap(model, screen, cursor, None).filter(|s| s.kind == SnapKind::OnFace);
             // Off any face: a guide line's offset stays level when its edge is level (laying out
             // on the floor), otherwise the tape runs in the plane facing the camera.
             let level = start.line.is_some_and(|d| d.z.abs() < 1e-9);
-            let point = surface
-                .map(|s| s.point)
-                .or_else(|| level.then(|| ray.hit_plane(base, DVec3::Z)).flatten())
-                .or_else(|| ray.hit_plane(base, -screen.forward()))
-                .unwrap_or(base);
-            (point, None, surface)
-        };
-        self.hover = shown;
-        self.end = Some((point, axis));
+            surface
+                .map(|s| (s.point, Some(s)))
+                .or_else(|| level.then(|| ray.hit_plane(base, DVec3::Z)).flatten().map(|p| (p, None)))
+                .or_else(|| ray.hit_plane(base, -screen.forward()).map(|p| (p, None)))
+        });
+        if self.shift && self.shift_lock.is_none() {
+            self.shift_lock = target.direction;
+        }
+        self.hints.note(target.snap.as_ref());
+        self.hover = target.snap;
+        self.end = Some(target);
     }
 
     pub fn click(&mut self, doc: &mut Document, screen: Screen<'_>, cursor: Vec2) -> Result<(), String> {
@@ -112,6 +127,11 @@ impl TapeTool {
                     line: hover.line.filter(|_| matches!(hover.kind, SnapKind::OnEdge | SnapKind::OnGuide)),
                 });
                 self.end = None;
+                self.plane = hover.normal;
+                // The edge it starts on is the one "perpendicular" refers to: the offset direction.
+                if let Some(line) = self.start.and_then(|s| s.line) {
+                    self.hints.edge = Some(line);
+                }
                 Ok(())
             }
             Some(start) => {
@@ -180,8 +200,9 @@ impl TapeTool {
         let end = start.point + offset;
         // The tape itself, and the guide it would leave.
         overlay.lines.push([start.point, end]);
-        let axis = self.end.and_then(|(_, axis)| axis);
-        overlay.guide = Some(crate::Guide { from: start.point, to: end, axis });
+        let along = self.end.and_then(|t| t.direction).map(|d| d.along);
+        overlay.guide = Some(crate::Guide { from: start.point, to: end, along });
+        overlay.alignment = self.end.and_then(|t| t.from).map(|(anchor, axis)| (anchor, end, axis));
         if !self.measure_only && offset.length() >= EPS {
             overlay.guides.push((Self::guide(start, offset), true));
         }
@@ -190,7 +211,7 @@ impl TapeTool {
     /// The tape from the start point to the cursor; for a guide line, only the part across it.
     fn offset(&self) -> DVec3 {
         match (self.start, self.end) {
-            (Some(start), Some((end, _))) => Self::project(start, end - start.point),
+            (Some(start), Some(end)) => Self::project(start, end.point - start.point),
             _ => DVec3::ZERO,
         }
     }
@@ -198,8 +219,8 @@ impl TapeTool {
     /// The direction typed distances go in.
     fn direction(&self) -> DVec3 {
         match self.end {
-            Some((p, Some(axis))) if self.start.is_some_and(|s| (p - s.point).dot(axis.dir()) < 0.0) => -axis.dir(),
-            Some((_, Some(axis))) => axis.dir(),
+            Some(Target { point, direction: Some(d), .. }) if self.start.is_some_and(|s| (point - s.point).dot(d.dir) < 0.0) => -d.dir,
+            Some(Target { direction: Some(d), .. }) => d.dir,
             _ => self.offset(),
         }
     }

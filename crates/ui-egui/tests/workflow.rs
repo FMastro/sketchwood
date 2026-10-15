@@ -960,3 +960,29 @@ fn boards_hide_the_guides_behind_them() {
     type_text(&mut harness, "Z");
     snapshot(&mut harness, "guides_behind_board");
 }
+
+#[test]
+fn line_infers_parallel_to_a_hovered_edge() {
+    use glam::DVec3;
+    let mut harness = app();
+    harness.state_mut().document_mut().edit(|m| {
+        m.add_line(DVec3::new(0.0, 0.0, 0.0), DVec3::new(24.0, 12.0, 0.0));
+        m.add_line(DVec3::new(0.0, 18.0, 0.0), DVec3::new(2.0, 18.0, 0.0));
+    });
+    harness.run();
+    type_text(&mut harness, "Z");
+    type_text(&mut harness, "l");
+    // Pass over the slanted edge, then start from the short line's end.
+    let on_edge = harness.state().to_window(DVec3::new(12.0, 6.0, 0.0)).unwrap();
+    harness.hover_at(on_edge);
+    harness.run();
+    let start = harness.state().to_window(DVec3::new(0.0, 18.0, 0.0)).unwrap();
+    click(&mut harness, start);
+    let along = DVec3::new(24.0, 12.0, 0.0).normalize();
+    let near = harness.state().to_window(DVec3::new(0.0, 18.0, 0.0) + along * 16.0).unwrap() + egui::vec2(2.0, 1.0);
+    harness.hover_at(near);
+    harness.run();
+    let overlay = harness.state().tools().overlay(harness.state().document());
+    assert_eq!(overlay.guide.and_then(|g| g.along), Some(sketchcraft_tools::infer::Along::Parallel));
+    snapshot(&mut harness, "parallel_inference");
+}

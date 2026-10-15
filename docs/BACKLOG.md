@@ -55,7 +55,8 @@ each section. Remove items when they're done (mention them in the commit).
   Offset on a closed group's face opens the group, so the work goes into the board. (Paint
   still paints the whole group, as in SketchUp.)
 - Selected groups are tinted; SketchUp instead draws their bounding box in blue.
-- No renaming in the Outliner, no nested tree (only the current level is listed), no
+- No renaming in the Outliner, no nested tree (only the current level is listed, so parts inside
+  assemblies can't be found or marked "needs a material" there), no
   "make unique" command for components, no component browser to place more instances.
 - Move stretching doesn't reach into groups from outside (Move moves the whole group).
 - Undo snapshots copy every definition; fine now, heavy for big furniture assemblies.

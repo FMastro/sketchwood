@@ -104,6 +104,19 @@ impl OrbitCamera {
     }
 
     /// Zoom by `steps` (positive zooms in) toward the point under `cursor`.
+    /// Zoom toward what's under the cursor at `depth` (its distance along the view direction),
+    /// as SketchUp does: the orbit center first slides along the line of sight to that depth
+    /// (the view doesn't change), so zooming closes in on the surface instead of slowing to a
+    /// stop at an orbit center floating in front of it.
+    pub fn zoom_toward(&mut self, steps: f32, cursor: Vec2, viewport: Vec2, depth: Option<f32>) {
+        if let Some(depth) = depth.filter(|d| d.is_finite() && *d > MIN_DISTANCE) {
+            let eye = self.eye();
+            self.target = eye + self.forward() * depth;
+            self.distance = depth;
+        }
+        self.zoom_at(steps, cursor, viewport);
+    }
+
     pub fn zoom_at(&mut self, steps: f32, cursor: Vec2, viewport: Vec2) {
         let new_distance =
             (self.distance * ZOOM_FACTOR_PER_STEP.powf(steps)).clamp(MIN_DISTANCE, MAX_DISTANCE);
@@ -175,6 +188,23 @@ fn aspect(viewport: Vec2) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn zooming_toward_a_surface_gets_right_up_to_it() {
+        // The orbit center floats 40" in front of a wall 100" away: zooming at the old center
+        // creeps toward it and never reaches the wall; zooming toward the wall's depth does.
+        let size = Vec2::new(1000.0, 800.0);
+        let mut camera = OrbitCamera { target: Vec3::new(0.0, 0.0, 0.0), distance: 40.0, ..Default::default() };
+        camera.set_view(StandardView::Front);
+        let eye = camera.eye();
+        let wall = 100.0;
+        let center = size * 0.5;
+        for _ in 0..60 {
+            camera.zoom_toward(1.0, center, size, Some(wall - (camera.eye() - eye).length()));
+        }
+        let travelled = (camera.eye() - eye).length();
+        assert!(travelled > wall - 1.0, "within an inch of the wall: moved {travelled}");
+    }
+
     use super::*;
 
     const VIEWPORT: Vec2 = Vec2::new(1200.0, 800.0);

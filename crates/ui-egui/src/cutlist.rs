@@ -46,10 +46,12 @@ impl CutListWindow {
         (&cache.list, &cache.plans)
     }
 
-    pub fn show(&mut self, ctx: &egui::Context, doc: &mut Document) {
+    /// Show the window. Returns a material to open in the Materials panel ("Edit material").
+    pub fn show(&mut self, ctx: &egui::Context, doc: &mut Document) -> Option<sketchcraft_doc::MaterialId> {
         if !self.open {
-            return;
+            return None;
         }
+        let mut edit = None;
         let mut open = self.open;
         egui::Window::new(format!("{} Cut List", ph::TABLE))
             .id(egui::Id::new("cut_list"))
@@ -82,7 +84,7 @@ impl CutListWindow {
                 egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| match self.tab {
                     Tab::Parts => {
                         let (list, _) = self.refresh(doc);
-                        parts_tab(ui, list, doc);
+                        parts_tab(ui, list, doc, &mut edit);
                     }
                     Tab::Diagrams => {
                         let (list, plans) = self.refresh(doc);
@@ -92,6 +94,7 @@ impl CutListWindow {
                 });
             });
         self.open = open;
+        edit
     }
 
     fn export_csv(&mut self, doc: &Document) {
@@ -198,9 +201,21 @@ fn color32(doc: &Document, material: &MaterialParts) -> egui::Color32 {
     egui::Color32::from_rgb(rgb[0], rgb[1], rgb[2])
 }
 
-fn parts_tab(ui: &mut egui::Ui, list: &CutList, doc: &Document) {
+fn parts_tab(ui: &mut egui::Ui, list: &CutList, doc: &Document, edit: &mut Option<sketchcraft_doc::MaterialId>) {
     if list.materials.is_empty() {
         ui.label("No parts yet. Each group or component is a part: boards made with Push/Pull count automatically.");
+    }
+    let needs = list.needs_material();
+    if needs > 0 {
+        ui.colored_label(
+            ui.visuals().warn_fg_color,
+            format!(
+                "{} {needs} part{} need{} a material (listed first). Paint each one, or paint the group around them.",
+                ph::WARNING,
+                if needs == 1 { "" } else { "s" },
+                if needs == 1 { "s" } else { "" },
+            ),
+        );
     }
     if list.loose_faces > 0 {
         ui.colored_label(
@@ -208,13 +223,26 @@ fn parts_tab(ui: &mut egui::Ui, list: &CutList, doc: &Document) {
             format!("{} loose faces aren't in any group, so they aren't parts. Group them (Ctrl+G) to list them.", list.loose_faces),
         );
     }
-    for material in &list.materials {
+    // What still needs a material first: that's what to fix.
+    let ordered = list.materials.iter().filter(|m| m.material.is_none()).chain(list.materials.iter().filter(|m| m.material.is_some()));
+    for material in ordered {
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             let (rect, _) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
             ui.painter().rect_filled(rect, 2.0, color32(doc, material));
-            ui.strong(&material.name);
-            ui.weak(format!("{}  ·  {} parts  ·  {}", kind_name(material), material.part_count(), amount(material)));
+            match material.material {
+                None => {
+                    ui.colored_label(ui.visuals().warn_fg_color, egui::RichText::new("Needs a material").strong());
+                    ui.weak(plural(material.part_count(), "part"));
+                }
+                Some(id) => {
+                    ui.strong(&material.name);
+                    ui.weak(format!("{}  ·  {}  ·  {}", kind_name(material), plural(material.part_count(), "part"), amount(material)));
+                    if ui.small_button(format!("{} Edit material", ph::PENCIL_SIMPLE)).clicked() {
+                        *edit = Some(id);
+                    }
+                }
+            }
         });
         egui::Grid::new(("parts", &material.name)).striped(true).num_columns(7).spacing([16.0, 4.0]).show(ui, |ui| {
             for heading in ["", "Name", "Qty", "Length", "Width", "Thickness", "Stock"] {
@@ -302,4 +330,9 @@ fn draw_stock(ui: &mut egui::Ui, stock: &cutplan::Stock, color: egui::Color32) {
         let font = egui::FontId::proportional(if part.height() < 18.0 { 10.0 } else { 12.0 });
         painter.text(part.center(), egui::Align2::CENTER_CENTER, text, font, egui::Color32::BLACK);
     }
+}
+
+/// `1 part`, `3 parts`.
+fn plural(count: usize, noun: &str) -> String {
+    if count == 1 { format!("1 {noun}") } else { format!("{count} {noun}s") }
 }

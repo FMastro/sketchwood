@@ -55,7 +55,7 @@ impl Viewport {
         let size = Vec2::new(rect.width(), rect.height());
         self.rect = rect;
 
-        self.navigate(ui, &response, rect, size);
+        self.navigate(ui, &response, rect, size, doc);
         self.feed_tools(ui, &response, rect, size, doc, tools);
         if self.zoom_extents_pending && size.x > 1.0 && size.y > 1.0 {
             match doc.bounds() {
@@ -136,7 +136,7 @@ impl Viewport {
     }
 
     /// Middle-drag orbits, Shift+middle-drag and right-drag pan, the wheel zooms at the cursor.
-    fn navigate(&mut self, ui: &egui::Ui, response: &egui::Response, rect: egui::Rect, size: Vec2) {
+    fn navigate(&mut self, ui: &egui::Ui, response: &egui::Response, rect: egui::Rect, size: Vec2, doc: &Document) {
         let (shift, scroll) = ui.input(|i| (i.modifiers.shift, i.smooth_scroll_delta.y));
         let drag = to_vec2(response.drag_delta());
         if response.dragged_by(egui::PointerButton::Middle) {
@@ -151,8 +151,26 @@ impl Viewport {
         if scroll != 0.0
             && let Some(pointer) = response.hover_pos()
         {
-            self.camera.zoom_at(scroll / POINTS_PER_ZOOM_STEP, to_vec2(pointer - rect.min), size);
+            let cursor = to_vec2(pointer - rect.min);
+            let depth = self.depth_under(cursor, size, doc);
+            self.camera.zoom_toward(scroll / POINTS_PER_ZOOM_STEP, cursor, size, depth);
         }
+    }
+
+    /// How far along the view direction the surface under `cursor` is: the nearest face, else
+    /// the ground. `None` when the cursor points at the sky.
+    fn depth_under(&self, cursor: Vec2, size: Vec2, doc: &Document) -> Option<f32> {
+        let to_world = doc.context_transform();
+        let screen = sketchcraft_tools::pick::Screen::in_context(&self.camera, size, to_world);
+        let ray = screen.ray(cursor);
+        let hit = sketchcraft_tools::pick::hit_face(doc.view().model(), &ray)
+            .map(|(_, p)| to_world.transform_point3(p))
+            .or_else(|| {
+                let (origin, dir) = self.camera.ray(cursor, size);
+                let t = -origin.z / dir.z;
+                (dir.z.abs() > 1e-6 && t > 0.0).then(|| (origin + dir * t).as_dvec3())
+            })?;
+        Some((hit.as_vec3() - self.camera.eye()).dot(self.camera.forward()))
     }
 
     /// Left-button input goes to the active tool.

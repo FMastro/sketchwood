@@ -45,7 +45,7 @@ impl SketchCraftApp {
             tools: Tools::default(),
             keyboard: keys::Keyboard::default(),
             tags: tags::TagsPanel::default(),
-            materials: materials::MaterialsPanel,
+            materials: materials::MaterialsPanel::default(),
             viewport: Viewport::new(render_state),
             files: files::Files::default(),
             cut_list: cutlist::CutListWindow::default(),
@@ -61,7 +61,7 @@ impl SketchCraftApp {
         self.tools.cancel();
         self.tools.active_material = None;
         self.tags = tags::TagsPanel::default();
-        self.materials = materials::MaterialsPanel;
+        self.materials = materials::MaterialsPanel::default();
         self.viewport.document_replaced(&self.doc);
         self.files.path = path;
         self.files.mark_saved(&self.doc);
@@ -213,7 +213,11 @@ impl eframe::App for SketchCraftApp {
         self.tool_set(ui);
         self.tray(ui);
 
-        self.cut_list.show(&ctx, &mut self.doc);
+        // "Edit material" in the Cut List opens it in the tray.
+        if let Some(material) = self.cut_list.show(&ctx, &mut self.doc) {
+            self.materials.editing = Some(material);
+            self.show_tray = true;
+        }
         self.about_window(&ctx);
 
         egui::CentralPanel::no_frame()

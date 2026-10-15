@@ -68,6 +68,13 @@ pub struct CutList {
     pub loose_faces: usize,
 }
 
+impl CutList {
+    /// How many parts (counting copies) have no material yet.
+    pub fn needs_material(&self) -> usize {
+        self.materials.iter().filter(|m| m.material.is_none()).map(MaterialParts::part_count).sum()
+    }
+}
+
 /// Identical parts while grouping: their names, how many, and their exact size.
 type Group = (Vec<String>, usize, [f64; 3]);
 
@@ -216,6 +223,34 @@ mod tests {
     pub(crate) fn board(doc: &mut Document, at: DVec3, l: f64, w: f64, t: f64) -> crate::InstanceId {
         let face = doc.edit(|m| m.add_rectangle(at, DVec3::X * w, DVec3::Y * t, DVec3::Z)).unwrap();
         doc.push_pull(face, l, true).unwrap().unwrap()
+    }
+
+    #[test]
+    fn assemblies_list_their_parts_and_unpainted_ones_need_a_material() {
+        let mut doc = Document::default();
+        let oak = doc.add_material(MaterialKind::SolidWood);
+        // A drawer: four boards grouped into an assembly (no faces of its own).
+        let parts: Vec<Entity> = (0..4).map(|i| Entity::Instance(board(&mut doc, DVec3::X * (30.0 * f64::from(i)), 20.0, 6.0, 0.75))).collect();
+        doc.paint(&parts[..1], Some(oak));
+        doc.selection_mut().extend(parts.iter().copied());
+        let drawer = doc.group_selection(DefinitionKind::Group).unwrap();
+        doc.rename_instance(drawer, "Drawer");
+        // A shelf made a component, used twice, unpainted.
+        let shelf = board(&mut doc, DVec3::Y * 50.0, 30.0, 10.0, 0.75);
+        doc.selection_mut().clear();
+        doc.selection_mut().extend([Entity::Instance(shelf)]);
+        let shelf = doc.group_selection(DefinitionKind::Component).unwrap();
+        doc.transform_entities(&[Entity::Instance(shelf)], &[glam::DAffine3::from_translation(DVec3::Z * 12.0)], true).unwrap();
+
+        let list = cut_list(doc.scene());
+        let count = |name: &str| list.materials.iter().find(|m| m.name == name).map_or(0, MaterialParts::part_count);
+        assert_eq!(count("Wood"), 1, "the painted drawer board");
+        assert_eq!(count("No material"), 3 + 2, "three drawer boards and both shelves need a material");
+        assert_eq!(list.needs_material(), 5);
+        // Painting the assembly gives its unpainted boards its material.
+        doc.selection_mut().clear();
+        doc.paint(&[Entity::Instance(drawer)], Some(oak));
+        assert_eq!(cut_list(doc.scene()).needs_material(), 2);
     }
 
     #[test]

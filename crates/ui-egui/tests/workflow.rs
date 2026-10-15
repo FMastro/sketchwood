@@ -1074,3 +1074,29 @@ fn a_pine_stud_lists_as_a_2x4_and_buys_an_8_foot_board() {
     assert!(harness.query_all_by_label_contains("1 × 2x4 x 96\"").next().is_some(), "buy one 8' 2x4");
     snapshot(&mut harness, "pine_stud_cut_list");
 }
+
+#[test]
+fn the_cut_list_calls_out_parts_needing_a_material() {
+    use egui_kittest::kittest::Queryable;
+    use egui_phosphor::regular as ph;
+    use glam::DVec3;
+    let mut harness = app();
+    {
+        let doc = harness.state_mut().document_mut();
+        let oak = doc.add_preset(sketchcraft_doc::library::LIBRARY.iter().find(|p| p.name == "Red Oak").unwrap());
+        let top = add_board(doc, DVec3::ZERO, 30.0, 12.0, 0.75);
+        doc.paint(&[top], Some(oak));
+        add_board(doc, DVec3::X * 20.0, 28.0, 3.5, 0.75);
+    }
+    harness.run();
+    harness.get_by_label(ph::TABLE).click();
+    harness.run();
+    assert!(harness.query_all_by_label_contains("1 part needs a material").next().is_some());
+    assert!(harness.query_by_label("Needs a material").is_some());
+    snapshot(&mut harness, "cut_list_needs_material");
+    // "Edit material" opens Red Oak's editor in the tray, without the Paint Bucket.
+    harness.get_by_label_contains("Edit material").click();
+    harness.run();
+    assert!(harness.query_by_label("Editing Red Oak").is_some());
+    assert_ne!(harness.state().tools().active(), ToolId::PaintBucket);
+}

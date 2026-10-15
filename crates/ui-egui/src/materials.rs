@@ -13,13 +13,22 @@ use sketchcraft_tools::{ToolId, Tools};
 
 
 #[derive(Default)]
-pub struct MaterialsPanel;
+pub struct MaterialsPanel {
+    /// The material open in the editor (shown without having to paint with it).
+    pub editing: Option<MaterialId>,
+}
 
 impl MaterialsPanel {
     pub fn show(&mut self, ui: &mut egui::Ui, doc: &mut Document, tools: &mut Tools) {
         ui.horizontal(|ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.menu_button(ph::PLUS, |ui| add_menu(ui, doc, tools)).response.on_hover_text("Add a material");
+                ui.menu_button(ph::PLUS, |ui| {
+                    if let Some(id) = add_menu(ui, doc, tools) {
+                        self.editing = Some(id);
+                    }
+                })
+                .response
+                .on_hover_text("Add a material");
             });
         });
 
@@ -41,16 +50,22 @@ impl MaterialsPanel {
                 let active = tools.active_material == Some(*id);
                 let response = ui
                     .selectable_label(active, &material.name)
-                    .on_hover_text(format!("{}. Click to paint with it and edit it below.", material.kind.name()));
+                    .on_hover_text(format!("{}. Click to paint with it; {} to edit it.", material.kind.name(), ph::PENCIL_SIMPLE));
                 if response.clicked() {
                     activate(tools, Some(*id));
+                    self.editing = Some(*id);
+                }
+                let editing = self.editing == Some(*id);
+                let edit = ui.selectable_label(editing, ph::PENCIL_SIMPLE).on_hover_text("Edit this material");
+                if edit.clicked() {
+                    self.editing = if editing { None } else { Some(*id) };
                 }
             });
         }
 
         if materials.is_empty() {
             ui.add_space(2.0);
-            ui.weak(format!("No materials yet. Click {} to add one, like Red Oak or Plywood 3/4\".", ph::PLUS));
+            ui.weak(format!("No materials yet. Click {} to add one, like Red Oak or Plywood.", ph::PLUS));
         } else if tools.active_material.is_none() && tools.active() == ToolId::PaintBucket {
             ui.add_space(2.0);
             ui.colored_label(
@@ -59,39 +74,56 @@ impl MaterialsPanel {
             );
         }
 
-        if let Some(id) = tools.active_material {
+        // Deleted (or undone away): close the editor.
+        if self.editing.is_some_and(|id| doc.scene().material(id).is_none()) {
+            self.editing = None;
+        }
+        if let Some(id) = self.editing {
             ui.add_space(4.0);
-            editor(ui, doc, tools, id);
+            ui.horizontal(|ui| {
+                ui.strong(format!("Editing {}", doc.scene().material(id).map_or("", |m| m.name.as_str())));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.small_button(ph::X).on_hover_text("Close the editor").clicked() {
+                        self.editing = None;
+                    }
+                });
+            });
+            if self.editing.is_some() {
+                editor(ui, doc, tools, id);
+            }
         }
     }
 }
 
 /// The + menu: library materials, or a blank one of a type.
-fn add_menu(ui: &mut egui::Ui, doc: &mut Document, tools: &mut Tools) {
+/// The + menu: library materials, or a blank one of a type. Returns the material added.
+fn add_menu(ui: &mut egui::Ui, doc: &mut Document, tools: &mut Tools) -> Option<MaterialId> {
+    let mut added = None;
     ui.weak("Library");
     for preset in LIBRARY {
-        let added = ui
+        let clicked = ui
             .horizontal(|ui| {
                 swatch(ui, preset.color);
                 ui.button(preset.name).clicked()
             })
             .inner;
-        if added {
-            let id = doc.add_preset(preset);
-            activate(tools, Some(id));
-            ui.close();
+        if clicked {
+            added = Some(doc.add_preset(preset));
         }
     }
     ui.separator();
     ui.menu_button("New blank material", |ui| {
         for kind in MaterialKind::ALL {
             if ui.button(kind.name()).clicked() {
-                let id = doc.add_material(kind);
-                activate(tools, Some(id));
-                ui.close();
+                added = Some(doc.add_material(kind));
             }
         }
     });
+    if let Some(id) = added {
+        activate(tools, Some(id));
+        ui.close();
+    }
+    added
 }
 
 /// A text field showing `current`, editable: while it has focus what's typed is kept (even if

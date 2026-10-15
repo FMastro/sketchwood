@@ -1,52 +1,93 @@
-//! Cutting diagrams: how to cut the cut list's parts from standard stock with little waste.
+//! Cutting diagrams: what stock to buy and how to cut the cut list's parts from it.
 //!
-//! - Sheet goods: parts are packed onto sheets (4' x 8' by default) with a 2D guillotine packer,
-//!   so every layout can be cut with edge-to-edge cuts on a table saw or track saw. Parts only
-//!   turn sideways if the material has no grain.
+//! A material lists the standard stock it comes in ([`Standard`], as in OpenCutList): sheet
+//! goods their thicknesses and sheet sizes, dimensional lumber its sections (2x4, 1x6...) and
+//! lengths, solid wood its thicknesses and board lengths and widths. Each part is matched to the
+//! stock its own size needs ([`match_stock`]): a 1/2" drawer bottom of Plywood comes from 1/2"
+//! sheets, a 1 1/2" x 3 1/2" x 84" stud of Pine lumber from a 2x4 8' long.
+//!
+//! - Sheet goods: parts are packed onto sheets with a 2D guillotine packer, so every layout can
+//!   be cut with edge-to-edge cuts on a table saw or track saw; the sheet size using the least
+//!   stock wins. Parts only turn sideways if the material has no grain.
 //! - Solid wood: the same, on boards of a standard width and length.
-//! - Dimensional lumber: parts go on the smallest standard section that fits (2x4, 1x6, ...)
-//!   and are packed by length onto standard lengths (first-fit decreasing); each board is then
-//!   shortened to the shortest standard length that still holds its parts.
+//! - Dimensional lumber: packed by length onto standard lengths (first-fit decreasing); each
+//!   board is then shortened to the shortest standard length that still holds its parts.
 //!
 //! Every cut takes a saw kerf. Several part orders and placement rules are tried and the plan
 //! using the least stock wins. These are good heuristics, not guaranteed optima.
 
 use serde::{Deserialize, Serialize};
 
-use crate::cutlist::MaterialParts;
-use crate::{MaterialKind, Scene};
+use crate::cutlist::{MaterialParts, Part};
 use crate::units::format_length;
+use crate::{MaterialKind, Scene};
 
-/// Stock sizes and the saw kerf, in inches. US defaults. Saved with the drawing; a material
-/// can override the sizes that apply to its type ([`StockOverride`]).
+/// How close, in inches, a part's thickness must be to a standard one (1/64").
+const THICKNESS_MATCH: f64 = 1.0 / 64.0;
+
+/// The saw kerf, in inches, saved with the drawing. (Stock sizes live in each material.)
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Settings {
     pub kerf: f64,
-    /// Sheet goods: (length, width).
-    pub sheet: (f64, f64),
-    /// Solid wood boards.
-    pub board_lengths: Vec<f64>,
-    pub board_widths: Vec<f64>,
-    /// Dimensional lumber.
-    pub lumber_lengths: Vec<f64>,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self {
-            kerf: 0.125,
-            sheet: (96.0, 48.0),
-            board_lengths: vec![72.0, 96.0, 120.0],
-            board_widths: vec![3.5, 5.5, 7.25, 9.25, 11.25],
-            lumber_lengths: vec![96.0, 120.0, 144.0, 192.0],
-        }
+        Self { kerf: 0.125 }
     }
 }
 
+/// The standard stock a material comes in, in inches. Which lists matter depends on the
+/// material's type; the others stay empty.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Standard {
+    /// Sheet goods and solid wood: the thicknesses it's sold in (actual, not nominal).
+    #[serde(default)]
+    pub thicknesses: Vec<f64>,
+    /// Sheet goods: sheet sizes (length, width); grain runs along the length.
+    #[serde(default)]
+    pub sheets: Vec<(f64, f64)>,
+    /// Dimensional lumber: sections (thickness, width), actual sizes.
+    #[serde(default)]
+    pub sections: Vec<(f64, f64)>,
+    /// Dimensional lumber and solid wood: the lengths it's sold in.
+    #[serde(default)]
+    pub lengths: Vec<f64>,
+    /// Solid wood: board widths.
+    #[serde(default)]
+    pub widths: Vec<f64>,
+}
 
-/// A material's own stock sizes, replacing the drawing's for its type: the sheet size for
-/// sheet goods, board lengths and widths for solid wood, lengths for dimensional lumber.
-/// `None` uses the drawing's.
+impl Standard {
+    /// US defaults for a type of material.
+    pub fn for_kind(kind: MaterialKind) -> Self {
+        match kind {
+            MaterialKind::SheetGood => {
+                Self { thicknesses: vec![0.25, 0.5, 0.75], sheets: vec![(96.0, 48.0)], ..Self::default() }
+            }
+            // Surfaced hardwood: 4/4, 5/4, 6/4 and 8/4 rough, planed.
+            MaterialKind::SolidWood => Self {
+                thicknesses: vec![0.75, 1.0, 1.25, 1.75],
+                lengths: vec![72.0, 96.0, 120.0],
+                widths: vec![3.5, 5.5, 7.25, 9.25, 11.25],
+                ..Self::default()
+            },
+            MaterialKind::DimensionalLumber => Self {
+                sections: lumber_sizes().into_iter().map(|(_, t, w)| (t, w)).collect(),
+                lengths: vec![96.0, 120.0, 144.0, 192.0],
+                ..Self::default()
+            },
+            MaterialKind::Hardware | MaterialKind::Other => Self::default(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// A material's own stock sizes from before materials listed their standard stock; read from
+/// older drawings only.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct StockOverride {
     pub sheet: Option<(f64, f64)>,
@@ -54,43 +95,77 @@ pub struct StockOverride {
     pub widths: Option<Vec<f64>>,
 }
 
-impl StockOverride {
-    pub fn is_empty(&self) -> bool {
-        self.sheet.is_none() && self.lengths.is_none() && self.widths.is_none()
+/// The stock a part is cut from.
+#[derive(Clone, Debug, PartialEq)]
+pub struct StockMatch {
+    /// E.g. `3/4" sheet`, `2x4`, `1" board`.
+    pub name: String,
+    /// The stock's thickness (and for lumber its width).
+    pub thickness: f64,
+    pub width: Option<f64>,
+}
+
+/// The standard stock `part` is cut from, or why there's none.
+pub fn match_stock(part: &Part, kind: MaterialKind, standard: &Standard) -> Result<StockMatch, String> {
+    let list = |values: &[f64]| values.iter().map(|&v| format_length(v)).collect::<Vec<_>>().join(", ");
+    match kind {
+        MaterialKind::SheetGood => standard
+            .thicknesses
+            .iter()
+            .copied()
+            .find(|t| (t - part.thickness).abs() <= THICKNESS_MATCH)
+            .map(|t| StockMatch { name: format!("{} sheet", format_length(t)), thickness: t, width: None })
+            .ok_or_else(|| {
+                format!(
+                    "{} thick isn't a standard thickness ({})",
+                    format_length(part.thickness),
+                    list(&standard.thicknesses)
+                )
+            }),
+        // Planed down from the thinnest stock at least as thick.
+        MaterialKind::SolidWood => standard
+            .thicknesses
+            .iter()
+            .copied()
+            .filter(|t| *t >= part.thickness - THICKNESS_MATCH)
+            .reduce(f64::min)
+            .map(|t| StockMatch { name: format!("{} board", format_length(t)), thickness: t, width: None })
+            .ok_or_else(|| format!("{} thick: thicker than any standard stock", format_length(part.thickness))),
+        // The smallest section the part's cross-section fits in, either way round.
+        MaterialKind::DimensionalLumber => standard
+            .sections
+            .iter()
+            .copied()
+            .filter(|&(t, w)| {
+                let fits = |a: f64, b: f64| part.thickness <= a + THICKNESS_MATCH && part.width <= b + THICKNESS_MATCH;
+                fits(t, w) || fits(w, t)
+            })
+            .min_by(|a, b| (a.0 * a.1).total_cmp(&(b.0 * b.1)))
+            .map(|(t, w)| StockMatch { name: section_name(t, w), thickness: t, width: Some(w) })
+            .ok_or_else(|| {
+                format!(
+                    "{} x {} is bigger than any standard section",
+                    format_length(part.thickness),
+                    format_length(part.width)
+                )
+            }),
+        MaterialKind::Hardware | MaterialKind::Other => Err("not cut from stock".into()),
     }
 }
 
-impl Settings {
-    /// These settings with a material's own stock sizes swapped in.
-    pub fn with_override(&self, kind: MaterialKind, stock: &StockOverride) -> Settings {
-        let mut s = self.clone();
-        match kind {
-            MaterialKind::SheetGood => s.sheet = stock.sheet.unwrap_or(s.sheet),
-            MaterialKind::SolidWood => {
-                s.board_lengths = stock.lengths.clone().unwrap_or(s.board_lengths);
-                s.board_widths = stock.widths.clone().unwrap_or(s.board_widths);
-            }
-            MaterialKind::DimensionalLumber => s.lumber_lengths = stock.lengths.clone().unwrap_or(s.lumber_lengths),
-            _ => {}
-        }
-        s
-    }
+/// `2x4` for a standard lumber section, else its actual size.
+fn section_name(t: f64, w: f64) -> String {
+    lumber_sizes()
+        .into_iter()
+        .find(|(_, st, sw)| (st - t).abs() < 1e-9 && (sw - w).abs() < 1e-9)
+        .map_or_else(|| format!("{} x {}", format_length(t), format_length(w)), |(name, _, _)| name)
 }
 
-/// Plan every material in the drawing's cut list with the drawing's settings and each
-/// material's own stock sizes.
+/// Plan every material in the drawing's cut list.
 pub fn plan_all(scene: &Scene, list: &crate::cutlist::CutList) -> Vec<Option<Plan>> {
-    list.materials
-        .iter()
-        .map(|parts| {
-            let settings = match (parts.kind, parts.material.and_then(|m| scene.material(m))) {
-                (Some(kind), Some(material)) => scene.cut_settings.with_override(kind, &material.stock),
-                _ => scene.cut_settings.clone(),
-            };
-            plan(parts, &settings)
-        })
-        .collect()
+    list.materials.iter().map(|parts| plan(parts, scene.cut_settings.kerf)).collect()
 }
+
 /// Dimensional lumber's actual sizes, with nominal names (a 2x4 is 1.5" x 3.5").
 const LUMBER_THICKNESSES: [(f64, u32); 3] = [(0.75, 1), (1.5, 2), (3.5, 4)];
 const LUMBER_WIDTHS: [(f64, u32); 7] = [(1.5, 2), (2.5, 3), (3.5, 4), (5.5, 6), (7.25, 8), (9.25, 10), (11.25, 12)];
@@ -173,79 +248,92 @@ struct Piece {
 }
 
 /// Plan the cuts for one material, or `None` if it isn't cut from stock (hardware, other, no
-/// material).
-pub fn plan(material: &MaterialParts, settings: &Settings) -> Option<Plan> {
-    let pieces = || {
-        material.parts.iter().flat_map(|p| {
-            std::iter::repeat_n(Piece { label: p.label.clone(), length: p.length, width: p.width }, p.count)
-        })
-    };
-    match material.kind? {
-        MaterialKind::SheetGood => {
-            let (length, width) = settings.sheet;
-            let name = format!("Sheet {} x {}", format_length(length), format_length(width));
-            Some(pack_2d(pieces().collect(), &[(length, width, name)], !material.grained, settings.kerf))
-        }
-        MaterialKind::SolidWood => {
-            // Boards wide and long enough for the biggest part, from the standard sizes.
-            let widest = material.parts.iter().map(|p| p.width).fold(0.0, f64::max);
-            let longest = material.parts.iter().map(|p| p.length).fold(0.0, f64::max);
-            let width = smallest_at_least(&settings.board_widths, widest)
-                .or_else(|| settings.board_widths.iter().copied().reduce(f64::max))?;
-            let mut sizes: Vec<(f64, f64, String)> = settings
-                .board_lengths
-                .iter()
-                .filter(|&&l| l >= longest)
-                .map(|&l| (l, width, format!("Board {} x {}", format_length(width), format_length(l))))
-                .collect();
-            if sizes.is_empty() {
-                let l = settings.board_lengths.iter().copied().fold(0.0, f64::max);
-                sizes.push((l, width, format!("Board {} x {}", format_length(width), format_length(l))));
-            }
-            let mut plan = pack_2d(pieces().collect(), &sizes, false, settings.kerf);
-            for (label, reason) in &mut plan.unplaced {
-                if material.parts.iter().any(|p| p.label == *label && p.width > width) {
-                    *reason = "wider than the widest board: glue up a panel".into();
+/// material). Parts are grouped by the stock they match, and each group is planned on it.
+pub fn plan(material: &MaterialParts, kerf: f64) -> Option<Plan> {
+    let kind = material.kind?;
+    if matches!(kind, MaterialKind::Hardware | MaterialKind::Other) {
+        return None;
+    }
+    let standard = &material.standard;
+    let mut plan = Plan::default();
+    // (stock, its pieces), in the order stock first appears.
+    let mut groups: Vec<(StockMatch, Vec<Piece>)> = Vec::new();
+    for part in &material.parts {
+        match match_stock(part, kind, standard) {
+            Ok(stock) => {
+                let pieces = std::iter::repeat_n(Piece { label: part.label.clone(), length: part.length, width: part.width }, part.count);
+                match groups.iter_mut().find(|(s, _)| *s == stock) {
+                    Some((_, list)) => list.extend(pieces),
+                    None => groups.push((stock, pieces.collect())),
                 }
             }
-            Some(plan)
+            Err(reason) => plan.unplaced.push((part.label.clone(), reason)),
         }
-        MaterialKind::DimensionalLumber => Some(plan_lumber(pieces().collect(), material, settings)),
-        MaterialKind::Hardware | MaterialKind::Other => None,
     }
+    for (stock, pieces) in groups {
+        let group = match kind {
+            MaterialKind::SheetGood => plan_sheets(pieces, &stock, standard, material.grained, kerf),
+            MaterialKind::SolidWood => plan_boards(pieces, &stock, standard, kerf),
+            _ => {
+                let width = stock.width.unwrap_or(stock.thickness);
+                pack_1d(pieces, &standard.lengths, width, &stock.name, kerf)
+            }
+        };
+        plan.stocks.extend(group.stocks);
+        plan.unplaced.extend(group.unplaced);
+    }
+    Some(plan)
+}
+
+/// Sheet goods of one thickness: on whichever standard sheet size uses the least stock.
+fn plan_sheets(pieces: Vec<Piece>, stock: &StockMatch, standard: &Standard, grained: bool, kerf: f64) -> Plan {
+    let thickness = format_length(stock.thickness);
+    let area = |plan: &Plan| plan.stocks.iter().map(|s| s.length * s.width).sum::<f64>();
+    standard
+        .sheets
+        .iter()
+        .map(|&(length, width)| {
+            let name = format!("Sheet {} x {} x {thickness}", format_length(length), format_length(width));
+            pack_2d(pieces.clone(), &[(length, width, name)], !grained, kerf)
+        })
+        // Everything placed first, then the least stock.
+        .min_by(|a, b| a.unplaced.len().cmp(&b.unplaced.len()).then(area(a).total_cmp(&area(b))))
+        .unwrap_or_else(|| Plan {
+            unplaced: pieces.into_iter().map(|p| (p.label, "the material lists no sheet sizes".into())).collect(),
+            ..Plan::default()
+        })
+}
+
+/// Solid wood of one thickness: boards wide and long enough for the biggest part.
+fn plan_boards(pieces: Vec<Piece>, stock: &StockMatch, standard: &Standard, kerf: f64) -> Plan {
+    let thickness = format_length(stock.thickness);
+    let widest = pieces.iter().map(|p| p.width).fold(0.0, f64::max);
+    let longest = pieces.iter().map(|p| p.length).fold(0.0, f64::max);
+    let Some(width) = smallest_at_least(&standard.widths, widest).or_else(|| standard.widths.iter().copied().reduce(f64::max)) else {
+        return Plan {
+            unplaced: pieces.into_iter().map(|p| (p.label, "the material lists no board widths".into())).collect(),
+            ..Plan::default()
+        };
+    };
+    let name = |l: f64| format!("Board {thickness} x {} x {}", format_length(width), format_length(l));
+    let mut sizes: Vec<(f64, f64, String)> =
+        standard.lengths.iter().filter(|&&l| l >= longest).map(|&l| (l, width, name(l))).collect();
+    if sizes.is_empty() {
+        let l = standard.lengths.iter().copied().fold(0.0, f64::max);
+        sizes.push((l, width, name(l)));
+    }
+    let wide: Vec<String> = pieces.iter().filter(|p| p.width > width).map(|p| p.label.clone()).collect();
+    let mut plan = pack_2d(pieces, &sizes, false, kerf);
+    for (label, reason) in &mut plan.unplaced {
+        if wide.contains(label) {
+            *reason = "wider than the widest board: glue up a panel".into();
+        }
+    }
+    plan
 }
 
 fn smallest_at_least(sizes: &[f64], at_least: f64) -> Option<f64> {
     sizes.iter().copied().filter(|&s| s >= at_least - 1e-9).reduce(f64::min)
-}
-
-/// Lumber: pick a section per part, then pack each section by length.
-fn plan_lumber(pieces: Vec<Piece>, material: &MaterialParts, settings: &Settings) -> Plan {
-    let mut plan = Plan::default();
-    let mut by_section: Vec<(Section, Section, Vec<Piece>)> = Vec::new();
-    for piece in pieces {
-        let thickness =
-            material.parts.iter().find(|p| p.label == piece.label).map_or(material.stock_thickness.unwrap_or(1.5), |p| p.thickness);
-        let section = (
-            LUMBER_THICKNESSES.iter().copied().find(|(t, _)| *t >= thickness - 1e-9),
-            LUMBER_WIDTHS.iter().copied().find(|(w, _)| *w >= piece.width - 1e-9),
-        );
-        let (Some(t), Some(w)) = section else {
-            plan.unplaced.push((piece.label, "bigger than any standard lumber".into()));
-            continue;
-        };
-        match by_section.iter_mut().find(|(st, sw, _)| *st == t && *sw == w) {
-            Some((_, _, list)) => list.push(piece),
-            None => by_section.push((t, w, vec![piece])),
-        }
-    }
-    for ((_, nominal_t), (width, nominal_w), pieces) in by_section {
-        let name = format!("{nominal_t}x{nominal_w}");
-        let section_plan = pack_1d(pieces, &settings.lumber_lengths, width, &name, settings.kerf);
-        plan.stocks.extend(section_plan.stocks);
-        plan.unplaced.extend(section_plan.unplaced);
-    }
-    plan
 }
 
 /// 1D: pieces by length onto stock lengths. See [`best_bins`]; then any board whose parts fit
@@ -284,9 +372,6 @@ fn pack_1d(pieces: Vec<Piece>, lengths: &[f64], width: f64, section: &str, kerf:
     plan.unplaced.extend(too_long.into_iter().map(|p| (p.label, "longer than the longest stock".to_owned())));
     plan
 }
-
-/// A lumber dimension: (actual inches, nominal size), e.g. (3.5, 4).
-type Section = (f64, u32);
 
 /// A 1D packing: ((total length bought, longest board), the pieces on each board).
 type Boards = ((f64, f64), Vec<Vec<Piece>>);
@@ -515,7 +600,7 @@ mod tests {
             name: "Test".into(),
             kind: Some(kind),
             grained,
-            stock_thickness: None,
+            standard: Standard::for_kind(kind),
             parts: parts
                 .iter()
                 .map(|&(label, count, length, width, thickness)| Part {
@@ -583,15 +668,81 @@ mod tests {
             let list = crate::cutlist::cut_list(doc.scene());
             plan_all(doc.scene(), &list)[0].as_ref().unwrap().shopping_list()[0].0.clone()
         };
-        assert_eq!(sheets(&doc), "Sheet 96\" x 48\"");
+        assert_eq!(sheets(&doc), "Sheet 96\" x 48\" x 3/4\"");
         // Baltic birch comes 5' x 5'.
-        doc.edit_material(ply, |m| m.stock.sheet = Some((60.0, 60.0)));
-        assert_eq!(sheets(&doc), "Sheet 60\" x 60\"");
+        doc.edit_material(ply, |m| m.standard.sheets = vec![(60.0, 60.0)]);
+        assert_eq!(sheets(&doc), "Sheet 60\" x 60\" x 3/4\"");
         // Saved with the drawing, as are the drawing's own settings.
-        doc.set_cut_settings(Settings { kerf: 0.09375, ..Settings::default() });
+        doc.set_cut_settings(Settings { kerf: 0.09375 });
         let reloaded = crate::file::from_str(&crate::file::to_string(doc.scene())).unwrap();
         assert_eq!(reloaded.cut_settings.kerf, 0.09375);
-        assert_eq!(reloaded.material(ply).unwrap().stock.sheet, Some((60.0, 60.0)));
+        assert_eq!(reloaded.material(ply).unwrap().standard.sheets, vec![(60.0, 60.0)]);
+    }
+
+    /// The drawing's cut list and plans, with every board one part.
+    fn plan_drawing(doc: &crate::Document) -> (crate::cutlist::CutList, Vec<Option<Plan>>) {
+        let list = crate::cutlist::cut_list(doc.scene());
+        let plans = plan_all(doc.scene(), &list);
+        (list, plans)
+    }
+
+    fn board(doc: &mut crate::Document, at: DVec3, size: DVec3, material: crate::MaterialId) {
+        let face = doc.edit(|m| m.add_rectangle(at, DVec3::X * size.x, DVec3::Y * size.y, DVec3::Z)).unwrap();
+        let part = doc.push_pull(face, size.z, true).unwrap().unwrap();
+        doc.paint(&[crate::Entity::Instance(part)], Some(material));
+    }
+
+    #[test]
+    fn a_stud_of_pine_lumber_is_cut_from_a_2x4() {
+        let mut doc = crate::Document::default();
+        let pine = doc.add_preset(crate::library::LIBRARY.iter().find(|p| p.name == "Pine Lumber").unwrap());
+        // A 7' stud standing up: 1 1/2" x 3 1/2" x 84".
+        board(&mut doc, DVec3::ZERO, DVec3::new(1.5, 3.5, 84.0), pine);
+        let (list, plans) = plan_drawing(&doc);
+        let part = &list.materials[0].parts[0];
+        let stock = match_stock(part, MaterialKind::DimensionalLumber, &list.materials[0].standard).unwrap();
+        assert_eq!(stock.name, "2x4");
+        assert_eq!(plans[0].as_ref().unwrap().shopping_list(), vec![("2x4 x 96\"".to_owned(), 1)]);
+    }
+
+    #[test]
+    fn one_plywood_material_supplies_every_thickness_its_parts_need() {
+        let mut doc = crate::Document::default();
+        let ply = doc.add_preset(crate::library::LIBRARY.iter().find(|p| p.name == "Pine Plywood").unwrap());
+        // A drawer: 3/4" sides and a 1/2" bottom.
+        board(&mut doc, DVec3::ZERO, DVec3::new(20.0, 6.0, 0.75), ply);
+        board(&mut doc, DVec3::new(0.0, 10.0, 0.0), DVec3::new(20.0, 6.0, 0.75), ply);
+        board(&mut doc, DVec3::new(0.0, 20.0, 0.0), DVec3::new(20.0, 14.0, 0.5), ply);
+        let (_, plans) = plan_drawing(&doc);
+        let buy = plans[0].as_ref().unwrap().shopping_list();
+        assert!(buy.contains(&("Sheet 96\" x 48\" x 3/4\"".to_owned(), 1)), "{buy:?}");
+        assert!(buy.contains(&("Sheet 96\" x 48\" x 1/2\"".to_owned(), 1)), "{buy:?}");
+    }
+
+    #[test]
+    fn a_thickness_the_material_doesnt_come_in_is_flagged() {
+        let mut doc = crate::Document::default();
+        let ply = doc.add_preset(crate::library::LIBRARY.iter().find(|p| p.name == "Plywood").unwrap());
+        board(&mut doc, DVec3::ZERO, DVec3::new(20.0, 6.0, 0.375), ply);
+        let (_, plans) = plan_drawing(&doc);
+        let plan = plans[0].as_ref().unwrap();
+        assert!(plan.stocks.is_empty());
+        assert!(plan.unplaced[0].1.contains("isn't a standard thickness"), "{:?}", plan.unplaced);
+    }
+
+    #[test]
+    fn older_drawings_materials_get_standard_stock() {
+        // Saved before materials listed their standard stock: one thickness and a sheet size.
+        let text = r#"{"format":"sketchcraft","version":1,"units":"inches","scene":{"root":{"model":{"vertices":[],"edges":[],"faces":[]},"instances":[]},"definitions":[],"tags":[],
+            "materials":[{"name":"Ply","color":[1,2,3],"kind":"SheetGood","grained":true,"thickness":0.625,"stock":{"sheet":[60.0,60.0],"lengths":null,"widths":null}}],
+            "next_group":0,"next_component":0}}"#;
+        let scene = crate::file::from_str(text).unwrap();
+        let (_, m) = scene.materials().next().unwrap();
+        assert_eq!(m.standard.sheets, vec![(60.0, 60.0)]);
+        assert_eq!(m.standard.thicknesses, vec![0.25, 0.5, 0.625, 0.75]);
+        // Saved again, only the new form is written.
+        let saved = crate::file::to_string(&scene);
+        assert!(saved.contains("\"standard\"") && !saved.contains("\"thickness\""));
     }
 
     #[test]
@@ -620,14 +771,14 @@ mod tests {
             &[("A", 4, 30.0, 23.25, 0.75), ("B", 4, 34.5, 23.25, 0.75), ("C", 2, 34.5, 30.0, 0.75)],
         );
         let settings = Settings::default();
-        let plan = plan(&m, &settings).unwrap();
+        let plan = plan(&m, settings.kerf).unwrap();
         assert_valid(&plan, settings.kerf);
         assert!(plan.unplaced.is_empty());
         let placed: usize = plan.stocks.iter().map(|s| s.placements.len()).sum();
         assert_eq!(placed, 10);
         // Parts are 7059 sq in; a sheet is 4608: at least 2 sheets, and no more than 3.
         assert!((2..=3).contains(&plan.stocks.len()), "{} sheets", plan.stocks.len());
-        assert_eq!(plan.shopping_list()[0].0, "Sheet 96\" x 48\"");
+        assert_eq!(plan.shopping_list()[0].0, "Sheet 96\" x 48\" x 3/4\"");
         // Grained: nothing turned sideways.
         assert!(plan.stocks.iter().flat_map(|s| &s.placements).all(|p| !p.rotated));
     }
@@ -637,13 +788,17 @@ mod tests {
         // 46" x 20" parts on a grained sheet fit 2 across the width, 2 along: 4 per sheet. On
         // MDF (no grain) the same holds; but a 40" x 47" part only fits crossways... it fits
         // either way here, so check a part that only fits rotated.
-        let settings = Settings { sheet: (60.0, 30.0), ..Settings::default() };
-        let crossways = material(MaterialKind::SheetGood, false, &[("A", 1, 28.0, 50.0, 0.5)]);
-        let plan = plan(&crossways, &settings).unwrap();
+        let settings = Settings::default();
+        let sheet_60x30 = |mut m: MaterialParts| {
+            m.standard.sheets = vec![(60.0, 30.0)];
+            m
+        };
+        let crossways = sheet_60x30(material(MaterialKind::SheetGood, false, &[("A", 1, 28.0, 50.0, 0.5)]));
+        let plan = plan(&crossways, settings.kerf).unwrap();
         assert!(plan.unplaced.is_empty());
         assert!(plan.stocks[0].placements[0].rotated);
-        let grained = material(MaterialKind::SheetGood, true, &[("A", 1, 28.0, 50.0, 0.5)]);
-        let plan = super::plan(&grained, &settings).unwrap();
+        let grained = sheet_60x30(material(MaterialKind::SheetGood, true, &[("A", 1, 28.0, 50.0, 0.5)]));
+        let plan = super::plan(&grained, settings.kerf).unwrap();
         assert_eq!(plan.unplaced.len(), 1, "with grain it can't turn, so it doesn't fit");
     }
 
@@ -652,15 +807,16 @@ mod tests {
         // 2x4s: three 46" pieces and one 92 5/8" stud.
         let m = material(MaterialKind::DimensionalLumber, true, &[("A", 1, 92.625, 3.5, 1.5), ("B", 3, 46.0, 3.5, 1.5)]);
         let settings = Settings::default();
-        let plan = plan(&m, &settings).unwrap();
+        let plan = plan(&m, settings.kerf).unwrap();
         assert_valid(&plan, settings.kerf);
         // The stud plus one 46" piece fits a 12' board (92.75 + 46.125 = 138.875"), and the
         // other two share an 8': 240", less than three 8' boards (288").
         assert_eq!(plan.shopping_list(), vec![("2x4 x 144\"".to_owned(), 1), ("2x4 x 96\"".to_owned(), 1)]);
         // With only 8' and 16' boards, a 16' + 8' and three 8's both buy 288"; the tie goes to
         // the shorter boards.
-        let settings = Settings { lumber_lengths: vec![96.0, 192.0], ..Settings::default() };
-        assert_eq!(super::plan(&m, &settings).unwrap().shopping_list(), vec![("2x4 x 96\"".to_owned(), 3)]);
+        let mut m = m;
+        m.standard.lengths = vec![96.0, 192.0];
+        assert_eq!(super::plan(&m, settings.kerf).unwrap().shopping_list(), vec![("2x4 x 96\"".to_owned(), 3)]);
     }
 
     #[test]
@@ -669,14 +825,15 @@ mod tests {
         // boards, 384". A 16' board holds 6 and a 12' the other 4 (120.5"): 336", less lumber.
         let m = material(MaterialKind::DimensionalLumber, true, &[("A", 10, 30.0, 5.5, 0.75)]);
         let settings = Settings::default();
-        let plan = plan(&m, &settings).unwrap();
+        let plan = plan(&m, settings.kerf).unwrap();
         assert_valid(&plan, settings.kerf);
         assert!(plan.stocks.iter().all(|s| s.description.starts_with("1x6")));
         let bought: f64 = plan.stocks.iter().map(|s| s.length).sum();
         assert_eq!(bought, 336.0);
         // Only 8' boards on hand: four of them.
-        let eights = Settings { lumber_lengths: vec![96.0], ..Settings::default() };
-        assert_eq!(super::plan(&m, &eights).unwrap().shopping_list(), vec![("1x6 x 96\"".to_owned(), 4)]);
+        let mut m = m;
+        m.standard.lengths = vec![96.0];
+        assert_eq!(super::plan(&m, settings.kerf).unwrap().shopping_list(), vec![("1x6 x 96\"".to_owned(), 4)]);
     }
 
     #[test]
@@ -685,7 +842,7 @@ mod tests {
         // are the same length and easier to carry; the rails share a 12' board.
         let m = material(MaterialKind::DimensionalLumber, true, &[("A", 2, 92.625, 3.5, 1.5), ("B", 3, 46.0, 3.5, 1.5)]);
         let settings = Settings::default();
-        let plan = plan(&m, &settings).unwrap();
+        let plan = plan(&m, settings.kerf).unwrap();
         assert_valid(&plan, settings.kerf);
         let mut buy = plan.shopping_list();
         buy.sort();
@@ -695,11 +852,11 @@ mod tests {
     #[test]
     fn oversize_parts_are_reported() {
         let m = material(MaterialKind::DimensionalLumber, true, &[("A", 1, 300.0, 3.5, 1.5)]);
-        let plan = plan(&m, &Settings::default()).unwrap();
+        let plan = plan(&m, Settings::default().kerf).unwrap();
         assert!(plan.stocks.is_empty());
         assert_eq!(plan.unplaced, vec![("A".to_owned(), "longer than the longest stock".to_owned())]);
         let wide = material(MaterialKind::SolidWood, true, &[("B", 1, 30.0, 18.0, 0.75)]);
-        let plan = super::plan(&wide, &Settings::default()).unwrap();
+        let plan = super::plan(&wide, Settings::default().kerf).unwrap();
         assert!(plan.unplaced[0].1.contains("glue up"));
     }
 
@@ -709,13 +866,13 @@ mod tests {
         // (4 x 20.125 = 80.5 <= 96), so a single board, cut to the shortest length holding it.
         let m = material(MaterialKind::SolidWood, true, &[("A", 4, 20.0, 5.0, 0.75)]);
         let settings = Settings::default();
-        let plan = plan(&m, &settings).unwrap();
+        let plan = plan(&m, settings.kerf).unwrap();
         assert_valid(&plan, settings.kerf);
         assert_eq!(plan.stocks.len(), 1);
         assert_eq!(plan.stocks[0].width, 5.5);
         assert_eq!(plan.stocks[0].length, 96.0);
         let short = material(MaterialKind::SolidWood, true, &[("A", 3, 20.0, 5.0, 0.75)]);
-        let plan = super::plan(&short, &settings).unwrap();
+        let plan = super::plan(&short, settings.kerf).unwrap();
         assert_eq!(plan.stocks[0].length, 72.0, "three aprons fit a 6' board");
     }
 
@@ -734,7 +891,7 @@ mod tests {
             ],
         );
         let settings = Settings::default();
-        let plan = plan(&m, &settings).unwrap();
+        let plan = plan(&m, settings.kerf).unwrap();
         assert_valid(&plan, settings.kerf);
         assert!(plan.unplaced.is_empty());
         assert_eq!(plan.stocks.iter().map(|s| s.placements.len()).sum::<usize>(), 17);
@@ -751,14 +908,14 @@ mod tests {
     #[test]
     fn hardware_has_no_cutting_plan() {
         let m = material(MaterialKind::Hardware, false, &[("A", 8, 2.0, 1.0, 0.1)]);
-        assert!(plan(&m, &Settings::default()).is_none());
+        assert!(plan(&m, Settings::default().kerf).is_none());
     }
 
     #[test]
     fn yield_is_parts_over_stock() {
         let m = material(MaterialKind::SheetGood, true, &[("A", 1, 96.0, 48.0, 0.75)]);
-        let settings = Settings { kerf: 0.0, ..Settings::default() };
-        let plan = plan(&m, &settings).unwrap();
+        let settings = Settings { kerf: 0.0 };
+        let plan = plan(&m, settings.kerf).unwrap();
         assert!((plan.yield_fraction() - 1.0).abs() < 1e-9);
     }
 }

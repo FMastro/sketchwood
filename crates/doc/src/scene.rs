@@ -98,11 +98,62 @@ pub struct Material {
     /// Whether the material has a grain direction (solid wood, most plywood) that parts must
     /// follow when laid out for cutting.
     pub grained: bool,
-    /// Stock thickness in inches, for sheet goods and dimensional lumber.
-    pub thickness: Option<f64>,
-    /// Stock sizes for this material's cutting diagrams, when they differ from the drawing's.
+    /// The standard stock it comes in (thicknesses, sheet sizes, lumber sections, lengths); the
+    /// cut list picks the right one for each part.
     #[serde(default)]
-    pub stock: crate::cutplan::StockOverride,
+    pub standard: crate::cutplan::Standard,
+    /// From older drawings, before materials listed their standard stock: one stock thickness
+    /// and size overrides. Read once to fill in `standard` ([`Scene::upgrade_materials`]).
+    #[serde(default, skip_serializing)]
+    pub(crate) thickness: Option<f64>,
+    #[serde(default, skip_serializing)]
+    pub(crate) stock: crate::cutplan::StockOverride,
+}
+
+impl Material {
+    /// A material of `kind` with that type's standard stock (US defaults).
+    pub fn new(name: impl Into<String>, color: [u8; 3], kind: MaterialKind, grained: bool) -> Self {
+        Self {
+            name: name.into(),
+            color,
+            kind,
+            grained,
+            standard: crate::cutplan::Standard::for_kind(kind),
+            thickness: None,
+            stock: Default::default(),
+        }
+    }
+}
+
+impl Scene {
+    /// Fill in the standard stock of materials from older drawings: the type's defaults, plus
+    /// the stock thickness and sizes they had set.
+    pub(crate) fn upgrade_materials(&mut self) {
+        for material in self.materials.iter_mut() {
+            if !material.standard.is_empty() {
+                continue;
+            }
+            let mut standard = crate::cutplan::Standard::for_kind(material.kind);
+            if let Some(t) = material.thickness.take()
+                && matches!(material.kind, MaterialKind::SheetGood | MaterialKind::SolidWood)
+                && !standard.thicknesses.iter().any(|s| (s - t).abs() < 1e-9)
+            {
+                standard.thicknesses.push(t);
+                standard.thicknesses.sort_by(f64::total_cmp);
+            }
+            let old = std::mem::take(&mut material.stock);
+            if let Some(sheet) = old.sheet {
+                standard.sheets = vec![sheet];
+            }
+            if let Some(lengths) = old.lengths {
+                standard.lengths = lengths;
+            }
+            if let Some(widths) = old.widths {
+                standard.widths = widths;
+            }
+            material.standard = standard;
+        }
+    }
 }
 
 /// A tag (SketchUp's renamed layers). Tags go on groups and components; hiding a tag hides

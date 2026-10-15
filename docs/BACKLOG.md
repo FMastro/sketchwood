@@ -78,11 +78,14 @@ each section. Remove items when they're done (mention them in the commit).
 ## Materials
 - No textures (color only), so no visible grain direction; parts' grain is assumed along their
   longest side for now (as OpenCutList does by default).
-- Dimensional lumber stores one thickness, not a section (e.g. 1.5" x 3.5"); the cut list picks
-  the section from each part (the editor lists the standard sizes).
-- The library is built in (no importing or saving your own library across drawings) and has no
-  textures; SketchUp's material browser has many more.
-- Paint Bucket has no Ctrl (paint connected faces) or Shift (replace everywhere) variants.
+- **Material collections** (like SketchUp's): save materials into named collections, browse
+  them across drawings, and import/export them. Today the library is built in and fixed.
+- No veneer or edge-banding material types (OpenCutList has both), no density or price for
+  estimates, no length/width/thickness oversize allowances.
+- Solid wood picks the thinnest standard thickness at least as thick as the part (planed
+  down); a part thinner than the thinnest stock still comes from it, without a warning.
+- Paint Bucket: a click paints the whole object (deliberately unlike SketchUp's one face; Ctrl
+  paints one face). No Shift (replace everywhere) variant.
 - Painted color shows on both sides of a face; SketchUp paints front and back separately.
 
 ## Tags

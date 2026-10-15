@@ -66,7 +66,8 @@ pub fn from_str(text: &str) -> Result<Scene, FileError> {
     if header.version > VERSION {
         return Err(FileError::TooNew(header.version));
     }
-    let file: File = serde_json::from_str(text).map_err(|e| FileError::Corrupt(e.to_string()))?;
+    let mut file: File = serde_json::from_str(text).map_err(|e| FileError::Corrupt(e.to_string()))?;
+    file.scene.upgrade_materials();
     Ok(file.scene)
 }
 

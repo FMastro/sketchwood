@@ -35,8 +35,8 @@ pub struct MaterialParts {
     pub name: String,
     pub kind: Option<MaterialKind>,
     pub grained: bool,
-    /// The material's stock thickness, if set.
-    pub stock_thickness: Option<f64>,
+    /// The standard stock the material comes in.
+    pub standard: crate::cutplan::Standard,
     pub parts: Vec<Part>,
 }
 
@@ -120,7 +120,7 @@ pub fn cut_list(scene: &Scene) -> CutList {
                 name: info.map_or_else(|| "No material".to_owned(), |m| m.name.clone()),
                 kind: info.map(|m| m.kind),
                 grained: info.is_some_and(|m| m.grained),
-                stock_thickness: info.and_then(|m| m.thickness),
+                standard: info.map(|m| m.standard.clone()).unwrap_or_default(),
                 parts,
             }
         })

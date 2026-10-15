@@ -119,3 +119,9 @@ add it there; when you finish an item, remove it.
 19. Eraser (done): `Document::erase`; tool (E) erases the edge, guide, group or component clicked, or
    everything dragged over as one undo step; faces only go with their edges (a seam between
    coplanar faces merges them). Every toolbar tool is now available.
+20. Materials rethought (OpenCutList's model): a material lists the standard stock it comes in
+   (`cutplan::Standard`: sheet thicknesses and sizes, lumber sections and lengths, solid wood
+   thicknesses, lengths and widths, US defaults per type); `cutplan::match_stock` picks each
+   part's stock from its own size (a 1.5 x 3.5 x 84 stud of Pine Lumber -> 2x4, 8'). Library of
+   species/products (`doc::library`); older drawings upgrade on open. Paint Bucket paints the
+   whole object (Ctrl: one face).

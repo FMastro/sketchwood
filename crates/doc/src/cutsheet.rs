@@ -160,7 +160,7 @@ mod tests {
         assert!(html.starts_with("<!doctype html>"));
         assert!(html.contains("<title>Bench &amp; shelf</title>"));
         assert!(html.contains("Side &lt;left&gt;"), "names are escaped");
-        assert!(html.contains("1 × Sheet 96\" x 48\""), "{html}");
+        assert!(html.contains("1 × Sheet 96\" x 48\" x 3/4\""), "{html}");
         assert_eq!(html.matches("<svg").count(), 1);
         assert!(html.contains("window.print()"));
     }

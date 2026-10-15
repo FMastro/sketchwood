@@ -6,11 +6,11 @@ use eframe::egui;
 use egui_phosphor::regular as ph;
 use sketchcraft_doc::cutplan::lumber_sizes;
 use sketchcraft_doc::library::LIBRARY;
-use sketchcraft_doc::units::{format_length, parse_length};
+use sketchcraft_doc::cutplan::Standard;
+use sketchcraft_doc::units::{format_length, parse_length, parse_lengths};
 use sketchcraft_doc::{Document, Entity, MaterialId, MaterialKind};
 use sketchcraft_tools::{ToolId, Tools};
 
-use crate::cutlist::StockText;
 
 #[derive(Default)]
 pub struct MaterialsPanel;
@@ -23,10 +23,13 @@ impl MaterialsPanel {
             });
         });
 
-        // The default material: painting with it removes paint.
+        // No material: the default look; painting with it removes paint.
         ui.horizontal(|ui| {
             swatch(ui, [250, 250, 246]);
-            if ui.selectable_label(tools.active_material.is_none(), "Default").clicked() {
+            let none = ui.selectable_label(tools.active_material.is_none(), "No material (default)").on_hover_text(
+                "The plain default look. Painting with it removes paint. It isn't a material you can edit: add one with +.",
+            );
+            if none.clicked() {
                 activate(tools, None);
             }
         });
@@ -52,7 +55,7 @@ impl MaterialsPanel {
             ui.add_space(2.0);
             ui.colored_label(
                 ui.visuals().warn_fg_color,
-                "Default is selected: painting removes paint. Pick a material above to paint with.",
+                "No material is selected: painting removes paint. Pick a material above to paint with.",
             );
         }
 
@@ -105,11 +108,40 @@ fn text_field(ui: &mut egui::Ui, key: egui::Id, current: String, hint: &str, wid
     changed
 }
 
+/// Lengths as typed text: `3/4", 1/2"`.
+fn list_text(values: &[f64]) -> String {
+    values.iter().map(|&v| format_length(v)).collect::<Vec<_>>().join(", ")
+}
+
+/// Comma-separated lengths; `None` if any doesn't read as one.
+fn parse_list(text: &str) -> Option<Vec<f64>> {
+    let mut values: Vec<f64> = parse_lengths(text).ok()?.into_iter().map(|v| v.map(f64::abs)).collect::<Option<_>>()?;
+    values.retain(|v| *v > 0.0);
+    values.sort_by(f64::total_cmp);
+    values.dedup();
+    Some(values)
+}
+
+/// Sheet sizes as typed text: `96" x 48", 60" x 60"`.
+fn sizes_text(sizes: &[(f64, f64)]) -> String {
+    sizes.iter().map(|&(l, w)| format!("{} x {}", format_length(l), format_length(w))).collect::<Vec<_>>().join(", ")
+}
+
+fn parse_sizes(text: &str) -> Option<Vec<(f64, f64)>> {
+    text.split([',', ';'])
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| {
+            let (l, w) = s.split_once(['x', 'X', '×'])?;
+            Some((parse_length(l.trim()).ok()?.abs(), parse_length(w.trim()).ok()?.abs()))
+        })
+        .collect()
+}
+
 /// The selected material's editor.
 fn editor(ui: &mut egui::Ui, doc: &mut Document, tools: &mut Tools, id: MaterialId) {
     let Some(material) = doc.scene().material(id).cloned() else { return };
-    let defaults = doc.scene().cut_settings.clone();
     let key = |field: &str| egui::Id::new(("material", id, field.to_owned()));
+    let standard = material.standard.clone();
     egui::Frame::group(ui.style()).show(ui, |ui| {
         egui::Grid::new(("material_editor", id)).num_columns(2).spacing([8.0, 5.0]).show(ui, |ui| {
             ui.label("Name");
@@ -130,8 +162,12 @@ fn editor(ui: &mut egui::Ui, doc: &mut Document, tools: &mut Tools, id: Material
             ui.label("Type");
             egui::ComboBox::from_id_salt(("material_kind", id)).selected_text(material.kind.name()).show_ui(ui, |ui| {
                 for kind in MaterialKind::ALL {
-                    if ui.selectable_label(material.kind == kind, kind.name()).clicked() {
-                        doc.edit_material(id, |m| m.kind = kind);
+                    if ui.selectable_label(material.kind == kind, kind.name()).clicked() && kind != material.kind {
+                        // A different type comes in different stock: start from its standards.
+                        doc.edit_material(id, |m| {
+                            m.kind = kind;
+                            m.standard = Standard::for_kind(kind);
+                        });
                     }
                 }
             });
@@ -144,64 +180,68 @@ fn editor(ui: &mut egui::Ui, doc: &mut Document, tools: &mut Tools, id: Material
             }
             ui.end_row();
 
-            ui.label("Thickness");
-            let shown = material.thickness.map(format_length).unwrap_or_default();
-            if let Some(text) = text_field(ui, key("thickness"), shown, "e.g. 3/4\"", 80.0) {
-                let thickness = if text.trim().is_empty() { Ok(None) } else { parse_length(&text).map(|t| Some(t.abs())) };
-                if let Ok(thickness) = thickness {
-                    doc.edit_material(id, |m| m.thickness = thickness);
-                }
-            }
-            ui.end_row();
-
-            // Stock sizes for the cutting diagrams; blank uses the drawing's (Cut List > Stock).
-            let list = |values: &[f64]| values.iter().map(|&v| format_length(v)).collect::<Vec<_>>().join(", ");
-            let stock = StockText::from(material.kind, &material.stock);
-            let fields: &[(&str, &str, String, String)] = &match material.kind {
-                MaterialKind::SheetGood => vec![
-                    ("Sheet length", "first", stock.first.clone(), format_length(defaults.sheet.0)),
-                    ("Sheet width", "second", stock.second.clone(), format_length(defaults.sheet.1)),
-                ],
-                MaterialKind::SolidWood => vec![
-                    ("Board lengths", "first", stock.first.clone(), list(&defaults.board_lengths)),
-                    ("Board widths", "second", stock.second.clone(), list(&defaults.board_widths)),
-                ],
-                MaterialKind::DimensionalLumber => {
-                    vec![("Lengths", "first", stock.first.clone(), list(&defaults.lumber_lengths))]
-                }
-                _ => vec![],
-            };
-            for (label, which, value, hint) in fields {
-                ui.label(*label).on_hover_text("Stock sizes for the cutting diagrams; blank uses the drawing's");
-                if let Some(text) = text_field(ui, key(which), value.clone(), hint, 150.0) {
-                    let mut edited = StockText::from(material.kind, &material.stock);
-                    if *which == "first" {
-                        edited.first = text;
-                    } else {
-                        edited.second = text;
-                    }
-                    if let Some(stock) = edited.parse(material.kind) {
-                        doc.edit_material(id, |m| m.stock = stock);
-                    }
+            // The standard stock it comes in; the cut list picks from it for each part.
+            let mut list_row = |ui: &mut egui::Ui, label: &str, field: &str, values: &[f64], hint: &str, apply: fn(&mut Standard, Vec<f64>)| {
+                ui.label(label);
+                if let Some(text) = text_field(ui, key(field), list_text(values), hint, 160.0)
+                    && let Some(values) = parse_list(&text)
+                {
+                    doc.edit_material(id, |m| apply(&mut m.standard, values));
                 }
                 ui.end_row();
+            };
+            match material.kind {
+                MaterialKind::SheetGood => {
+                    list_row(ui, "Thicknesses", "thicknesses", &standard.thicknesses, "1/4, 1/2, 3/4", |s, v| s.thicknesses = v);
+                    ui.label("Sheet sizes");
+                    if let Some(text) = text_field(ui, key("sheets"), sizes_text(&standard.sheets), "96 x 48, 60 x 60", 160.0)
+                        && let Some(sheets) = parse_sizes(&text)
+                    {
+                        doc.edit_material(id, |m| m.standard.sheets = sheets);
+                    }
+                    ui.end_row();
+                }
+                MaterialKind::SolidWood => {
+                    list_row(ui, "Thicknesses", "thicknesses", &standard.thicknesses, "3/4, 1, 1 1/4", |s, v| s.thicknesses = v);
+                    list_row(ui, "Board lengths", "lengths", &standard.lengths, "72, 96, 120", |s, v| s.lengths = v);
+                    list_row(ui, "Board widths", "widths", &standard.widths, "3 1/2, 5 1/2", |s, v| s.widths = v);
+                }
+                MaterialKind::DimensionalLumber => {
+                    list_row(ui, "Lengths", "lengths", &standard.lengths, "96, 120, 144", |s, v| s.lengths = v);
+                }
+                MaterialKind::Hardware | MaterialKind::Other => {
+                    ui.label("");
+                    ui.weak("Not cut from stock; the cut list counts the parts.");
+                    ui.end_row();
+                }
             }
         });
 
         if material.kind == MaterialKind::DimensionalLumber {
-            egui::CollapsingHeader::new("Standard lumber sizes").id_salt(("lumber_sizes", id)).show(ui, |ui| {
-                ui.weak("Nominal size and actual size; the cut list picks the smallest that fits each part.");
-                egui::Grid::new(("lumber_table", id)).striped(true).num_columns(2).show(ui, |ui| {
-                    for (name, t, w) in lumber_sizes() {
-                        ui.label(name);
-                        ui.label(format!("{} x {}", format_length(t), format_length(w)));
-                        ui.end_row();
-                    }
+            egui::CollapsingHeader::new(format!("Sections ({} of {})", standard.sections.len(), lumber_sizes().len()))
+                .id_salt(("lumber_sections", id))
+                .show(ui, |ui| {
+                    ui.weak("Nominal and actual sizes it comes in; each part gets the smallest that fits.");
+                    egui::Grid::new(("lumber_table", id)).striped(true).num_columns(2).show(ui, |ui| {
+                        for (name, t, w) in lumber_sizes() {
+                            let mut on = standard.sections.iter().any(|&(st, sw)| (st - t).abs() < 1e-9 && (sw - w).abs() < 1e-9);
+                            if ui.checkbox(&mut on, name).changed() {
+                                doc.edit_material(id, |m| {
+                                    m.standard.sections.retain(|&(st, sw)| (st - t).abs() > 1e-9 || (sw - w).abs() > 1e-9);
+                                    if on {
+                                        m.standard.sections.push((t, w));
+                                        m.standard.sections.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+                                    }
+                                });
+                            }
+                            ui.label(format!("{} x {}", format_length(t), format_length(w)));
+                            ui.end_row();
+                        }
+                    });
                 });
-            });
         }
 
-        if ui.button(format!("{} Delete material", ph::TRASH)).on_hover_text("Painted things go back to the default").clicked() {
+        if ui.button(format!("{} Delete material", ph::TRASH)).on_hover_text("Painted things go back to no material").clicked() {
             doc.delete_material(id);
             tools.active_material = None;
         }

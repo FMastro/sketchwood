@@ -446,19 +446,19 @@ impl Document {
             [165, 140, 110], // MDF
             [150, 150, 155], // steel
         ];
-        let (base, color, grained, thickness) = match kind {
-            MaterialKind::SolidWood => ("Wood", PALETTE[count % 5], true, None),
-            MaterialKind::SheetGood => ("Plywood", PALETTE[5], true, Some(0.75)),
-            MaterialKind::DimensionalLumber => ("Lumber", PALETTE[0], true, Some(1.5)),
-            MaterialKind::Hardware => ("Hardware", PALETTE[7], false, None),
-            MaterialKind::Other => ("Material", PALETTE[6], false, None),
+        let (base, color, grained) = match kind {
+            MaterialKind::SolidWood => ("Wood", PALETTE[count % 5], true),
+            MaterialKind::SheetGood => ("Plywood", PALETTE[5], true),
+            MaterialKind::DimensionalLumber => ("Lumber", PALETTE[0], true),
+            MaterialKind::Hardware => ("Hardware", PALETTE[7], false),
+            MaterialKind::Other => ("Material", PALETTE[6], false),
         };
         let taken = |name: &str| self.state.scene.materials().any(|(_, m)| m.name == name);
         let name = std::iter::once(base.to_owned())
             .chain((2..).map(|i| format!("{base} {i}")))
             .find(|n| !taken(n))
             .expect("some name is free");
-        self.edit_scene(|scene, _| scene.add_material(Material { name, color, kind, grained, thickness, stock: Default::default() }))
+        self.edit_scene(|scene, _| scene.add_material(Material::new(name, color, kind, grained)))
     }
 
     /// Change a material. Consecutive edits of the same material merge into one undo step.
@@ -480,6 +480,37 @@ impl Document {
         if self.state.scene.material(id).is_some() {
             self.edit_scene(|scene, _| scene.remove_material(id));
         }
+    }
+
+    /// Paint the whole object `face` belongs to (the Paint Bucket's click), as one undo step:
+    /// inside an open group, the group itself (the part the cut list sees), with its connected
+    /// faces' own paint cleared so all of it shows the material; in loose geometry, every face
+    /// connected to it.
+    pub fn paint_object(&mut self, face: FaceId, material: Option<MaterialId>) {
+        let connected: Vec<FaceId> = self
+            .model()
+            .connected(Entity::Face(face))
+            .into_iter()
+            .filter_map(|e| if let Entity::Face(f) = e { Some(f) } else { None })
+            .collect();
+        self.edit_scene(|scene, path| {
+            let Some((&open, parent)) = path.split_last() else {
+                if let Some(container) = scene.container_mut(path) {
+                    for &f in &connected {
+                        container.model.set_face_material(f, material);
+                    }
+                }
+                return;
+            };
+            if let Some(container) = scene.container_mut(path) {
+                for &f in &connected {
+                    container.model.set_face_material(f, None);
+                }
+            }
+            if let Some(instance) = scene.container_mut(parent).and_then(|c| c.instance_mut(open)) {
+                instance.material = material;
+            }
+        });
     }
 
     /// Paint faces and groups/components of the container being edited (`None` = default).
@@ -817,7 +848,7 @@ mod tests {
         let painted: Vec<_> = doc.model().faces().filter(|(_, f)| f.material == Some(ply)).map(|(_, f)| f.normal).collect();
         // The original face (now the bottom) and the new top keep the paint; walls don't.
         assert_eq!(painted.len(), 2);
-        assert_eq!(doc.scene().material(ply).unwrap().thickness, Some(0.75));
+        assert!(doc.scene().material(ply).unwrap().standard.thicknesses.contains(&0.75));
     }
 
     #[test]

@@ -405,15 +405,16 @@ fn paint_a_board_with_a_new_plywood_material() {
     // Materials' "+" (above the Tags panel's) opens the library.
     harness.get_all_by_label(ph::PLUS).next().expect("Materials + button").click();
     harness.run();
-    harness.get_by_label("Plywood 3/4\"").click();
+    harness.get_by_label("Plywood").click();
     harness.run();
     let state = harness.state();
     assert_eq!(state.tools().active(), ToolId::PaintBucket, "picking a material switches to the Paint Bucket");
     let plywood = state.tools().active_material.expect("the new material is active");
     let material = state.document().scene().material(plywood).unwrap();
-    assert_eq!((material.name.as_str(), material.thickness), ("Plywood 3/4\"", Some(0.75)));
-    // Its editor shows, with the sheet size it's cut from.
-    assert!(harness.query_by_label("Sheet length").is_some());
+    assert_eq!(material.name, "Plywood");
+    assert_eq!(material.standard.thicknesses, vec![0.25, 0.5, 0.75], "one material, every standard thickness");
+    // Its editor shows the stock it comes in.
+    assert!(harness.query_by_label("Thicknesses").is_some() && harness.query_by_label("Sheet sizes").is_some());
 
     // Click the board: the whole group gets the material.
     let side = harness.state().to_window(glam::DVec3::new((lo.x + hi.x) * 0.5, lo.y, (lo.z + hi.z) * 0.5)).unwrap();
@@ -1041,4 +1042,35 @@ fn push_pull_and_offset_open_a_closed_board() {
     harness.run();
     let model = harness.state().document().model();
     assert_eq!(model.faces().filter(|(_, f)| f.normal.z > 0.5).count(), 2, "frame and panel on the top");
+}
+
+#[test]
+fn a_pine_stud_lists_as_a_2x4_and_buys_an_8_foot_board() {
+    use egui_kittest::kittest::Queryable;
+    use egui_phosphor::regular as ph;
+    use glam::DVec3;
+    let mut harness = app();
+    {
+        let doc = harness.state_mut().document_mut();
+        let face = doc.edit(|m| m.add_rectangle(DVec3::ZERO, DVec3::X * 1.5, DVec3::Y * 3.5, DVec3::Z)).unwrap();
+        doc.push_pull(face, 84.0, true).unwrap();
+    }
+    harness.run();
+    type_text(&mut harness, "Z");
+    harness.get_all_by_label(ph::PLUS).next().expect("Materials + button").click();
+    harness.run();
+    harness.get_by_label("Pine Lumber").click();
+    harness.run();
+    snapshot(&mut harness, "pine_lumber_editor");
+    // Paint the stud: any face paints the whole board.
+    let side = harness.state().to_window(DVec3::new(0.75, 0.0, 42.0)).unwrap();
+    click(&mut harness, side);
+
+    harness.get_by_label(ph::TABLE).click();
+    harness.run();
+    assert!(harness.query_by_label("2x4").is_some(), "the stud's stock is a 2x4");
+    harness.get_by_label("Cutting diagrams").click();
+    harness.run();
+    assert!(harness.query_all_by_label_contains("1 × 2x4 x 96\"").next().is_some(), "buy one 8' 2x4");
+    snapshot(&mut harness, "pine_stud_cut_list");
 }

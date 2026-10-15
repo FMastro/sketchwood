@@ -1,15 +1,13 @@
-//! The Cut List window: parts grouped by material, cutting diagrams on standard stock with a
-//! shopping list, and the stock sizes and saw kerf they assume (saved with the drawing, with
-//! per-material sizes). Exports a CSV, or a cut sheet to print.
-
-use std::collections::HashMap;
+//! The Cut List window: parts grouped by material with the stock each is cut from, cutting
+//! diagrams with a shopping list, and the saw kerf (each material's standard stock is set in the
+//! Materials panel). Exports a CSV, or a cut sheet to print.
 
 use eframe::egui;
 use egui_phosphor::regular as ph;
 use sketchcraft_doc::cutlist::{self, CutList, MaterialParts};
-use sketchcraft_doc::cutplan::{self, Plan, Settings, StockOverride};
-use sketchcraft_doc::units::{format_length, parse_length, parse_lengths};
-use sketchcraft_doc::{Document, MaterialId, MaterialKind, cutsheet};
+use sketchcraft_doc::cutplan::{self, Plan, Settings, match_stock};
+use sketchcraft_doc::units::{format_length, parse_length};
+use sketchcraft_doc::{Document, MaterialKind, cutsheet};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Tab {
@@ -23,10 +21,8 @@ pub enum Tab {
 pub struct CutListWindow {
     pub open: bool,
     pub tab: Tab,
-    /// The drawing's settings as typed (and the drawing version they were read at).
-    settings_text: Option<(u64, SettingsText)>,
-    /// Each material's own stock sizes as typed.
-    stock_text: HashMap<MaterialId, StockText>,
+    /// The kerf as typed (and the drawing version it was read at).
+    kerf_text: Option<(u64, String)>,
     /// The list and plans, for the drawing version they were made from.
     cache: Option<Cache>,
     message: Option<String>,
@@ -36,94 +32,6 @@ struct Cache {
     model_version: u64,
     list: CutList,
     plans: Vec<Option<Plan>>,
-}
-
-struct SettingsText {
-    kerf: String,
-    sheet_length: String,
-    sheet_width: String,
-    board_lengths: String,
-    board_widths: String,
-    lumber_lengths: String,
-}
-
-fn list_text(values: &[f64]) -> String {
-    values.iter().map(|&v| format_length(v)).collect::<Vec<_>>().join(", ")
-}
-
-/// A length, or `None` if it doesn't parse or is negative.
-fn one(s: &str) -> Option<f64> {
-    parse_length(s).ok().filter(|v| *v >= 0.0)
-}
-
-/// A comma-separated list of positive lengths.
-fn many(s: &str) -> Option<Vec<f64>> {
-    let values: Vec<f64> = parse_lengths(s).ok()?.into_iter().flatten().filter(|v| *v > 0.0).collect();
-    (!values.is_empty()).then_some(values)
-}
-
-impl SettingsText {
-    fn from(settings: &Settings) -> Self {
-        Self {
-            kerf: format_length(settings.kerf),
-            sheet_length: format_length(settings.sheet.0),
-            sheet_width: format_length(settings.sheet.1),
-            board_lengths: list_text(&settings.board_lengths),
-            board_widths: list_text(&settings.board_widths),
-            lumber_lengths: list_text(&settings.lumber_lengths),
-        }
-    }
-
-    fn parse(&self) -> Option<Settings> {
-        Some(Settings {
-            kerf: one(&self.kerf)?,
-            sheet: (one(&self.sheet_length)?, one(&self.sheet_width)?),
-            board_lengths: many(&self.board_lengths)?,
-            board_widths: many(&self.board_widths)?,
-            lumber_lengths: many(&self.lumber_lengths)?,
-        })
-    }
-}
-
-/// A material's own sizes as typed; blank fields use the drawing's.
-pub(crate) struct StockText {
-    pub first: String,
-    pub second: String,
-}
-
-impl StockText {
-    pub(crate) fn from(kind: MaterialKind, stock: &StockOverride) -> Self {
-        match kind {
-            MaterialKind::SheetGood => Self {
-                first: stock.sheet.map(|s| format_length(s.0)).unwrap_or_default(),
-                second: stock.sheet.map(|s| format_length(s.1)).unwrap_or_default(),
-            },
-            _ => Self {
-                first: stock.lengths.as_deref().map(list_text).unwrap_or_default(),
-                second: stock.widths.as_deref().map(list_text).unwrap_or_default(),
-            },
-        }
-    }
-
-    /// The override, or `None` if something typed doesn't parse.
-    pub(crate) fn parse(&self, kind: MaterialKind) -> Option<StockOverride> {
-        let blank = |s: &str| s.trim().is_empty();
-        Some(match kind {
-            MaterialKind::SheetGood => StockOverride {
-                sheet: if blank(&self.first) && blank(&self.second) {
-                    None
-                } else {
-                    Some((one(&self.first)?, one(&self.second)?))
-                },
-                ..StockOverride::default()
-            },
-            _ => StockOverride {
-                lengths: if blank(&self.first) { None } else { Some(many(&self.first)?) },
-                widths: if blank(&self.second) || kind != MaterialKind::SolidWood { None } else { Some(many(&self.second)?) },
-                ..StockOverride::default()
-            },
-        })
-    }
 }
 
 impl CutListWindow {
@@ -150,7 +58,7 @@ impl CutListWindow {
             .resizable(true)
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    for (tab, label) in [(Tab::Parts, "Parts"), (Tab::Diagrams, "Cutting diagrams"), (Tab::Settings, "Stock & kerf")] {
+                    for (tab, label) in [(Tab::Parts, "Parts"), (Tab::Diagrams, "Cutting diagrams"), (Tab::Settings, "Saw kerf")] {
                         if ui.selectable_label(self.tab == tab, label).clicked() {
                             self.tab = tab;
                         }
@@ -219,98 +127,29 @@ impl CutListWindow {
     fn settings_tab(&mut self, ui: &mut egui::Ui, doc: &mut Document) {
         // Retyped from the drawing whenever it changes underneath (undo, open).
         let version = doc.model_version();
-        if self.settings_text.as_ref().is_none_or(|(v, _)| *v != version) {
-            self.settings_text = Some((version, SettingsText::from(&doc.scene().cut_settings)));
-            self.stock_text.clear();
+        if self.kerf_text.as_ref().is_none_or(|(v, _)| *v != version) {
+            self.kerf_text = Some((version, format_length(doc.scene().cut_settings.kerf)));
         }
-        let (_, text) = self.settings_text.as_mut().expect("just filled");
-        ui.label("Standard stock for the cutting diagrams, saved with the drawing (inches unless you type units). Lists are comma-separated.");
+        let (_, text) = self.kerf_text.as_mut().expect("just filled");
+        ui.label("The saw kerf every cut takes, saved with the drawing.");
+        ui.weak("Stock sizes (thicknesses, sheet sizes, lumber sections and lengths) are set for each material in the Materials panel.");
         ui.add_space(6.0);
-        let mut changed = false;
-        egui::Grid::new("cut_settings").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
-            let mut row = |ui: &mut egui::Ui, label: &str, value: &mut String, hint: &str| {
-                ui.label(label);
-                changed |= ui.add(egui::TextEdit::singleline(value).desired_width(260.0).hint_text(hint)).changed();
-                ui.end_row();
-            };
-            row(ui, "Saw kerf", &mut text.kerf, "1/8\"");
-            row(ui, "Sheet length", &mut text.sheet_length, "96\"");
-            row(ui, "Sheet width", &mut text.sheet_width, "48\"");
-            row(ui, "Solid wood board lengths", &mut text.board_lengths, "72, 96, 120");
-            row(ui, "Solid wood board widths", &mut text.board_widths, "3.5, 5.5, 7.25");
-            row(ui, "Lumber lengths", &mut text.lumber_lengths, "96, 120, 144, 192");
-        });
+        let changed = ui
+            .horizontal(|ui| {
+                ui.label("Saw kerf");
+                ui.add(egui::TextEdit::singleline(text).desired_width(100.0).hint_text("1/8\"")).changed()
+            })
+            .inner;
         if changed {
-            match text.parse() {
-                Some(settings) => {
-                    doc.set_cut_settings(settings);
+            match parse_length(text).ok().filter(|k| *k >= 0.0) {
+                Some(kerf) => {
+                    doc.set_cut_settings(Settings { kerf });
                     self.message = None;
                 }
-                None => self.message = Some("Some stock sizes don't read as lengths; the last good ones are used.".into()),
+                None => self.message = Some("The kerf doesn't read as a length; the last good one is used.".into()),
             }
             // Keep what's typed: this edit isn't a change from elsewhere.
-            if let Some((v, _)) = &mut self.settings_text {
-                *v = doc.model_version();
-            }
-        }
-        ui.add_space(8.0);
-        if ui.button("Reset to US defaults").clicked() {
-            doc.set_cut_settings(Settings::default());
-            self.message = None;
-        }
-
-        self.material_stock(ui, doc);
-    }
-
-    /// Each stock material's own sizes (OpenCutList keeps sizes per material).
-    fn material_stock(&mut self, ui: &mut egui::Ui, doc: &mut Document) {
-        let materials: Vec<(MaterialId, String, MaterialKind, StockOverride)> = doc
-            .scene()
-            .materials()
-            .filter(|(_, m)| matches!(m.kind, MaterialKind::SheetGood | MaterialKind::SolidWood | MaterialKind::DimensionalLumber))
-            .map(|(id, m)| (id, m.name.clone(), m.kind, m.stock.clone()))
-            .collect();
-        if materials.is_empty() {
-            return;
-        }
-        ui.add_space(12.0);
-        ui.strong("Per material");
-        ui.weak("Leave blank to use the sizes above.");
-        ui.add_space(4.0);
-        let mut edits = Vec::new();
-        egui::Grid::new("material_stock").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
-            for (id, name, kind, stock) in &materials {
-                let text = self.stock_text.entry(*id).or_insert_with(|| StockText::from(*kind, stock));
-                ui.label(name);
-                let (first, second) = match kind {
-                    MaterialKind::SheetGood => ("Sheet length", Some("width")),
-                    MaterialKind::SolidWood => ("Board lengths", Some("widths")),
-                    _ => ("Lengths", None),
-                };
-                let mut changed = false;
-                ui.horizontal(|ui| {
-                    ui.weak(first);
-                    changed |= ui.add(egui::TextEdit::singleline(&mut text.first).desired_width(140.0)).changed();
-                    if let Some(label) = second {
-                        ui.weak(label);
-                        changed |= ui.add(egui::TextEdit::singleline(&mut text.second).desired_width(140.0)).changed();
-                    }
-                });
-                ui.end_row();
-                if changed {
-                    edits.push((*id, text.parse(*kind)));
-                }
-            }
-        });
-        for (id, parsed) in edits {
-            match parsed {
-                Some(stock) => {
-                    doc.edit_material(id, |m| m.stock = stock);
-                    self.message = None;
-                }
-                None => self.message = Some("Some stock sizes don't read as lengths; the last good ones are used.".into()),
-            }
-            if let Some((v, _)) = &mut self.settings_text {
+            if let Some((v, _)) = &mut self.kerf_text {
                 *v = doc.model_version();
             }
         }
@@ -377,8 +216,8 @@ fn parts_tab(ui: &mut egui::Ui, list: &CutList, doc: &Document) {
             ui.strong(&material.name);
             ui.weak(format!("{}  ·  {} parts  ·  {}", kind_name(material), material.part_count(), amount(material)));
         });
-        egui::Grid::new(("parts", &material.name)).striped(true).num_columns(6).spacing([16.0, 4.0]).show(ui, |ui| {
-            for heading in ["", "Name", "Qty", "Length", "Width", "Thickness"] {
+        egui::Grid::new(("parts", &material.name)).striped(true).num_columns(7).spacing([16.0, 4.0]).show(ui, |ui| {
+            for heading in ["", "Name", "Qty", "Length", "Width", "Thickness", "Stock"] {
                 ui.strong(heading);
             }
             ui.end_row();
@@ -388,16 +227,18 @@ fn parts_tab(ui: &mut egui::Ui, list: &CutList, doc: &Document) {
                 ui.label(part.count.to_string());
                 ui.label(format_length(part.length));
                 ui.label(format_length(part.width));
-                // Flag parts thinner or thicker than the material's stock.
-                let off = material.stock_thickness.is_some_and(|t| (t - part.thickness).abs() > 1.0 / 64.0);
-                let thickness = egui::RichText::new(format_length(part.thickness));
-                if off {
-                    ui.label(thickness.color(ui.visuals().warn_fg_color)).on_hover_text(format!(
-                        "The material's stock is {} thick",
-                        format_length(material.stock_thickness.unwrap_or_default())
-                    ));
-                } else {
-                    ui.label(thickness);
+                ui.label(format_length(part.thickness));
+                // The standard stock it's cut from, or why there's none (flagged).
+                match material.kind.map(|kind| match_stock(part, kind, &material.standard)) {
+                    Some(Ok(stock)) => {
+                        ui.label(stock.name);
+                    }
+                    Some(Err(reason)) if material.kind.is_some_and(|k| !matches!(k, MaterialKind::Hardware | MaterialKind::Other)) => {
+                        ui.colored_label(ui.visuals().warn_fg_color, format!("{} none", ph::WARNING)).on_hover_text(reason);
+                    }
+                    _ => {
+                        ui.weak("—");
+                    }
                 }
                 ui.end_row();
             }

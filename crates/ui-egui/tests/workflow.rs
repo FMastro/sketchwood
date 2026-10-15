@@ -808,3 +808,99 @@ fn erase_a_splitting_line_with_the_eraser() {
     assert_eq!(model.faces().count(), 1, "the two halves merged back into one face");
     assert!(model.edges().all(|(id, _)| !model.edge_faces(id).is_empty()), "the line is gone");
 }
+
+#[test]
+fn drill_through_a_grouped_board() {
+    use glam::DVec3;
+    let mut harness = app();
+    let board = {
+        let doc = harness.state_mut().document_mut();
+        let face = doc.edit(|m| m.add_rectangle(DVec3::ZERO, DVec3::X * 6.0, DVec3::Y * 4.0, DVec3::Z)).unwrap();
+        doc.push_pull(face, 0.75, true).unwrap().unwrap()
+    };
+    harness.run();
+    type_text(&mut harness, "Z");
+
+    type_text(&mut harness, "c");
+    let center = harness.state().to_window(DVec3::new(3.0, 2.0, 0.75)).unwrap();
+    click(&mut harness, center);
+    harness.hover_at(center + egui::vec2(30.0, 0.0));
+    harness.run();
+    type_text(&mut harness, "3/16");
+    harness.key_press(Key::Enter);
+    harness.run();
+
+    type_text(&mut harness, "p");
+    click(&mut harness, center);
+    harness.hover_at(center + egui::vec2(0.0, 30.0));
+    harness.run();
+    type_text(&mut harness, "3/4");
+    harness.key_press(Key::Enter);
+    harness.run();
+
+    let doc = harness.state().document();
+    let def = doc.scene().definition(doc.scene().root.instance(board).unwrap().definition).unwrap();
+    let model = &def.container.model;
+    let holes: Vec<usize> = model.faces().filter(|(_, f)| f.normal.z.abs() > 0.5).map(|(_, f)| f.holes.len()).collect();
+    assert_eq!(holes, vec![1, 1], "the board's top and bottom both have the hole");
+    assert_eq!(doc.scene().root.model.faces().count(), 0, "nothing loose left on top of the board");
+}
+
+#[test]
+fn square_push_pulled_then_a_hole_dragged_through_it() {
+    use egui_kittest::kittest::Queryable;
+    use glam::DVec3;
+    let mut harness = app();
+    // A 10" square, pulled up 3/4" into a board (auto-grouped).
+    type_text(&mut harness, "r");
+    click(&mut harness, pos2(600.0, 450.0));
+    harness.hover_at(pos2(700.0, 380.0));
+    harness.run();
+    type_text(&mut harness, "10,10");
+    harness.key_press(Key::Enter);
+    harness.run();
+    type_text(&mut harness, "Z");
+    let (lo, hi) = harness.state().document().bounds().unwrap();
+    let middle = (lo + hi) * 0.5;
+    type_text(&mut harness, "p");
+    let center = harness.state().to_window(middle).unwrap();
+    click(&mut harness, center);
+    harness.hover_at(center - egui::vec2(0.0, 40.0));
+    harness.run();
+    type_text(&mut harness, "3/4");
+    harness.key_press(Key::Enter);
+    harness.run();
+    type_text(&mut harness, "Z");
+
+    // A circle in the middle of the top.
+    let top_center = harness.state().to_window(middle + DVec3::Z * 0.75).unwrap();
+    type_text(&mut harness, "c");
+    click(&mut harness, top_center);
+    harness.hover_at(top_center + egui::vec2(40.0, 0.0));
+    harness.run();
+    type_text(&mut harness, "2");
+    harness.key_press(Key::Enter);
+    harness.run();
+
+    // Push it down by mouse, well past the bottom.
+    type_text(&mut harness, "p");
+    click(&mut harness, top_center);
+    click(&mut harness, top_center + egui::vec2(0.0, 250.0));
+
+    let doc = harness.state().document();
+    let all_faces: Vec<_> = doc
+        .scene()
+        .definitions()
+        .flat_map(|(_, d)| d.container.model.faces().map(|(_, f)| f.clone()).collect::<Vec<_>>())
+        .chain(doc.scene().root.model.faces().map(|(_, f)| f.clone()))
+        .collect();
+    let holes: Vec<usize> = all_faces.iter().filter(|f| f.normal.z.abs() > 0.5).map(|f| f.holes.len()).collect();
+    assert_eq!(holes, vec![1, 1], "top and bottom both open: you can see through");
+    assert_eq!(doc.scene().bounds().unwrap().0.z, 0.0, "nothing pokes out below");
+
+    harness.key_press(Key::Escape);
+    harness.run();
+    harness.get_by_label("Top").click();
+    harness.run();
+    snapshot(&mut harness, "hole_top");
+}

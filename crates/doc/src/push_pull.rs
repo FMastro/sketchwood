@@ -88,6 +88,12 @@ impl Model {
     fn extrude(&mut self, face: FaceId, distance: f64, attached: bool) {
         let original = self.face(face).expect("checked by caller").clone();
         let n = original.normal;
+        // Pushed past the far side of the board: stop there and cut through (SketchUp stops at
+        // the face behind too), rather than poking out the back.
+        let distance = match self.depth_to_far_side(&original) {
+            Some(depth) if attached && distance < -depth => -depth,
+            _ => distance,
+        };
         let offset = n * distance;
         // Pushing an attached face back cuts a pocket: the new faces look into the pocket.
         let removing = attached && distance < 0.0;
@@ -176,6 +182,21 @@ impl Model {
         }
     }
 
+
+    /// How far behind `face` the board's far side is: the nearest face facing the other way
+    /// that lies straight behind the middle of `face`.
+    fn depth_to_far_side(&self, face: &crate::Face) -> Option<f64> {
+        let n = face.normal;
+        let outline = self.loop_points(&face.outer);
+        let center = outline.iter().sum::<DVec3>() / outline.len() as f64;
+        self.faces()
+            .filter(|(_, f)| f.normal.dot(n) < -1.0 + 1e-9)
+            .filter_map(|(_, f)| {
+                let depth = (center - self.vertex(f.outer[0])).dot(n);
+                (depth > EPS && self.face_contains(f, center - n * depth)).then_some(depth)
+            })
+            .min_by(f64::total_cmp)
+    }
     /// Add one side wall of an extrusion, swept from the edge `a`–`b`. Where a face already
     /// lies in the wall's plane on the far side of that edge (a board's side, when pushing or
     /// pulling part of its top flush with it), the wall belongs to that face: a push cuts the
@@ -399,6 +420,21 @@ mod tests {
         // Front, back and end each grew into one face; plus bottom, both tops and the step.
         assert_eq!(model.faces().count(), 8);
         assert!(model.faces().all(|(_, f)| f.holes.is_empty()));
+    }
+
+    #[test]
+    fn pushing_past_the_far_side_stops_there_and_cuts_through() {
+        let mut model = Model::default();
+        let base = model.add_rectangle(DVec3::ZERO, DVec3::X * 10.0, DVec3::Y * 10.0, DVec3::Z).unwrap();
+        model.push_pull(base, 0.75).unwrap();
+        let inner = model.add_rectangle(DVec3::new(4.0, 4.0, 0.75), DVec3::X * 2.0, DVec3::Y * 2.0, DVec3::Z).unwrap();
+        // Dragged too far by hand.
+        model.push_pull(inner, -1.3).unwrap();
+        let (lo, _) = model.bounds().unwrap();
+        assert_eq!(lo.z, 0.0, "nothing pokes out of the back");
+        let holes: Vec<usize> = model.faces().filter(|(_, f)| f.normal.z.abs() > 0.5).map(|(_, f)| f.holes.len()).collect();
+        assert_eq!(holes, vec![1, 1]);
+        assert!((volume(&model) - (75.0 - 3.0)).abs() < 1e-6, "{}", volume(&model));
     }
 
     #[test]

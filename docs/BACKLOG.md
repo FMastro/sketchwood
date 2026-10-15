@@ -29,8 +29,6 @@ each section. Remove items when they're done (mention them in the commit).
   there's no per-edge Soften/Smooth setting, and facets are shaded flat, not smoothed.
 - Arc: no tangent inference, no 3-point Arc or Pie, no Polygon tool. Circles off any face lie
   flat on the ground plane.
-- Push/Pull cuts right through only when pushed exactly to the far face; pushing further
-  makes a stray cap below the board.
 
 ## Offset
 - Only a face's outer outline is offset; holes aren't (SketchUp offsets them too).
@@ -58,6 +56,9 @@ each section. Remove items when they're done (mention them in the commit).
 - Snapping only considers screen distance; no "sticky" preference for the last inference.
 
 ## Groups and components
+- Deliberate difference from SketchUp: starting Line, Rectangle, Circle or Arc on a closed
+  group's face opens the group, so drawings cut into the board. Push/Pull, Offset and Paint
+  still need the group opened first (or work on the whole group).
 - No dashed bounding box around the group being edited (SketchUp draws one).
 - Selected groups are tinted; SketchUp instead draws their bounding box in blue.
 - No renaming in the Outliner, no nested tree (only the current level is listed), no

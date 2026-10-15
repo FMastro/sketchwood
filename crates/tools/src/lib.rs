@@ -466,6 +466,9 @@ impl Tools {
             _ => {}
         }
 
+        if let PointerEvent::Click { pos, .. } | PointerEvent::DragStart { origin: pos } = event {
+            self.open_group_to_draw_on(doc, camera, size, pos);
+        }
         let screen = Screen::in_context(camera, size, doc.context_transform());
         if self.active == ToolId::Move
             && let Some(result) = self.grip_pointer(event, doc, screen)
@@ -614,6 +617,30 @@ impl Tools {
         };
         if let Err(message) = result {
             self.message = Some(message);
+        }
+    }
+
+    /// Starting a drawing tool on a face of a closed group or component opens it (as a
+    /// double-click would), so what's drawn becomes part of that board: a circle on a board's
+    /// top then pushes through as a hole. SketchUp instead draws loose geometry on top of the
+    /// group, which surprises people; the faded surroundings show the group is open.
+    fn open_group_to_draw_on(&mut self, doc: &mut Document, camera: &OrbitCamera, size: Vec2, cursor: Vec2) {
+        let drawing = matches!(self.active, ToolId::Line | ToolId::Rectangle | ToolId::Circle | ToolId::Arc);
+        let busy = self.line.is_busy() || self.rectangle.is_busy() || self.circle.is_busy() || self.arc.is_busy();
+        if !drawing || busy {
+            return;
+        }
+        // Nested groups open one level at a time, down to the face's own group.
+        for _ in 0..16 {
+            let screen = Screen::in_context(camera, size, doc.context_transform());
+            let view = doc.view();
+            let Some((face, _)) = pick::hit_face(view.model(), &screen.ray(cursor)) else { return };
+            let sketchcraft_doc::Owner::Instance(instance) = view.owner(sketchcraft_doc::Entity::Face(face)) else { return };
+            let name = doc.instance_name(instance).unwrap_or("the group").to_owned();
+            if !doc.enter(instance) {
+                return;
+            }
+            self.message = Some(format!("Opened {name} to draw on it. Esc or click outside closes it."));
         }
     }
 

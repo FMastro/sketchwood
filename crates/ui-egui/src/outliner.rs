@@ -73,14 +73,8 @@ pub fn show(ui: &mut egui::Ui, doc: &mut Document, tools: &mut Tools) {
 
 /// "Model › Group#1 › Leg", with a button to close the innermost open group.
 fn breadcrumb(ui: &mut egui::Ui, doc: &mut Document, tools: &mut Tools) {
-    let scene = doc.scene();
     let path = doc.path().to_vec();
-    let names: Vec<String> = (0..path.len())
-        .filter_map(|depth| {
-            let instance = scene.container(&path[..depth])?.instance(path[depth])?;
-            scene.definition(instance.definition).map(|d| d.name.clone())
-        })
-        .collect();
+    let names = doc.path_names();
     ui.horizontal_wrapped(|ui| {
         ui.label("Model");
         for name in &names {

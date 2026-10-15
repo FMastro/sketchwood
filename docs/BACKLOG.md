@@ -59,7 +59,6 @@ each section. Remove items when they're done (mention them in the commit).
 - Deliberate difference from SketchUp: starting Line, Rectangle, Circle or Arc on a closed
   group's face opens the group, so drawings cut into the board. Push/Pull, Offset and Paint
   still need the group opened first (or work on the whole group).
-- No dashed bounding box around the group being edited (SketchUp draws one).
 - Selected groups are tinted; SketchUp instead draws their bounding box in blue.
 - No renaming in the Outliner, no nested tree (only the current level is listed), no
   "make unique" command for components, no component browser to place more instances.

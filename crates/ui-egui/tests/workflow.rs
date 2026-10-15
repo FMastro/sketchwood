@@ -904,3 +904,26 @@ fn square_push_pulled_then_a_hole_dragged_through_it() {
     harness.run();
     snapshot(&mut harness, "hole_top");
 }
+
+#[test]
+fn an_open_group_is_boxed_and_labeled() {
+    use glam::DVec3;
+    let mut harness = app();
+    let board = {
+        let doc = harness.state_mut().document_mut();
+        let face = doc.edit(|m| m.add_rectangle(DVec3::ZERO, DVec3::X * 6.0, DVec3::Y * 4.0, DVec3::Z)).unwrap();
+        let board = doc.push_pull(face, 0.75, true).unwrap().unwrap();
+        doc.rename_instance(board, "Shelf");
+        board
+    };
+    harness.run();
+    type_text(&mut harness, "Z");
+    assert!(harness.state().tools().overlay(harness.state().document()).dashed.is_empty(), "no box at the top level");
+
+    harness.state_mut().document_mut().enter(board);
+    harness.run();
+    let overlay = harness.state().tools().overlay(harness.state().document());
+    assert_eq!(overlay.dashed.len(), 12, "a dashed box around the open group");
+    assert_eq!(harness.state().document().path_names(), vec!["Shelf".to_owned()]);
+    snapshot(&mut harness, "editing_group");
+}

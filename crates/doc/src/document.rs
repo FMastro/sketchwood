@@ -110,6 +110,33 @@ impl Document {
         &self.state.path
     }
 
+    /// The names of the open groups and components, outermost first.
+    pub fn path_names(&self) -> Vec<String> {
+        let scene = &self.state.scene;
+        let path = &self.state.path;
+        (0..path.len())
+            .filter_map(|depth| {
+                let instance = scene.container(&path[..depth])?.instance(path[depth])?;
+                scene.definition(instance.definition).map(|d| d.name.clone())
+            })
+            .collect()
+    }
+
+    /// The box around everything in the open group, in its own coordinates (SketchUp draws it
+    /// dashed while you edit inside). `None` at the top level or for an empty group.
+    pub fn editing_box(&self) -> Option<(DVec3, DVec3)> {
+        if self.state.path.is_empty() {
+            return None;
+        }
+        let container = self.container();
+        let points = container
+            .model
+            .vertices()
+            .map(|(_, p)| p)
+            .chain(container.instances().flat_map(|(_, inst)| self.state.scene.instance_box_corners(inst)));
+        points.fold(None, |acc, p| Some(acc.map_or((p, p), |(lo, hi): (DVec3, DVec3)| (lo.min(p), hi.max(p)))))
+    }
+
     /// The container being edited.
     pub fn container(&self) -> &Container {
         self.state.scene.container(&self.state.path).unwrap_or(&self.state.scene.root)

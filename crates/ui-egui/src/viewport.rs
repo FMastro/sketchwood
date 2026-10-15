@@ -101,6 +101,7 @@ impl Viewport {
             egui::Color32::WHITE,
         );
         draw_overlay(&painter, rect, &self.camera, size, &tools.overlay(doc));
+        editing_badge(&painter, rect, doc);
     }
 
     /// Middle-drag orbits, Shift+middle-drag and right-drag pan, the wheel zooms at the cursor.
@@ -284,6 +285,26 @@ fn draw_guides(
     }
 }
 
+/// While inside a group or component, a label in the viewport's corner says which one, so it's
+/// always clear whether new drawing goes into it.
+fn editing_badge(painter: &egui::Painter, rect: egui::Rect, doc: &Document) {
+    let names = doc.path_names();
+    if names.is_empty() {
+        return;
+    }
+    let text = format!("Editing  {}    Esc or click outside to close", names.join(" › "));
+    let galley = painter.layout_no_wrap(text, egui::FontId::proportional(13.0), egui::Color32::from_gray(30));
+    let badge = egui::Rect::from_min_size(rect.min + egui::vec2(10.0, 10.0), galley.size()).expand2(egui::vec2(8.0, 5.0));
+    painter.rect(
+        badge.translate(egui::vec2(8.0, 5.0)),
+        4.0,
+        egui::Color32::from_rgba_unmultiplied(255, 255, 255, 230),
+        egui::Stroke::new(1.0, egui::Color32::from_gray(150)),
+        egui::StrokeKind::Outside,
+    );
+    painter.galley(rect.min + egui::vec2(18.0, 15.0), galley, egui::Color32::from_gray(30));
+}
+
 /// A SketchUp-style inference tooltip below-right of `pos`.
 fn tooltip(painter: &egui::Painter, pos: egui::Pos2, label: &str) {
     let galley = painter.layout_no_wrap(label.into(), egui::FontId::proportional(12.0), egui::Color32::BLACK);
@@ -304,6 +325,14 @@ fn draw_overlay(painter: &egui::Painter, rect: egui::Rect, camera: &OrbitCamera,
     let screen = |p: DVec3| camera.project(p.as_vec3(), size).map(|s| rect.min + egui::vec2(s.x, s.y));
 
     draw_guides(painter, camera, &screen, overlay);
+
+    // The box around the group being edited, dashed as in SketchUp.
+    let dashed = egui::Stroke::new(1.0, egui::Color32::from_gray(70));
+    for [a, b] in &overlay.dashed {
+        if let (Some(a), Some(b)) = (screen(*a), screen(*b)) {
+            painter.extend(egui::Shape::dashed_line(&[a, b], dashed, 6.0, 4.0));
+        }
+    }
 
     let highlight = egui::Stroke::new(3.0, egui::Color32::from_rgb(0, 90, 255));
     for [a, b] in &overlay.highlight {

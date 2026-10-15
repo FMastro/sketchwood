@@ -171,6 +171,8 @@ pub struct Overlay {
     pub grips: Vec<(DVec3, bool)>,
     /// The inference point under the cursor.
     pub snap: Option<Snap>,
+    /// Dashed lines: the box around the group being edited.
+    pub dashed: Vec<[DVec3; 2]>,
     /// The drawing's guides (and one being placed), and whether each is selected.
     pub guides: Vec<(sketchcraft_doc::Guide, bool)>,
     pub window: Option<SelectionWindow>,
@@ -275,7 +277,7 @@ impl Overlay {
     fn into_world(mut self, t: &DAffine3) -> Self {
         let p = |v: DVec3| t.transform_point3(v);
         let n = |v: DVec3| t.transform_vector3(v).normalize();
-        for segment in self.lines.iter_mut().chain(self.highlight.iter_mut()) {
+        for segment in self.lines.iter_mut().chain(self.highlight.iter_mut()).chain(self.dashed.iter_mut()) {
             *segment = segment.map(p);
         }
         if let Some(snap) = &mut self.snap {
@@ -848,6 +850,11 @@ impl Tools {
             .guides()
             .map(|(id, g)| (*g, selection.contains(sketchcraft_doc::Entity::Guide(id))))
             .collect();
+        if let Some((lo, hi)) = doc.editing_box() {
+            // Just outside the geometry, so the box doesn't hide behind the group's own edges.
+            let margin = DVec3::splat(((hi - lo).length() * 0.02).max(0.125));
+            overlay.dashed = box_edges(lo - margin, hi + margin);
+        }
         match self.active {
             ToolId::Select => self.select.overlay(&mut overlay),
             ToolId::Line => self.line.overlay(&mut overlay),
@@ -869,6 +876,13 @@ impl Tools {
     }
 }
 
+
+/// The 12 edges of the axis-aligned box from `lo` to `hi`.
+fn box_edges(lo: DVec3, hi: DVec3) -> Vec<[DVec3; 2]> {
+    let corner = |i: usize| DVec3::new(if i & 1 == 0 { lo.x } else { hi.x }, if i & 2 == 0 { lo.y } else { hi.y }, if i & 4 == 0 { lo.z } else { hi.z });
+    let pairs = [(0, 1), (2, 3), (4, 5), (6, 7), (0, 2), (1, 3), (4, 6), (5, 7), (0, 4), (1, 5), (2, 6), (3, 7)];
+    pairs.iter().map(|&(a, b)| [corner(a), corner(b)]).collect()
+}
 #[cfg(test)]
 mod tests {
     use super::*;

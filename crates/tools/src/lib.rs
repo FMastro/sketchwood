@@ -684,7 +684,7 @@ impl Tools {
             ToolId::Move if self.rotate.is_busy() => self.rotate.toggle_copy(),
             ToolId::Move => self.move_tool.toggle_copy(),
             ToolId::Rotate => self.rotate.toggle_copy(),
-            ToolId::TapeMeasure => self.tape.toggle_guides(),
+            ToolId::TapeMeasure => self.tape.cycle_mode(),
             ToolId::Scale => self.scale.toggle_center(),
             _ => {}
         }

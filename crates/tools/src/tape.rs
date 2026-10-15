@@ -1,23 +1,56 @@
-//! The Tape Measure tool (T): measures distances and lays out guides, as in SketchUp.
+//! The Tape Measure tool (T), as in SketchUp: three modes, cycled by tapping Ctrl, each named
+//! beside the pointer.
 //!
-//! - Start on an edge (or a guide line) and move away: a guide line parallel to it follows at
-//!   the offset; click, or type the offset, to place it. This is how you mark a cut line or a
-//!   board's position a set distance from an edge.
-//! - Start on a point: the tape measures to the next point and leaves a guide point there.
-//! - Tap Ctrl to switch guide-making off (just measure) and back on.
-//! - Typing right after placing a guide moves it to the typed distance.
+//! - **Create Guide Lines** (the default). Start on an edge (anywhere on it) or a guide line
+//!   and move away: the tape runs perpendicular from the edge to the cursor, and a guide line
+//!   parallel to the edge follows at that distance. Started on a point instead, the guide line
+//!   runs through both points.
+//! - **Create Guide Points**: measures from the start to the end and leaves a guide point there.
+//! - **Measure**: just measures; hovering an edge shows its length.
+//!
+//! Click, or type the distance; typing right after placing a guide moves it.
 
 use glam::{DVec3, Vec2};
 use sketchcraft_doc::units::format_length;
 use sketchcraft_doc::{Document, EPS, Guide};
 
-use crate::move_tool::parse_offset;
 use crate::infer::{self, Direction, Hints, Query, Target};
-use crate::pick::{Screen, Snap, snap};
+use crate::move_tool::parse_offset;
+use crate::pick::{Screen, Snap, hit_edge, snap};
 use crate::{Axis, Overlay, SnapKind};
+
+/// What the tape leaves behind.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TapeMode {
+    #[default]
+    GuideLine,
+    GuidePoint,
+    Measure,
+}
+
+impl TapeMode {
+    /// The next mode, for Ctrl.
+    pub fn next(self) -> Self {
+        match self {
+            Self::GuideLine => Self::GuidePoint,
+            Self::GuidePoint => Self::Measure,
+            Self::Measure => Self::GuideLine,
+        }
+    }
+
+    /// Beside the pointer (SketchUp shows a cursor for each mode).
+    pub fn cursor_note(self) -> &'static str {
+        match self {
+            Self::GuideLine => "+ Guide Line",
+            Self::GuidePoint => "+ Guide Point",
+            Self::Measure => "Measure",
+        }
+    }
+}
 
 #[derive(Default)]
 pub struct TapeTool {
+    pub mode: TapeMode,
     start: Option<Start>,
     hover: Option<Snap>,
     /// Where the tape ends, and why.
@@ -31,8 +64,8 @@ pub struct TapeTool {
     hints: Hints,
     /// The plane the tape started on (for "perpendicular").
     plane: DVec3,
-    /// Ctrl switched guide-making off.
-    measure_only: bool,
+    /// In Measure mode, the length of the edge under the cursor.
+    edge_length: Option<f64>,
     /// The last measurement or guide, which typing can still change.
     last: Option<Done>,
 }
@@ -40,14 +73,16 @@ pub struct TapeTool {
 #[derive(Clone, Copy)]
 struct Start {
     point: DVec3,
-    /// Started on an edge or guide line with this direction: making a parallel guide line.
+    /// Started on an edge or guide line (making a guide line): its direction. The tape then
+    /// measures straight across it.
     line: Option<DVec3>,
 }
 
 #[derive(Clone, Copy)]
 struct Done {
     start: Start,
-    /// Offset from the start point (perpendicular to the line, for a guide line).
+    mode: TapeMode,
+    /// Offset from the start point (perpendicular to the line, for a guide line from an edge).
     offset: DVec3,
     /// The model version right after placing the guide; `None` if nothing was placed.
     model_version: Option<u64>,
@@ -66,8 +101,9 @@ impl TapeTool {
         self.last = None;
     }
 
-    pub fn toggle_guides(&mut self) {
-        self.measure_only = !self.measure_only;
+    /// Ctrl: Create Guide Lines → Create Guide Points → Measure → back.
+    pub fn cycle_mode(&mut self) {
+        self.mode = self.mode.next();
     }
 
     pub fn lock_axis(&mut self, axis: Axis) {
@@ -88,6 +124,15 @@ impl TapeTool {
         let Some(start) = self.start else {
             self.hover = snap(model, screen, cursor, None);
             self.hints.note(self.hover.as_ref());
+            // Measure mode reads out the length of the edge under the cursor.
+            self.edge_length = (self.mode == TapeMode::Measure)
+                .then(|| hit_edge(model, screen, cursor))
+                .flatten()
+                .and_then(|id| model.edge(id))
+                .map(|e| {
+                    let [a, b] = model.edge_points(e);
+                    a.distance(b)
+                });
             return;
         };
         let base = start.point;
@@ -122,14 +167,14 @@ impl TapeTool {
             None => {
                 let Some(hover) = self.hover else { return Ok(()) };
                 self.last = None;
-                self.start = Some(Start {
-                    point: hover.point,
-                    line: hover.line.filter(|_| matches!(hover.kind, SnapKind::OnEdge | SnapKind::OnGuide)),
-                });
+                // Guide lines started anywhere on an edge (its middle too) run parallel to it.
+                let on_line = matches!(hover.kind, SnapKind::OnEdge | SnapKind::OnGuide | SnapKind::Midpoint);
+                let line = hover.line.filter(|_| on_line && self.mode == TapeMode::GuideLine);
+                self.start = Some(Start { point: hover.point, line });
                 self.end = None;
                 self.plane = hover.normal;
                 // The edge it starts on is the one "perpendicular" refers to: the offset direction.
-                if let Some(line) = self.start.and_then(|s| s.line) {
+                if let Some(line) = line {
                     self.hints.edge = Some(line);
                 }
                 Ok(())
@@ -167,7 +212,9 @@ impl TapeTool {
                     return Err("Distance must be greater than zero".into());
                 }
                 doc.undo();
+                let mode = std::mem::replace(&mut self.mode, last.mode);
                 self.place(doc, last.start, offset);
+                self.mode = mode;
                 Ok(())
             }
             _ => Err("Click where to measure from, then type the distance".into()),
@@ -175,15 +222,25 @@ impl TapeTool {
     }
 
     pub fn status(&self) -> String {
-        let mode = if self.measure_only { " Measuring only: tap Ctrl to make guides." } else { "" };
-        match self.start {
-            None => format!("Click an edge to offset a guide line from it, or a point to measure from.{mode}"),
-            Some(Start { line: Some(_), .. }) => format!("Click or type the guide line's offset.{mode}"),
-            Some(_) => format!("Click the point to measure to, or type the distance.{mode}"),
+        let cycle = " Tap Ctrl to change mode.";
+        match (self.mode, self.start) {
+            (TapeMode::GuideLine, None) => {
+                format!("Create Guide Lines: click an edge to offset a guide from it, or a point.{cycle}")
+            }
+            (TapeMode::GuidePoint, None) => format!("Create Guide Points: click where to measure from.{cycle}"),
+            (TapeMode::Measure, None) => format!("Measure: click where to measure from, or hover an edge.{cycle}"),
+            (_, Some(Start { line: Some(_), .. })) => "Move away from the edge; click or type the guide's offset.".into(),
+            (TapeMode::Measure, Some(_)) => "Click the point to measure to.".into(),
+            (_, Some(_)) => "Click the point to measure to, or type the distance.".into(),
         }
     }
 
     pub fn measurement(&self) -> String {
+        if self.start.is_none()
+            && let Some(length) = self.edge_length
+        {
+            return format_length(length);
+        }
         let offset = if self.start.is_some() { self.offset() } else { self.last.map_or(DVec3::ZERO, |l| l.offset) };
         if self.start.is_none() && self.last.is_none() {
             return String::new();
@@ -193,22 +250,29 @@ impl TapeTool {
 
     pub fn overlay(&self, overlay: &mut Overlay) {
         overlay.snap = self.hover;
-        // SketchUp marks the cursor with "+" while the tape makes guides.
-        overlay.cursor_note = Some(if self.measure_only { "Measure" } else { "+ Guide" });
-        let Some(start) = self.start else { return };
+        overlay.cursor_note = Some(self.mode.cursor_note());
+        let (Some(start), Some(end)) = (self.start, self.end) else { return };
         let offset = self.offset();
-        let end = start.point + offset;
-        // The tape itself, and the guide it would leave.
-        overlay.lines.push([start.point, end]);
-        let along = self.end.and_then(|t| t.direction).map(|d| d.along);
-        overlay.guide = Some(crate::Guide { from: start.point, to: end, along });
-        overlay.alignment = self.end.and_then(|t| t.from).map(|(anchor, axis)| (anchor, end, axis));
-        if !self.measure_only && offset.length() >= EPS {
-            overlay.guides.push((Self::guide(start, offset), true));
+        // From an edge, the tape is the perpendicular from the edge to the cursor; otherwise
+        // it runs from the start point.
+        let foot = match start.line {
+            Some(dir) => start.point + dir * (end.point - start.point).dot(dir),
+            None => start.point,
+        };
+        let tip = foot + offset;
+        overlay.lines.push([foot, tip]);
+        let along = end.direction.map(|d| d.along);
+        overlay.guide = Some(crate::Guide { from: foot, to: tip, along });
+        overlay.alignment = end.from.map(|(anchor, axis)| (anchor, tip, axis));
+        if offset.length() >= EPS
+            && let Some(guide) = Self::guide(start, offset, self.mode)
+        {
+            overlay.guides.push((guide, true));
         }
     }
 
-    /// The tape from the start point to the cursor; for a guide line, only the part across it.
+    /// The tape from the start point to the cursor; for a guide line from an edge, only the
+    /// part across it.
     fn offset(&self) -> DVec3 {
         match (self.start, self.end) {
             (Some(start), Some(end)) => Self::project(start, end.point - start.point),
@@ -232,19 +296,22 @@ impl TapeTool {
         }
     }
 
-    fn guide(start: Start, offset: DVec3) -> Guide {
-        match start.line {
-            Some(dir) => Guide::Line { point: start.point + offset, dir },
-            None => Guide::Point(start.point + offset),
+    /// The guide `mode` leaves for a tape from `start` across `offset`, if any.
+    fn guide(start: Start, offset: DVec3, mode: TapeMode) -> Option<Guide> {
+        match (mode, start.line) {
+            (TapeMode::GuideLine, Some(dir)) => Some(Guide::Line { point: start.point + offset, dir }),
+            (TapeMode::GuideLine, None) => Some(Guide::Line { point: start.point, dir: offset.normalize() }),
+            (TapeMode::GuidePoint, _) => Some(Guide::Point(start.point + offset)),
+            (TapeMode::Measure, _) => None,
         }
     }
 
     fn place(&mut self, doc: &mut Document, start: Start, offset: DVec3) {
-        let model_version = (!self.measure_only).then(|| {
-            doc.edit(|m| m.add_guide(Self::guide(start, offset)));
+        let model_version = Self::guide(start, offset, self.mode).map(|guide| {
+            doc.edit(|m| m.add_guide(guide));
             doc.model_version()
         });
-        self.last = Some(Done { start, offset, model_version });
+        self.last = Some(Done { start, mode: self.mode, offset, model_version });
     }
 }
 
@@ -311,30 +378,67 @@ mod tests {
     }
 
     #[test]
-    fn from_a_point_it_leaves_a_guide_point_or_just_measures() {
+    fn ctrl_cycles_guide_lines_guide_points_and_measure() {
         let mut doc = board();
         let camera = camera();
         let screen = Screen::new(&camera, SIZE);
         let mut tool = TapeTool::default();
+        let note = |tool: &TapeTool| {
+            let mut overlay = Overlay::default();
+            tool.overlay(&mut overlay);
+            overlay.cursor_note
+        };
+        assert_eq!(note(&tool), Some("+ Guide Line"));
+
+        // Guide line from a corner: through both points.
         tool.click(&mut doc, screen, at(screen, 10.0, 10.0)).unwrap();
         tool.lock_axis(Axis::X);
         tool.hover(&doc, screen, at(screen, 14.0, 10.0));
         tool.enter(&mut doc, "24").unwrap();
-        let (_, &guide) = doc.model().guides().next().unwrap();
-        assert_eq!(guide, Guide::Point(DVec3::new(34.0, 10.0, 0.0)));
+        let guides: Vec<Guide> = doc.model().guides().map(|(_, g)| *g).collect();
+        assert_eq!(guides, vec![Guide::Line { point: DVec3::new(10.0, 10.0, 0.0), dir: DVec3::X }]);
 
+        // Guide point.
+        tool.cycle_mode();
+        assert_eq!(note(&tool), Some("+ Guide Point"));
+        tool.click(&mut doc, screen, at(screen, 10.0, 10.0)).unwrap();
+        tool.hover(&doc, screen, at(screen, 14.0, 10.0));
+        tool.enter(&mut doc, "24").unwrap();
+        assert!(doc.model().guides().any(|(_, g)| *g == Guide::Point(DVec3::new(34.0, 10.0, 0.0))));
+
+        // Measure: nothing added; hovering an edge reads its length.
+        tool.cycle_mode();
+        assert_eq!(note(&tool), Some("Measure"));
         let before = doc.model_version();
-        let mut overlay = Overlay::default();
-        tool.overlay(&mut overlay);
-        assert_eq!(overlay.cursor_note, Some("+ Guide"));
-        tool.toggle_guides();
-        let mut overlay = Overlay::default();
-        tool.overlay(&mut overlay);
-        assert_eq!(overlay.cursor_note, Some("Measure"), "Ctrl switched to measuring only");
         tool.click(&mut doc, screen, at(screen, 0.0, 0.0)).unwrap();
         tool.click(&mut doc, screen, at(screen, 10.0, 0.0)).unwrap();
         assert_eq!(tool.measurement(), "10\"");
-        assert_eq!(doc.model_version(), before, "measuring only changes nothing");
+        assert_eq!(doc.model_version(), before, "measuring changes nothing");
+        tool.hover(&doc, screen, at(screen, 0.0, 6.0) + Vec2::new(2.0, 0.0));
+        assert_eq!(tool.measurement(), "10\"", "the hovered edge's length");
+
+        tool.cycle_mode();
+        assert_eq!(tool.mode, TapeMode::GuideLine);
+    }
+
+    #[test]
+    fn from_an_edge_the_tape_runs_perpendicular_at_the_cursor() {
+        let mut doc = board();
+        let camera = camera();
+        let screen = Screen::new(&camera, SIZE);
+        let mut tool = TapeTool::default();
+        // Start on the bottom edge's midpoint: still a guide line parallel to the edge.
+        tool.click(&mut doc, screen, at(screen, 5.0, 0.0)).unwrap();
+        tool.hover(&doc, screen, at(screen, 8.0, 3.0));
+        let mut overlay = Overlay::default();
+        tool.overlay(&mut overlay);
+        let [foot, tip] = overlay.lines[0];
+        assert!((foot.y).abs() < 1e-9 && (foot.x - tip.x).abs() < 1e-9, "straight across from the edge: {foot} {tip}");
+        assert!((foot.x - 8.0).abs() < 0.2, "under the cursor, not back at the click: {foot}");
+        tool.enter(&mut doc, "3").unwrap();
+        let (_, &guide) = doc.model().guides().next().unwrap();
+        let Guide::Line { point, dir } = guide else { panic!("{guide:?}") };
+        assert!((point.y - 3.0).abs() < 1e-9 && dir.cross(DVec3::X).length() < 1e-9);
     }
 
     #[test]

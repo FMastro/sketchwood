@@ -601,8 +601,10 @@ fn tape_a_guide_off_an_edge_then_draw_from_where_it_crosses() {
     assert_eq!(harness.state().tools().active(), ToolId::TapeMeasure);
     let on_edge = harness.state().to_window(DVec3::new(6.0, 0.0, 0.0)).unwrap();
     click(&mut harness, on_edge);
-    harness.hover_at(harness.state().to_window(DVec3::new(6.0, 4.0, 0.0)).unwrap());
+    // Off to the side: the tape still runs straight across from the edge, at the cursor.
+    harness.hover_at(harness.state().to_window(DVec3::new(14.0, 4.0, 0.0)).unwrap());
     harness.run();
+    snapshot(&mut harness, "tape_measuring");
     type_text(&mut harness, "3 1/2");
     harness.key_press(Key::Enter);
     harness.run();
@@ -934,13 +936,16 @@ fn ctrl_switches_the_tape_between_guides_and_measuring() {
     type_text(&mut harness, "t");
     harness.hover_at(pos2(600.0, 450.0));
     harness.run();
-    assert!(!harness.state().tools().status().contains("Measuring only"));
-    // A tap of Ctrl on its own.
-    harness.event(Event::ModifiersChanged(Modifiers::COMMAND));
-    harness.run();
-    harness.event(Event::ModifiersChanged(Modifiers::NONE));
-    harness.run();
-    assert!(harness.state().tools().status().contains("Measuring only"));
+    assert!(harness.state().tools().status().starts_with("Create Guide Lines"));
+    // Taps of Ctrl on its own cycle the modes, as in SketchUp.
+    for expected in ["Create Guide Points", "Measure", "Create Guide Lines", "Create Guide Points", "Measure"] {
+        harness.event(Event::ModifiersChanged(Modifiers::COMMAND));
+        harness.run();
+        harness.event(Event::ModifiersChanged(Modifiers::NONE));
+        harness.run();
+        let status = harness.state().tools().status();
+        assert!(status.starts_with(expected), "{status}");
+    }
     snapshot(&mut harness, "tape_measure_only");
 }
 

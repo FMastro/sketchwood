@@ -37,7 +37,8 @@ each section. Remove items when they're done (mention them in the commit).
 - Corners are always mitered (sharp); no rounded outward corners.
 
 ## Guides (Tape Measure)
-- Guides can't be made from a point toward a direction (SketchUp makes a guide line when the tape starts on a point with Ctrl).
+- Tape Measure: no "resize the model" after measuring (SketchUp offers to scale everything so
+  the measured distance becomes the typed one).
 - No Protractor guides (angled guide lines), no "hide guides" toggle (only Delete Guides).
 - Guide lines snap where they cross edges and other guides, but not where they cross faces.
 

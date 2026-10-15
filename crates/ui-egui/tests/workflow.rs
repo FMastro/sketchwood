@@ -943,3 +943,20 @@ fn ctrl_switches_the_tape_between_guides_and_measuring() {
     assert!(harness.state().tools().status().contains("Measuring only"));
     snapshot(&mut harness, "tape_measure_only");
 }
+
+#[test]
+fn boards_hide_the_guides_behind_them() {
+    use glam::DVec3;
+    let mut harness = app();
+    {
+        let doc = harness.state_mut().document_mut();
+        let face = doc.edit(|m| m.add_rectangle(DVec3::ZERO, DVec3::X * 12.0, DVec3::Y * 4.0, DVec3::Z)).unwrap();
+        doc.push_pull(face, 12.0, true).unwrap();
+        // A guide running behind the block (it's in front of the camera only past the block).
+        doc.edit(|m| m.add_guide(sketchcraft_doc::Guide::Line { point: DVec3::new(0.0, 7.0, 3.0), dir: DVec3::X }));
+        doc.edit(|m| m.add_guide(sketchcraft_doc::Guide::Line { point: DVec3::new(6.0, 0.0, 0.0), dir: DVec3::Z }));
+    }
+    harness.run();
+    type_text(&mut harness, "Z");
+    snapshot(&mut harness, "guides_behind_board");
+}

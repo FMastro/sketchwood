@@ -15,7 +15,7 @@ use std::collections::BTreeSet;
 use glam::{DAffine3, DVec3};
 
 use crate::arena::Arena;
-use crate::{EdgeId, Entity, FaceId, Model, VertexId};
+use crate::{EdgeId, Entity, FaceId, GuideId, Model, VertexId};
 
 /// An instance within one [`Container`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -466,7 +466,7 @@ pub struct View {
 
 #[derive(Clone, Copy, Debug)]
 struct Segment {
-    start: (VertexId, EdgeId, FaceId),
+    start: (VertexId, EdgeId, FaceId, GuideId),
     owner: Owner,
     paint: Option<MaterialId>,
 }
@@ -529,11 +529,11 @@ impl View {
         &self.model
     }
 
-    fn segment_where(&self, is_past: impl Fn(&(VertexId, EdgeId, FaceId)) -> bool) -> Option<&Segment> {
+    fn segment_where(&self, is_past: impl Fn(&(VertexId, EdgeId, FaceId, GuideId)) -> bool) -> Option<&Segment> {
         self.segments.iter().rev().find(|s| is_past(&s.start))
     }
 
-    fn owner_where(&self, is_past: impl Fn(&(VertexId, EdgeId, FaceId)) -> bool) -> Owner {
+    fn owner_where(&self, is_past: impl Fn(&(VertexId, EdgeId, FaceId, GuideId)) -> bool) -> Owner {
         self.segment_where(is_past).map_or(Owner::Active, |s| s.owner)
     }
 
@@ -554,8 +554,7 @@ impl View {
             Entity::Edge(id) => self.owner_where(|start| id >= start.1),
             Entity::Face(id) => self.owner_where(|start| id >= start.2),
             Entity::Instance(id) => Owner::Instance(id),
-            // Only the edited container's guides are in the view.
-            Entity::Guide(_) => Owner::Active,
+            Entity::Guide(id) => self.owner_where(|start| id >= start.3),
         }
     }
 

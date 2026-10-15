@@ -328,10 +328,17 @@ impl Document {
         let loose: Vec<Entity> = entities.iter().copied().filter(|e| !matches!(e, Entity::Instance(_))).collect();
         let instances: Vec<InstanceId> =
             entities.iter().filter_map(|e| if let Entity::Instance(i) = e { Some(*i) } else { None }).collect();
+        let guides: Vec<crate::GuideId> =
+            entities.iter().filter_map(|e| if let Entity::Guide(g) = e { Some(*g) } else { None }).collect();
         let mut copies = Vec::new();
         if copy {
             for t in transforms {
                 copies.extend(trial.model.copy_entities_with(&loose, |p| t.transform_point3(p)));
+                for &g in &guides {
+                    if let Some(moved) = trial.model.guide(g).map(|guide| guide.transformed(t)) {
+                        copies.push(Entity::Guide(trial.model.add_guide(moved)));
+                    }
+                }
                 for &id in &instances {
                     if let Some(&inst) = trial.instance(id) {
                         let new = trial.add_instance(Instance { transform: *t * inst.transform, ..inst });
@@ -342,6 +349,9 @@ impl Document {
         } else if let Some(t) = transforms.first() {
             let vertices = trial.model.entity_vertices(loose);
             trial.model.transform_vertices(&vertices, |p| t.transform_point3(p))?;
+            for &g in &guides {
+                trial.model.transform_guide(g, t);
+            }
             for &id in &instances {
                 if let Some(inst) = trial.instance_mut(id) {
                     inst.transform = *t * inst.transform;

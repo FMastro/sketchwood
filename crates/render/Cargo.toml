@@ -12,5 +12,8 @@ wgpu.workspace = true
 glam.workspace = true
 bytemuck.workspace = true
 
+[dev-dependencies]
+sketchcraft-view.workspace = true
+
 [lints]
 workspace = true

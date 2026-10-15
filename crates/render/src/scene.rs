@@ -1,9 +1,9 @@
 //! CPU-side geometry the renderer draws: the reference grid and axes, plus the model.
 
-use glam::{DAffine3, DVec3, Vec3};
 use std::collections::HashMap;
 
-use sketchcraft_doc::{Entity, Owner, Scene as SceneData, Selection, VertexId, View};
+use glam::{DAffine3, DVec3, Mat4, Vec3};
+use sketchcraft_doc::{Entity, Guide, Owner, Scene as SceneData, Selection, VertexId, View};
 
 /// Linear-space RGBA. The render target is sRGB, so colors are converted from sRGB on creation.
 pub type Color = [f32; 4];
@@ -30,6 +30,8 @@ pub struct Scene {
     pub lines: Vec<LineVertex>,
     /// Triples of vertices, one triple per triangle.
     pub faces: Vec<FaceVertex>,
+    /// Guides, in world coordinates; turned into dashed lines each frame ([`guide_vertices`]).
+    pub guides: Vec<SceneGuide>,
 }
 
 fn line_vertex(p: Vec3, color: Color) -> LineVertex {
@@ -142,7 +144,103 @@ impl Scene {
             let [a, b] = model.edge_points(e);
             self.add_line(world(a), world(b), color);
         }
+        for (id, guide) in model.guides() {
+            let entity = Entity::Guide(id);
+            let color = match view.owner(entity) {
+                Owner::Outside => srgb(170, 170, 170),
+                _ if is_selected(entity) => selected_edge,
+                _ => srgb(70, 70, 70),
+            };
+            let guide = match *guide {
+                Guide::Line { point, dir } => {
+                    Guide::Line { point: to_world.transform_point3(point), dir: to_world.transform_vector3(dir).normalize() }
+                }
+                Guide::Point(p) => Guide::Point(to_world.transform_point3(p)),
+            };
+            self.guides.push(SceneGuide { guide, color });
+        }
     }
+}
+
+
+/// A guide to draw, in world coordinates.
+#[derive(Clone, Copy, Debug)]
+pub struct SceneGuide {
+    pub guide: Guide,
+    pub color: Color,
+}
+
+/// Position + color + the segment's start (for measuring dashes) + 1 for dashed, 0 for solid.
+pub type DashedVertex = [f32; 11];
+
+/// How far guide lines reach either side of the point nearest the eye, in inches: far beyond
+/// any furniture, yet small enough for f32 precision.
+const GUIDE_REACH: f64 = 20_000.0;
+
+/// The guides as line segments for this camera: guide lines cut where they pass behind the
+/// eye (so the GPU can measure dashes from a visible start), guide points as small crosses
+/// facing the eye.
+pub fn guide_vertices(guides: &[SceneGuide], view_proj: Mat4, eye: Vec3) -> Vec<DashedVertex> {
+    let eye = eye.as_dvec3();
+    let view_proj = view_proj.as_dmat4();
+    // Depth in front of the eye (the projection's w).
+    let w = |p: DVec3| (view_proj * p.extend(1.0)).w;
+    let min_w = 1e-3;
+    let vertex = |p: DVec3, color: Color, start: DVec3, dash: f32| -> DashedVertex {
+        let (p, s) = (p.as_vec3(), start.as_vec3());
+        [p.x, p.y, p.z, color[0], color[1], color[2], color[3], s.x, s.y, s.z, dash]
+    };
+    let mut out = Vec::new();
+    for g in guides {
+        match g.guide {
+            Guide::Line { point, dir } => {
+                let middle = point + dir * (eye - point).dot(dir);
+                let (mut a, mut b) = (middle - dir * GUIDE_REACH, middle + dir * GUIDE_REACH);
+                let (wa, wb) = (w(a), w(b));
+                if wa < min_w && wb < min_w {
+                    continue;
+                }
+                if wa < min_w {
+                    a += (b - a) * ((min_w - wa) / (wb - wa));
+                } else if wb < min_w {
+                    b = a + (b - a) * ((wa - min_w) / (wa - wb));
+                }
+                // Dashes are measured from a point that projects near the view, not from a far
+                // end that lands way off screen (where f32 pixel distances lose precision): the
+                // point nearest the line of sight through the middle of the view.
+                let ahead = view_proj.inverse().project_point3(DVec3::new(0.0, 0.0, 1.0)) - eye;
+                let start = closest_to_ray(a, b, eye, ahead.normalize_or_zero());
+                out.extend([vertex(a, g.color, start, 1.0), vertex(b, g.color, start, 1.0)]);
+            }
+            Guide::Point(p) => {
+                let to = (p - eye).normalize_or_zero();
+                let right = to.cross(DVec3::Z).try_normalize().unwrap_or(DVec3::X);
+                let up = right.cross(to);
+                let size = p.distance(eye) * 0.008;
+                for d in [right + up, right - up] {
+                    let d = d * size;
+                    out.extend([vertex(p - d, g.color, p - d, 0.0), vertex(p + d, g.color, p - d, 0.0)]);
+                }
+            }
+        }
+    }
+    out
+}
+
+
+/// The point of segment `a`–`b` nearest the ray from `origin` along unit `dir`.
+fn closest_to_ray(a: DVec3, b: DVec3, origin: DVec3, dir: DVec3) -> DVec3 {
+    let along = b - a;
+    let length = along.length();
+    if length < 1e-9 {
+        return a;
+    }
+    let d = along / length;
+    let w = a - origin;
+    let k = d.dot(dir);
+    let denom = 1.0 - k * k;
+    let t = if denom < 1e-12 { 0.0 } else { (k * dir.dot(w) - d.dot(w)) / denom };
+    a + d * t.clamp(0.0, length)
 }
 
 /// Whether the edge between faces with normals `n` and `m` is soft, as SketchUp draws the edges
@@ -181,6 +279,41 @@ mod tests {
         scene.add_view(doc.view(), doc.selection(), &doc.context_transform(), doc.scene());
         // The board's 12 edges and the hole's two rims; not the 24 seams down its wall.
         assert_eq!(scene.lines.len(), (12 + 24 + 24) * 2);
+    }
+
+    #[test]
+    fn guide_lines_start_in_front_of_the_eye() {
+        let guides = [SceneGuide { guide: Guide::Line { point: DVec3::ZERO, dir: DVec3::X }, color: srgb(0, 0, 0) }];
+        let mut camera = sketchcraft_view::OrbitCamera { target: glam::Vec3::ZERO, distance: 50.0, ..Default::default() };
+        camera.set_view(sketchcraft_view::StandardView::Iso);
+        let size = glam::Vec2::new(1000.0, 800.0);
+        let vp = camera.view_proj(size);
+        let vertices = guide_vertices(&guides, vp, camera.eye());
+        assert_eq!(vertices.len(), 2);
+        for v in &vertices {
+            let w = (vp * glam::Vec4::new(v[0], v[1], v[2], 1.0)).w;
+            assert!(w > 0.0, "every end is in front of the camera");
+        }
+    }
+
+    #[test]
+    fn a_closed_groups_guides_are_drawn_and_faded_outside_the_open_group() {
+        let (mut doc, group) = two_boards();
+        doc.enter(group);
+        doc.edit(|m| m.add_guide(Guide::Line { point: DVec3::ZERO, dir: DVec3::Z }));
+        doc.exit();
+        doc.selection_mut().clear();
+        let mut scene = Scene::default();
+        scene.add_view(doc.view(), doc.selection(), &doc.context_transform(), doc.scene());
+        assert_eq!(scene.guides.len(), 1, "a closed group's guide still shows");
+        assert_eq!(scene.guides[0].color, srgb(70, 70, 70));
+        // Editing the other (loose) geometry's group puts this one outside: faded.
+        let loose_group = doc.edit(|m| m.add_rectangle(DVec3::new(40.0, 0.0, 0.0), DVec3::X, DVec3::Y, DVec3::Z)).unwrap();
+        let other = doc.push_pull(loose_group, 1.0, true).unwrap().unwrap();
+        doc.enter(other);
+        let mut scene = Scene::default();
+        scene.add_view(doc.view(), doc.selection(), &doc.context_transform(), doc.scene());
+        assert_eq!(scene.guides[0].color, srgb(170, 170, 170));
     }
 
     #[test]

@@ -203,6 +203,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn selected_guides_move_and_copy_with_the_rest() {
+        use crate::{Document, Entity, Guide};
+        let mut doc = Document::default();
+        let guide = doc.edit(|m| m.add_guide(Guide::Line { point: DVec3::new(0.0, 2.0, 0.0), dir: DVec3::X }));
+        let shift = glam::DAffine3::from_translation(DVec3::new(0.0, 3.0, 0.0));
+        doc.transform_entities(&[Entity::Guide(guide)], &[shift], false).unwrap();
+        assert_eq!(doc.model().guide(guide), Some(&Guide::Line { point: DVec3::new(0.0, 5.0, 0.0), dir: DVec3::X }));
+        let copies = doc.transform_entities(&[Entity::Guide(guide)], &[shift], true).unwrap();
+        assert_eq!(copies.len(), 1);
+        assert_eq!(doc.model().guides().count(), 2);
+    }
+
+    #[test]
     fn rotating_a_board_a_quarter_turn_about_its_corner() {
         let mut model = Model::default();
         let entities = board(&mut model, DVec3::ZERO);

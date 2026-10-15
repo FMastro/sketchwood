@@ -317,6 +317,20 @@ mod tests {
     }
 
     #[test]
+    fn guides_inside_a_closed_group_still_snap() {
+        let mut doc = Document::default();
+        let face = doc.edit(|m| m.add_rectangle(DVec3::ZERO, DVec3::X * 4.0, DVec3::Y * 4.0, DVec3::Z)).unwrap();
+        let board = doc.push_pull(face, 1.0, true).unwrap().unwrap();
+        doc.enter(board);
+        doc.edit(|m| m.add_guide(Guide::Line { point: DVec3::new(0.0, 8.0, 0.0), dir: DVec3::X }));
+        doc.exit();
+        let camera = camera();
+        let screen = Screen::new(&camera, SIZE);
+        let found = snap(doc.view().model(), screen, at(screen, 9.0, 8.0) + Vec2::new(0.0, 2.0), None).unwrap();
+        assert_eq!(found.kind, SnapKind::OnGuide);
+    }
+
+    #[test]
     fn rectangles_start_at_guide_intersections() {
         let mut doc = Document::default();
         doc.edit(|m| m.add_guide(Guide::Line { point: DVec3::new(0.0, 2.0, 0.0), dir: DVec3::X }));

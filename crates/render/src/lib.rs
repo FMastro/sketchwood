@@ -4,7 +4,7 @@
 
 mod scene;
 
-pub use scene::{Color, FaceVertex, LineVertex, Scene, srgb};
+pub use scene::{Color, DashedVertex, FaceVertex, LineVertex, Scene, SceneGuide, guide_vertices, srgb};
 
 use glam::{Mat4, Vec3};
 use wgpu::util::DeviceExt;
@@ -13,9 +13,9 @@ use wgpu::util::DeviceExt;
 pub const OUTPUT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const SAMPLE_COUNT: u32 = 4;
-/// Size of the `Globals` uniform: the view-projection matrix, the eye position (a vec4) and the
-/// inverse view-projection matrix.
-const GLOBALS_SIZE: u64 = 144;
+/// Size of the `Globals` uniform: the view-projection matrix, the eye position (a vec4), the
+/// inverse view-projection matrix and the viewport (pixels and pixels per point).
+const GLOBALS_SIZE: u64 = 160;
 
 pub struct ViewportRenderer {
     sky_pipeline: wgpu::RenderPipeline,
@@ -27,6 +27,9 @@ pub struct ViewportRenderer {
     background_lines: GpuBuffer,
     lines: GpuBuffer,
     faces: GpuBuffer,
+    dashed_pipeline: wgpu::RenderPipeline,
+    /// Guides in world coordinates, made into dashed lines each frame for the camera.
+    guides: Vec<SceneGuide>,
     targets: Option<Targets>,
     background: wgpu::Color,
 }
@@ -98,6 +101,24 @@ impl ViewportRenderer {
         let face_attributes = wgpu::vertex_attr_array![
             0 => Float32x3, 1 => Float32x3, 2 => Float32x4, 3 => Float32x4
         ];
+        let dashed_attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4, 2 => Float32x3, 3 => Float32];
+        let dashed_pipeline = create_pipeline(
+            device,
+            &layout,
+            &shader,
+            PipelineSpec {
+                label: "viewport guides",
+                vertex_entry: "vs_dashed",
+                fragment_entry: "fs_dashed",
+                stride: size_of::<DashedVertex>(),
+                attributes: &dashed_attributes,
+                topology: wgpu::PrimitiveTopology::LineList,
+                // Faces hide guides; a guide lying on a face still shows (faces are biased back).
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                depth_write: false,
+                depth_bias: wgpu::DepthBiasState::default(),
+            },
+        );
         let face_pipeline = create_pipeline(
             device,
             &layout,
@@ -127,6 +148,8 @@ impl ViewportRenderer {
             background_lines: GpuBuffer::new(device, "viewport background lines", &scene.background_lines),
             lines: GpuBuffer::new(device, "viewport lines", &scene.lines),
             faces: GpuBuffer::new(device, "viewport faces", &scene.faces),
+            dashed_pipeline,
+            guides: scene.guides.clone(),
             targets: None,
             background: wgpu::Color { r: r.into(), g: g.into(), b: b.into(), a: 1.0 },
         }
@@ -137,6 +160,7 @@ impl ViewportRenderer {
         self.background_lines = GpuBuffer::new(device, "viewport background lines", &scene.background_lines);
         self.lines = GpuBuffer::new(device, "viewport lines", &scene.lines);
         self.faces = GpuBuffer::new(device, "viewport faces", &scene.faces);
+        self.guides = scene.guides.clone();
     }
 
     /// Render one frame at `size` physical pixels. Returns `true` when the output texture was
@@ -148,6 +172,7 @@ impl ViewportRenderer {
         size: [u32; 2],
         view_proj: Mat4,
         eye: Vec3,
+        pixels_per_point: f32,
     ) -> bool {
         let size = [size[0].max(1), size[1].max(1)];
         let resized = self.targets.as_ref().is_none_or(|t| t.size != size);
@@ -156,10 +181,12 @@ impl ViewportRenderer {
         }
         let targets = self.targets.as_ref().expect("targets were just created");
 
-        let mut globals = [0.0_f32; 36];
+        let mut globals = [0.0_f32; 40];
         globals[..16].copy_from_slice(&view_proj.to_cols_array());
         globals[16..19].copy_from_slice(&eye.to_array());
         globals[20..36].copy_from_slice(&view_proj.inverse().to_cols_array());
+        globals[36..39].copy_from_slice(&[size[0] as f32, size[1] as f32, pixels_per_point]);
+        let dashed = GpuBuffer::new(device, "viewport guides", &guide_vertices(&self.guides, view_proj, eye));
         queue.write_buffer(&self.globals, 0, bytemuck::cast_slice(&globals));
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -196,6 +223,7 @@ impl ViewportRenderer {
                 (&self.background_line_pipeline, &self.background_lines),
                 (&self.face_pipeline, &self.faces),
                 (&self.line_pipeline, &self.lines),
+                (&self.dashed_pipeline, &dashed),
             ] {
                 if buffer.vertex_count > 0 {
                     pass.set_pipeline(pipeline);

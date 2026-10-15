@@ -37,11 +37,7 @@ each section. Remove items when they're done (mention them in the commit).
 - Corners are always mitered (sharp); no rounded outward corners.
 
 ## Guides (Tape Measure)
-- Only the edited group's guides are shown and snapped to; guides inside closed groups are
-  hidden (SketchUp shows them all).
-- Guides are drawn over the model without depth, so faces don't hide them.
-- Move and Rotate don't move selected guides; guides can't be made from a point toward a
-  direction (SketchUp makes a guide line when the tape starts on a point with Ctrl).
+- Guides can't be made from a point toward a direction (SketchUp makes a guide line when the tape starts on a point with Ctrl).
 - No Protractor guides (angled guide lines), no "hide guides" toggle (only Delete Guides).
 - Guide lines snap where they cross edges and other guides, but not where they cross faces.
 

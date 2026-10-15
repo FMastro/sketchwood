@@ -4,6 +4,8 @@ struct Globals {
     eye: vec4<f32>,
     // For turning screen positions back into view directions (the sky).
     inv_view_proj: mat4x4<f32>,
+    // Viewport width and height in pixels, pixels per point, unused.
+    viewport: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -90,4 +92,41 @@ fn fs_sky(in: SkyOut) -> @location(0) vec4<f32> {
     }
     let t = pow(clamp(dir.z, 0.0, 1.0), 0.6);
     return vec4<f32>(mix(horizon, zenith, t), 1.0);
+}
+
+// Guides: dashed lines that faces can hide. Dashes are measured in screen pixels from the
+// segment's start, so they look the same at any zoom. `dash` 0 draws solid (guide points).
+struct DashedOut {
+    @builtin(position) position: vec4<f32>,
+    @location(0) color: vec4<f32>,
+    @location(1) start_px: vec2<f32>,
+    @location(2) dash: f32,
+};
+
+@vertex
+fn vs_dashed(
+    @location(0) position: vec3<f32>,
+    @location(1) color: vec4<f32>,
+    @location(2) start: vec3<f32>,
+    @location(3) dash: f32,
+) -> DashedOut {
+    var out: DashedOut;
+    out.position = globals.view_proj * vec4<f32>(position, 1.0);
+    let s = globals.view_proj * vec4<f32>(start, 1.0);
+    let ndc = s.xy / s.w;
+    out.start_px = vec2<f32>((ndc.x * 0.5 + 0.5) * globals.viewport.x, (0.5 - ndc.y * 0.5) * globals.viewport.y);
+    out.color = color;
+    out.dash = dash;
+    return out;
+}
+
+@fragment
+fn fs_dashed(in: DashedOut) -> @location(0) vec4<f32> {
+    if in.dash > 0.5 {
+        let period = 10.0 * globals.viewport.z;
+        if fract(distance(in.position.xy, in.start_px) / period) > 0.6 {
+            discard;
+        }
+    }
+    return in.color;
 }

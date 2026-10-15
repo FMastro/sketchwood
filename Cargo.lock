@@ -2823,6 +2823,7 @@ dependencies = [
  "bytemuck",
  "glam",
  "sketchcraft-doc",
+ "sketchcraft-view",
  "wgpu",
 ]
 

@@ -77,6 +77,7 @@ impl Viewport {
             physical,
             self.camera.view_proj(size),
             self.camera.eye(),
+            pixels_per_point,
         );
 
         let view = self.renderer.output_view().expect("rendered at least once");

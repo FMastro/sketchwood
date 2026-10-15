@@ -52,6 +52,19 @@ pub enum Guide {
     Point(DVec3),
 }
 
+impl Guide {
+    /// The guide mapped through `transform` (moved, turned or scaled with what it marks out).
+    pub fn transformed(&self, transform: &DAffine3) -> Guide {
+        match *self {
+            Guide::Line { point, dir } => Guide::Line {
+                point: transform.transform_point3(point),
+                dir: transform.transform_vector3(dir).normalize(),
+            },
+            Guide::Point(p) => Guide::Point(transform.transform_point3(p)),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Edge {
     pub a: VertexId,
@@ -111,6 +124,13 @@ impl Model {
 
     pub fn guides(&self) -> impl Iterator<Item = (GuideId, &Guide)> {
         self.guides.iter().map(|(i, g)| (GuideId(i), g))
+    }
+
+    /// Move a guide with a move, rotation or scale.
+    pub(crate) fn transform_guide(&mut self, id: GuideId, transform: &DAffine3) {
+        if let Some(guide) = self.guides.get_mut(id.0) {
+            *guide = guide.transformed(transform);
+        }
     }
 
     pub fn add_guide(&mut self, guide: Guide) -> GuideId {
@@ -180,8 +200,13 @@ impl Model {
 
     /// The ids the next vertex, edge and face will get. Everything added later has ids at or
     /// above these.
-    pub(crate) fn next_ids(&self) -> (VertexId, EdgeId, FaceId) {
-        (VertexId(self.vertices.next_id()), EdgeId(self.edges.next_id()), FaceId(self.faces.next_id()))
+    pub(crate) fn next_ids(&self) -> (VertexId, EdgeId, FaceId, GuideId) {
+        (
+            VertexId(self.vertices.next_id()),
+            EdgeId(self.edges.next_id()),
+            FaceId(self.faces.next_id()),
+            GuideId(self.guides.next_id()),
+        )
     }
 
     /// Copy all of `other`'s geometry in, mapped through `transform` (a rigid motion), without
@@ -202,6 +227,9 @@ impl Model {
                 normal: transform.transform_vector3(face.normal).normalize(),
                 material: face.material,
             });
+        }
+        for (_, guide) in other.guides() {
+            self.guides.insert(guide.transformed(transform));
         }
     }
 

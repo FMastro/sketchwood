@@ -175,7 +175,8 @@ pub struct Overlay {
     pub cursor_note: Option<&'static str>,
     /// Dashed lines: the box around the group being edited.
     pub dashed: Vec<[DVec3; 2]>,
-    /// The drawing's guides (and one being placed), and whether each is selected.
+    /// Guides to preview or highlight (the drawing's own guides are drawn by the renderer), and
+    /// whether each is highlighted.
     pub guides: Vec<(sketchcraft_doc::Guide, bool)>,
     pub window: Option<SelectionWindow>,
 }
@@ -846,12 +847,6 @@ impl Tools {
     /// What to draw over the viewport, in world coordinates.
     pub fn overlay(&self, doc: &Document) -> Overlay {
         let mut overlay = Overlay::default();
-        let selection = doc.selection();
-        overlay.guides = doc
-            .model()
-            .guides()
-            .map(|(id, g)| (*g, selection.contains(sketchcraft_doc::Entity::Guide(id))))
-            .collect();
         if let Some((lo, hi)) = doc.editing_box() {
             // Just outside the geometry, so the box doesn't hide behind the group's own edges.
             let margin = DVec3::splat(((hi - lo).length() * 0.02).max(0.125));

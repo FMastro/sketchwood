@@ -16,7 +16,11 @@ pub struct Viewport {
     renderer: ViewportRenderer,
     texture: Option<egui::TextureId>,
     /// The document version and grid setting the renderer's scene was built from.
-    scene_version: Option<(u64, bool)>,
+    scene_version: Option<(u64, Vec<sketchcraft_doc::InstanceId>, bool)>,
+    /// The document version the selection highlight was built from.
+    selection_version: Option<u64>,
+    /// The drawing's soft edges, kept for rebuilding the selection highlight alone.
+    soft_edges: std::collections::HashSet<sketchcraft_doc::EdgeId>,
     /// The ground grid (View > Grid). SketchUp has none, so it starts off.
     pub show_grid: bool,
     zoom_extents_pending: bool,
@@ -33,6 +37,8 @@ impl Viewport {
             show_grid: false,
             texture: None,
             scene_version: None,
+            selection_version: None,
+            soft_edges: Default::default(),
             zoom_extents_pending: false,
             last_hover: None,
             rect: egui::Rect::NOTHING,
@@ -59,12 +65,22 @@ impl Viewport {
         }
 
         let Some(render_state) = frame.wgpu_render_state() else { return };
-        let wanted = (doc.version(), self.show_grid);
-        if self.scene_version != Some(wanted) {
+        // The drawing is rebuilt when it, the open group or the grid changes; the selection
+        // highlight alone when only the selection does (cheap, so clicking stays instant).
+        let geometry = (doc.model_version(), doc.path().to_vec(), self.show_grid);
+        if self.scene_version.as_ref() != Some(&geometry) {
             let mut scene = Scene::reference(self.show_grid);
             scene.add_view(doc.view(), doc.selection(), &doc.context_transform(), doc.scene());
             self.renderer.set_scene(&render_state.device, &scene);
-            self.scene_version = Some(wanted);
+            self.soft_edges = scene.soft_edges;
+            self.scene_version = Some(geometry);
+            self.selection_version = Some(doc.version());
+        } else if self.selection_version != Some(doc.version()) {
+            let mut scene = Scene { soft_edges: std::mem::take(&mut self.soft_edges), ..Scene::default() };
+            scene.add_selection(doc.view(), doc.selection(), &doc.context_transform(), doc.scene());
+            self.renderer.set_selection(&render_state.device, &scene);
+            self.soft_edges = scene.soft_edges;
+            self.selection_version = Some(doc.version());
         }
         let pixels_per_point = ui.ctx().pixels_per_point();
         let physical = [

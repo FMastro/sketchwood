@@ -30,6 +30,10 @@ pub struct ViewportRenderer {
     dashed_pipeline: wgpu::RenderPipeline,
     /// Guides in world coordinates, made into dashed lines each frame for the camera.
     guides: Vec<SceneGuide>,
+    selected_face_pipeline: wgpu::RenderPipeline,
+    selected_faces: GpuBuffer,
+    selected_lines: GpuBuffer,
+    selected_guides: Vec<SceneGuide>,
     targets: Option<Targets>,
     background: wgpu::Color,
 }
@@ -137,8 +141,30 @@ impl ViewportRenderer {
             },
         );
 
+        // The selection's tinted faces, redrawn over the same triangles: equal depth passes.
+        let selected_face_pipeline = create_pipeline(
+            device,
+            &layout,
+            &shader,
+            PipelineSpec {
+                label: "viewport selected faces",
+                vertex_entry: "vs_face",
+                fragment_entry: "fs_face",
+                stride: size_of::<FaceVertex>(),
+                attributes: &face_attributes,
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                depth_write: false,
+                depth_bias: wgpu::DepthBiasState { constant: 2, slope_scale: 2.0, clamp: 0.0 },
+            },
+        );
+
         let [r, g, b, _] = srgb(250, 250, 250);
         Self {
+            selected_face_pipeline,
+            selected_faces: GpuBuffer::new(device, "viewport selected faces", &scene.selected_faces),
+            selected_lines: GpuBuffer::new(device, "viewport selected lines", &scene.selected_lines),
+            selected_guides: scene.selected_guides.clone(),
             sky_pipeline: create_sky_pipeline(device, &layout, &shader),
             background_line_pipeline,
             line_pipeline,
@@ -161,6 +187,15 @@ impl ViewportRenderer {
         self.lines = GpuBuffer::new(device, "viewport lines", &scene.lines);
         self.faces = GpuBuffer::new(device, "viewport faces", &scene.faces);
         self.guides = scene.guides.clone();
+        self.set_selection(device, scene);
+    }
+
+    /// Replace just the selection highlight (`scene` built with [`Scene::add_selection`]):
+    /// selecting doesn't rebuild the whole drawing.
+    pub fn set_selection(&mut self, device: &wgpu::Device, scene: &Scene) {
+        self.selected_faces = GpuBuffer::new(device, "viewport selected faces", &scene.selected_faces);
+        self.selected_lines = GpuBuffer::new(device, "viewport selected lines", &scene.selected_lines);
+        self.selected_guides = scene.selected_guides.clone();
     }
 
     /// Render one frame at `size` physical pixels. Returns `true` when the output texture was
@@ -186,7 +221,8 @@ impl ViewportRenderer {
         globals[16..19].copy_from_slice(&eye.to_array());
         globals[20..36].copy_from_slice(&view_proj.inverse().to_cols_array());
         globals[36..39].copy_from_slice(&[size[0] as f32, size[1] as f32, pixels_per_point]);
-        let dashed = GpuBuffer::new(device, "viewport guides", &guide_vertices(&self.guides, view_proj, eye));
+        let all_guides: Vec<SceneGuide> = self.guides.iter().chain(&self.selected_guides).copied().collect();
+        let dashed = GpuBuffer::new(device, "viewport guides", &guide_vertices(&all_guides, view_proj, eye));
         queue.write_buffer(&self.globals, 0, bytemuck::cast_slice(&globals));
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -223,6 +259,8 @@ impl ViewportRenderer {
                 (&self.background_line_pipeline, &self.background_lines),
                 (&self.face_pipeline, &self.faces),
                 (&self.line_pipeline, &self.lines),
+                (&self.selected_face_pipeline, &self.selected_faces),
+                (&self.line_pipeline, &self.selected_lines),
                 (&self.dashed_pipeline, &dashed),
             ] {
                 if buffer.vertex_count > 0 {

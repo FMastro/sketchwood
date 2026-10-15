@@ -134,9 +134,16 @@ each section. Remove items when they're done (mention them in the commit).
 - Faces drawn on the ground face up, where SketchUp shows the blue back face (deliberate).
 
 ## Performance
-- Vertex dedupe, edge lookup, picking and occlusion tests are linear scans per call (and
-  occlusion is edges x faces). Fine for furniture; needs spatial indexing for big models.
-- The whole scene is rebuilt and re-uploaded on every document change.
+Measured with `tests/perf.rs` (`cargo test --release -p sketchcraft-ui-egui --test perf --
+--ignored --nocapture`, `PERF_BOARDS=1500` for a big drawing). At 1500 boards (12,900 faces):
+hover 1-3 ms, click 9 ms, selection highlight 2 ms, an edit 14-17 ms, full redraw rebuild 40 ms.
+- Picking tests every face's plane and box (cached per model), but has no spatial index; a
+  BVH would make it constant-ish for very big models.
+- Each edit snapshots the whole scene for undo and re-flattens the whole view (~2 ms and ~4 ms
+  at 1500 boards); sharing unchanged definitions (Arc) and per-definition caches would cut both.
+- Vertex dedupe (`add_vertex`) and edge lookup are linear scans per call.
+- The drawing's geometry is rebuilt and re-uploaded on every model change (the selection has
+  its own small layer).
 
 ## Testing / infra
 - Two full test runs once died without a failing assertion, likely a GPU driver crash with

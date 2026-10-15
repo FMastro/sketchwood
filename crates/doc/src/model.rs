@@ -111,6 +111,10 @@ pub struct Model {
     /// Older files have none.
     #[serde(default)]
     guides: Arena<Guide>,
+    /// Each face's plane and bounding box, built on first use for picking and cleared by any
+    /// change to vertices or faces.
+    #[serde(skip)]
+    face_index: std::sync::OnceLock<Vec<FaceEntry>>,
 }
 
 impl Model {
@@ -212,13 +216,16 @@ impl Model {
     /// Copy all of `other`'s geometry in, mapped through `transform` (a rigid motion), without
     /// merging it with anything already here.
     pub(crate) fn append(&mut self, other: &Model, transform: &DAffine3) {
-        let mut vertex_map = std::collections::HashMap::new();
+        self.face_index.take();
+        // Old id -> new id, by index (ids are dense): this runs for every group on every edit.
+        let mut vertex_map = vec![VertexId(u32::MAX); other.vertices.next_id() as usize];
         for (id, p) in other.vertices() {
-            vertex_map.insert(id, VertexId(self.vertices.insert(transform.transform_point3(p))));
+            vertex_map[id.0 as usize] = VertexId(self.vertices.insert(transform.transform_point3(p)));
         }
-        let map = |ids: &[VertexId]| -> Vec<VertexId> { ids.iter().map(|v| vertex_map[v]).collect() };
+        let to_new = |v: VertexId| vertex_map[v.0 as usize];
+        let map = |ids: &[VertexId]| -> Vec<VertexId> { ids.iter().map(|&v| to_new(v)).collect() };
         for (_, edge) in other.edges() {
-            self.edges.insert(Edge { a: vertex_map[&edge.a], b: vertex_map[&edge.b] });
+            self.edges.insert(Edge { a: to_new(edge.a), b: to_new(edge.b) });
         }
         for (_, face) in other.faces() {
             self.faces.insert(Face {
@@ -240,6 +247,7 @@ impl Model {
 
     /// The vertex at `point`, creating it if none is within [`EPS`].
     pub fn add_vertex(&mut self, point: DVec3) -> VertexId {
+        self.face_index.take();
         self.vertex_at(point).unwrap_or_else(|| VertexId(self.vertices.insert(point)))
     }
 
@@ -260,6 +268,7 @@ impl Model {
     ///
     /// Returns `None` for degenerate input (fewer than 3 distinct points, or zero area).
     pub fn add_face(&mut self, points: &[DVec3]) -> Option<FaceId> {
+        self.face_index.take();
         let distinct = points.iter().enumerate().all(|(i, p)| {
             points[i + 1..].iter().all(|q| p.distance_squared(*q) > EPS * EPS)
         });
@@ -321,15 +330,18 @@ impl Model {
 
     /// Remove a face, keeping its edges.
     pub fn remove_face(&mut self, id: FaceId) -> Option<Face> {
+        self.face_index.take();
         self.faces.remove(id.0)
     }
 
     pub(crate) fn insert_face(&mut self, face: Face) -> FaceId {
+        self.face_index.take();
         FaceId(self.faces.insert(face))
     }
 
     /// Give a live face new contents, keeping its id.
     pub(crate) fn replace_face(&mut self, id: FaceId, face: Face) {
+        self.face_index.take();
         if let Some(slot) = self.faces.get_mut(id.0) {
             *slot = face;
         }
@@ -343,6 +355,7 @@ impl Model {
     /// Split an edge at `point` (on it), keeping the faces it bounds whole: the new vertex is
     /// inserted into their loops. Returns the vertex at `point`.
     pub(crate) fn split_edge(&mut self, id: EdgeId, point: DVec3) -> Option<VertexId> {
+        self.face_index.take();
         let edge = *self.edge(id)?;
         let v = self.add_vertex(point);
         if v == edge.a || v == edge.b {
@@ -363,6 +376,7 @@ impl Model {
 
     /// Flip a face so its back becomes its front.
     pub fn reverse_face(&mut self, id: FaceId) {
+        self.face_index.take();
         if let Some(face) = self.faces.get_mut(id.0) {
             face.outer.reverse();
             face.holes.iter_mut().for_each(|h| h.reverse());
@@ -371,6 +385,7 @@ impl Model {
     }
 
     pub(crate) fn set_vertex(&mut self, id: VertexId, point: DVec3) {
+        self.face_index.take();
         if let Some(p) = self.vertices.get_mut(id.0) {
             *p = point;
         }
@@ -393,6 +408,7 @@ impl Model {
     }
 
     pub(crate) fn set_face_normal(&mut self, id: FaceId, normal: DVec3) {
+        self.face_index.take();
         if let Some(face) = self.faces.get_mut(id.0) {
             face.normal = normal;
         }
@@ -400,6 +416,7 @@ impl Model {
 
     /// Move vertices by `delta`. Faces using them must stay planar; callers ensure that.
     pub fn translate_vertices(&mut self, ids: impl IntoIterator<Item = VertexId>, delta: DVec3) {
+        self.face_index.take();
         for id in ids {
             if let Some(p) = self.vertices.get_mut(id.0) {
                 *p += delta;
@@ -427,6 +444,7 @@ impl Model {
     /// cut (SketchUp behavior), except that an edge between two coplanar faces merges them.
     /// Vertices left without edges are removed.
     pub fn erase(&mut self, entities: impl IntoIterator<Item = Entity>) {
+        self.face_index.take();
         // Faces first, so an erased edge between two erased faces doesn't merge them.
         let mut entities: Vec<Entity> = entities.into_iter().collect();
         entities.sort_by_key(|e| !matches!(e, Entity::Face(_)));
@@ -517,11 +535,9 @@ impl Model {
     pub fn face_contains(&self, face: &Face, point: DVec3) -> bool {
         let project = projector(face.normal);
         let p = project(point);
-        let polygon = |ids: &[VertexId]| -> Vec<DVec2> {
-            ids.iter().map(|&id| project(self.vertex(id))).collect()
-        };
-        locate(p, &polygon(&face.outer)) != Location::Outside
-            && face.holes.iter().all(|h| locate(p, &polygon(h)) != Location::Inside)
+        // Straight from the vertex ids: picking calls this for every face, so no allocation.
+        let locate_loop = |ids: &[VertexId]| locate_by(p, ids.len(), |i| project(self.vertex(ids[i])));
+        locate_loop(&face.outer) != Location::Outside && face.holes.iter().all(|h| locate_loop(h) != Location::Inside)
     }
 
     /// The face as triangles, holes cut out.
@@ -545,6 +561,41 @@ impl Model {
     }
 }
 
+
+/// A face's plane and bounding box, for quickly ruling faces out when picking.
+#[derive(Clone, Copy, Debug)]
+pub struct FaceEntry {
+    pub id: FaceId,
+    /// A point on the face's plane.
+    pub origin: DVec3,
+    pub normal: DVec3,
+    pub lo: DVec3,
+    pub hi: DVec3,
+}
+
+impl FaceEntry {
+    /// Whether `p` is within the face's bounding box (with a little slack).
+    pub fn box_contains(&self, p: DVec3) -> bool {
+        let slack = DVec3::splat(1e-6 + (self.hi - self.lo).max_element() * 1e-9);
+        p.cmpge(self.lo - slack).all() && p.cmple(self.hi + slack).all()
+    }
+}
+
+impl Model {
+    /// Every face's plane and bounding box (cached until the geometry changes).
+    pub fn face_index(&self) -> &[FaceEntry] {
+        self.face_index.get_or_init(|| {
+            self.faces()
+                .map(|(id, face)| {
+                    let mut points = face.outer.iter().map(|&v| self.vertex(v));
+                    let first = points.next().unwrap_or_default();
+                    let (lo, hi) = points.fold((first, first), |(lo, hi), p| (lo.min(p), hi.max(p)));
+                    FaceEntry { id, origin: first, normal: face.normal, lo, hi }
+                })
+                .collect()
+        })
+    }
+}
 /// Whether two loops use the same vertices (in any order or direction).
 pub(crate) fn same_loop(a: &[VertexId], b: &[VertexId]) -> bool {
     a.len() == b.len() && a.iter().collect::<BTreeSet<_>>() == b.iter().collect::<BTreeSet<_>>()
@@ -588,9 +639,14 @@ pub(crate) enum Location {
 }
 
 pub(crate) fn locate(p: DVec2, polygon: &[DVec2]) -> Location {
+    locate_by(p, polygon.len(), |i| polygon[i])
+}
+
+/// [`locate`] for a polygon of `count` corners given by `corner`.
+fn locate_by(p: DVec2, count: usize, corner: impl Fn(usize) -> DVec2) -> Location {
     let mut inside = false;
-    for (i, &a) in polygon.iter().enumerate() {
-        let b = polygon[(i + 1) % polygon.len()];
+    for i in 0..count {
+        let (a, b) = (corner(i), corner((i + 1) % count));
         let ab = b - a;
         let t = ((p - a).dot(ab) / ab.length_squared()).clamp(0.0, 1.0);
         if (a + ab * t).distance_squared(p) <= EPS * EPS {

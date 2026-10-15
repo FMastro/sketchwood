@@ -32,6 +32,13 @@ pub struct Scene {
     pub faces: Vec<FaceVertex>,
     /// Guides, in world coordinates; turned into dashed lines each frame ([`guide_vertices`]).
     pub guides: Vec<SceneGuide>,
+    /// The selection, drawn over the rest: tinted faces, blue edges and guides.
+    pub selected_faces: Vec<FaceVertex>,
+    pub selected_lines: Vec<LineVertex>,
+    pub selected_guides: Vec<SceneGuide>,
+    /// Edges hidden between a curve's facets (found by [`Self::add_geometry`]); a selected
+    /// group's highlight skips them too.
+    pub soft_edges: std::collections::HashSet<sketchcraft_doc::EdgeId>,
 }
 
 fn line_vertex(p: Vec3, color: Color) -> LineVertex {
@@ -82,41 +89,22 @@ impl Scene {
     /// highlighted in blue (whole groups when they're selected); while editing inside a group,
     /// everything outside it is faded, as in SketchUp.
     pub fn add_view(&mut self, view: &View, selection: &Selection, to_world: &DAffine3, scene: &SceneData) {
-        let model = view.model();
-        let edge = srgb(0, 0, 0);
-        let selected_edge = srgb(0, 64, 255);
-        let faded_edge = srgb(190, 190, 190);
-        // SketchUp's default material: warm white front, blue-grey back.
-        let front = srgb(250, 250, 246);
-        let back = srgb(164, 180, 204);
-        let tint = |c: Color| mix(c, srgb(80, 120, 255), 0.45);
-        let fade = |c: Color| mix(c, srgb(250, 250, 250), 0.7);
-        let is_selected = |entity: Entity| match view.owner(entity) {
-            Owner::Active => selection.contains(entity),
-            Owner::Instance(id) => selection.contains(Entity::Instance(id)),
-            Owner::Outside => false,
-        };
-        let world = |p: DVec3| to_world.transform_point3(p).as_vec3();
+        self.add_geometry(view, to_world, scene);
+        self.add_selection(view, selection, to_world, scene);
+    }
 
+    /// Everything in the drawing, unselected. Rebuilt only when the drawing (or the group
+    /// being edited) changes.
+    pub fn add_geometry(&mut self, view: &View, to_world: &DAffine3, scene: &SceneData) {
+        let model = view.model();
+        let world = |p: DVec3| to_world.transform_point3(p).as_vec3();
         for (id, face) in model.faces() {
-            let entity = Entity::Face(id);
-            // A painted face (or one in a painted group) shows the material on both sides.
-            let painted = view.face_material(id).and_then(|m| scene.material(m)).map(|m| srgb(m.color[0], m.color[1], m.color[2]));
-            let (front, back) = painted.map_or((front, back), |c| (c, c));
-            let (front, back) = match view.owner(entity) {
+            let (front, back) = face_colors(view, id, scene);
+            let (front, back) = match view.owner(Entity::Face(id)) {
                 Owner::Outside => (fade(front), fade(back)),
-                _ if is_selected(entity) => (tint(front), tint(back)),
                 _ => (front, back),
             };
-            let n = to_world.transform_vector3(face.normal).normalize().as_vec3();
-            for triangle in model.triangulate(face) {
-                for p in triangle.map(world) {
-                    self.faces.push([
-                        p.x, p.y, p.z, n.x, n.y, n.z, front[0], front[1], front[2], front[3], back[0],
-                        back[1], back[2], back[3],
-                    ]);
-                }
-            }
+            self.push_face(model, face, to_world, front, back, false);
         }
         // The normals of the faces on each edge, to hide the edges between a curve's facets.
         let mut sides: HashMap<(VertexId, VertexId), Vec<DVec3>> = HashMap::new();
@@ -129,35 +117,72 @@ impl Scene {
             }
         }
         for (id, e) in model.edges() {
-            let entity = Entity::Edge(id);
             if let Some([n, m]) = sides.get(&(e.a.min(e.b), e.a.max(e.b))).map(Vec::as_slice)
                 && is_soft(*n, *m)
-                && !is_selected(entity)
             {
+                self.soft_edges.insert(id);
                 continue;
             }
-            let color = match view.owner(entity) {
-                Owner::Outside => faded_edge,
-                _ if is_selected(entity) => selected_edge,
-                _ => edge,
+            let color = match view.owner(Entity::Edge(id)) {
+                Owner::Outside => srgb(190, 190, 190),
+                _ => srgb(0, 0, 0),
             };
             let [a, b] = model.edge_points(e);
             self.add_line(world(a), world(b), color);
         }
         for (id, guide) in model.guides() {
-            let entity = Entity::Guide(id);
-            let color = match view.owner(entity) {
+            let color = match view.owner(Entity::Guide(id)) {
                 Owner::Outside => srgb(170, 170, 170),
-                _ if is_selected(entity) => selected_edge,
                 _ => srgb(70, 70, 70),
             };
-            let guide = match *guide {
-                Guide::Line { point, dir } => {
-                    Guide::Line { point: to_world.transform_point3(point), dir: to_world.transform_vector3(dir).normalize() }
-                }
-                Guide::Point(p) => Guide::Point(to_world.transform_point3(p)),
-            };
-            self.guides.push(SceneGuide { guide, color });
+            self.guides.push(SceneGuide { guide: guide.transformed(to_world), color });
+        }
+    }
+
+    /// The selection's highlight, drawn over the geometry: selected faces (all of a selected
+    /// group's) tinted blue, their edges and selected guides in blue. Cheap to rebuild when only
+    /// the selection changes.
+    pub fn add_selection(&mut self, view: &View, selection: &Selection, to_world: &DAffine3, scene: &SceneData) {
+        if selection.is_empty() {
+            return;
+        }
+        let model = view.model();
+        let world = |p: DVec3| to_world.transform_point3(p).as_vec3();
+        let is_selected = |entity: Entity| match view.owner(entity) {
+            Owner::Active => selection.contains(entity),
+            Owner::Instance(id) => selection.contains(Entity::Instance(id)),
+            Owner::Outside => false,
+        };
+        for (id, face) in model.faces() {
+            if is_selected(Entity::Face(id)) {
+                let (front, back) = face_colors(view, id, scene);
+                self.push_face(model, face, to_world, tint(front), tint(back), true);
+            }
+        }
+        let blue = srgb(0, 64, 255);
+        for (id, e) in model.edges() {
+            let in_selected_group = matches!(view.owner(Entity::Edge(id)), Owner::Instance(_));
+            if is_selected(Entity::Edge(id)) && !(in_selected_group && self.soft_edges.contains(&id)) {
+                let [a, b] = model.edge_points(e);
+                self.selected_lines.extend([line_vertex(world(a), blue), line_vertex(world(b), blue)]);
+            }
+        }
+        for (id, guide) in model.guides() {
+            if is_selected(Entity::Guide(id)) {
+                self.selected_guides.push(SceneGuide { guide: guide.transformed(to_world), color: blue });
+            }
+        }
+    }
+
+    fn push_face(&mut self, model: &sketchcraft_doc::Model, face: &sketchcraft_doc::Face, to_world: &DAffine3, front: Color, back: Color, selected: bool) {
+        let n = to_world.transform_vector3(face.normal).normalize().as_vec3();
+        let target = if selected { &mut self.selected_faces } else { &mut self.faces };
+        for triangle in model.triangulate(face) {
+            for p in triangle.map(|p| to_world.transform_point3(p).as_vec3()) {
+                target.push([
+                    p.x, p.y, p.z, n.x, n.y, n.z, front[0], front[1], front[2], front[3], back[0], back[1], back[2], back[3],
+                ]);
+            }
         }
     }
 }
@@ -241,6 +266,29 @@ fn closest_to_ray(a: DVec3, b: DVec3, origin: DVec3, dir: DVec3) -> DVec3 {
     let denom = 1.0 - k * k;
     let t = if denom < 1e-12 { 0.0 } else { (k * dir.dot(w) - d.dot(w)) / denom };
     a + d * t.clamp(0.0, length)
+}
+
+
+/// A face's front and back colors: SketchUp's default material (warm white front, blue-grey
+/// back), or its paint (its own, else its group's) on both sides.
+fn face_colors(view: &View, id: sketchcraft_doc::FaceId, scene: &SceneData) -> (Color, Color) {
+    match view.face_material(id).and_then(|m| scene.material(m)) {
+        Some(m) => {
+            let c = srgb(m.color[0], m.color[1], m.color[2]);
+            (c, c)
+        }
+        None => (srgb(250, 250, 246), srgb(164, 180, 204)),
+    }
+}
+
+/// Selected faces: tinted blue.
+fn tint(c: Color) -> Color {
+    mix(c, srgb(80, 120, 255), 0.45)
+}
+
+/// Outside the group being edited: faded toward the background, as in SketchUp.
+fn fade(c: Color) -> Color {
+    mix(c, srgb(250, 250, 250), 0.7)
 }
 
 /// Whether the edge between faces with normals `n` and `m` is soft, as SketchUp draws the edges
@@ -334,10 +382,16 @@ mod tests {
             scene
         };
         let before = plain(&doc);
+        assert!(before.selected_faces.is_empty() && before.selected_lines.is_empty());
         doc.selection_mut().extend([Entity::Instance(group)]);
         let after = plain(&doc);
-        let changed = before.faces.iter().zip(&after.faces).filter(|(a, b)| a[6..10] != b[6..10]).count();
-        assert_eq!(changed, 36, "exactly the group's 6 faces (36 vertices) are tinted");
+        assert_eq!(after.faces, before.faces, "the drawing itself doesn't change with the selection");
+        assert_eq!(after.selected_faces.len(), 36, "exactly the group's 6 faces (36 vertices) are tinted");
+        assert_eq!(after.selected_lines.len(), 24, "and its 12 edges drawn blue");
+        // The highlight alone, as the viewport rebuilds it when only the selection changes.
+        let mut highlight = Scene::default();
+        highlight.add_selection(doc.view(), doc.selection(), &doc.context_transform(), doc.scene());
+        assert_eq!(highlight.selected_faces, after.selected_faces);
     }
 
     #[test]

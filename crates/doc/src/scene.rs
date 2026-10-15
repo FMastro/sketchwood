@@ -530,7 +530,9 @@ impl View {
     }
 
     fn segment_where(&self, is_past: impl Fn(&(VertexId, EdgeId, FaceId, GuideId)) -> bool) -> Option<&Segment> {
-        self.segments.iter().rev().find(|s| is_past(&s.start))
+        // Segments are appended in id order, so the ones an id is past form a prefix.
+        let past = self.segments.partition_point(|s| is_past(&s.start));
+        past.checked_sub(1).map(|i| &self.segments[i])
     }
 
     fn owner_where(&self, is_past: impl Fn(&(VertexId, EdgeId, FaceId, GuideId)) -> bool) -> Owner {

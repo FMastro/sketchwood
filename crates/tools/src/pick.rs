@@ -17,8 +17,10 @@ pub const EDGE_RADIUS: f32 = 6.0;
 pub struct Screen<'a> {
     pub camera: &'a OrbitCamera,
     pub size: Vec2,
-    to_world: DAffine3,
     to_local: DAffine3,
+    /// Model coordinates straight to clip space, worked out once: picking projects every
+    /// vertex and edge on each mouse move.
+    clip: glam::DMat4,
 }
 
 impl<'a> Screen<'a> {
@@ -29,11 +31,17 @@ impl<'a> Screen<'a> {
 
     /// Inside a group whose coordinates map to the world through `to_world`.
     pub fn in_context(camera: &'a OrbitCamera, size: Vec2, to_world: DAffine3) -> Self {
-        Self { camera, size, to_world, to_local: to_world.inverse() }
+        let clip = camera.view_proj(size).as_dmat4() * glam::DMat4::from(to_world);
+        Self { camera, size, to_local: to_world.inverse(), clip }
     }
 
     pub fn project(&self, point: DVec3) -> Option<Vec2> {
-        self.camera.project(self.to_world.transform_point3(point).as_vec3(), self.size)
+        let clip = self.clip * point.extend(1.0);
+        if clip.w <= 0.0 {
+            return None;
+        }
+        let (x, y) = (clip.x / clip.w, clip.y / clip.w);
+        Some(Vec2::new(((x + 1.0) * 0.5) as f32 * self.size.x, ((1.0 - y) * 0.5) as f32 * self.size.y))
     }
 
     pub fn ray(&self, cursor: Vec2) -> Ray {
@@ -74,15 +82,21 @@ impl Ray {
 
 /// The nearest face the ray hits, and where.
 pub fn hit_face(model: &Model, ray: &Ray) -> Option<(FaceId, DVec3)> {
-    model
-        .faces()
-        .filter_map(|(id, face)| {
-            let hit = ray.hit_plane(model.vertex(face.outer[0]), face.normal)?;
-            model.face_contains(face, hit).then_some((id, hit))
+    // Where the ray crosses each face's plane (cheap), nearest first; then the slower
+    // inside-the-outline test only until one passes.
+    let mut crossings: Vec<(f64, FaceId, DVec3)> = model
+        .face_index()
+        .iter()
+        .filter_map(|e| {
+            let hit = ray.hit_plane(e.origin, e.normal)?;
+            e.box_contains(hit).then(|| (hit.distance_squared(ray.origin), e.id, hit))
         })
-        .min_by(|(_, a), (_, b)| {
-            a.distance_squared(ray.origin).total_cmp(&b.distance_squared(ray.origin))
-        })
+        .collect();
+    crossings.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
+    crossings
+        .into_iter()
+        .find(|&(_, id, hit)| model.face(id).is_some_and(|face| model.face_contains(face, hit)))
+        .map(|(_, id, hit)| (id, hit))
 }
 
 /// Whether a face (other than those `ignore` accepts) hides `point` from `eye`.
@@ -90,11 +104,14 @@ fn occluded(model: &Model, eye: DVec3, point: DVec3, ignore: impl Fn(FaceId) -> 
     let to_point = point - eye;
     let distance = to_point.length();
     let ray = Ray { origin: eye, dir: to_point / distance };
-    model.faces().any(|(id, face)| {
-        !ignore(id)
-            && ray.hit_plane(model.vertex(face.outer[0]), face.normal).is_some_and(|hit| {
-                hit.distance(eye) < distance * (1.0 - 1e-6) && model.face_contains(face, hit)
-            })
+    // Cheap tests first (plane, distance, bounding box), the outline test last.
+    model.face_index().iter().any(|e| {
+        ray.hit_plane(e.origin, e.normal).is_some_and(|hit| {
+            hit.distance(eye) < distance * (1.0 - 1e-6)
+                && e.box_contains(hit)
+                && !ignore(e.id)
+                && model.face(e.id).is_some_and(|face| model.face_contains(face, hit))
+        })
     })
 }
 

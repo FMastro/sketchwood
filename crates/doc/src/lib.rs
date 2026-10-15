@@ -18,7 +18,7 @@ mod transform;
 pub mod units;
 
 pub use document::{Document, Selection};
-pub use model::{EPS, Edge, EdgeId, Entity, Face, FaceId, Guide, GuideId, Model, VertexId};
+pub use model::{EPS, Edge, EdgeId, Entity, Face, FaceEntry, FaceId, Guide, GuideId, Model, VertexId};
 pub use offset::OffsetError;
 pub use push_pull::PushPullError;
 pub use scene::{

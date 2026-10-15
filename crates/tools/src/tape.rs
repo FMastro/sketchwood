@@ -173,6 +173,8 @@ impl TapeTool {
 
     pub fn overlay(&self, overlay: &mut Overlay) {
         overlay.snap = self.hover;
+        // SketchUp marks the cursor with "+" while the tape makes guides.
+        overlay.cursor_note = Some(if self.measure_only { "Measure" } else { "+ Guide" });
         let Some(start) = self.start else { return };
         let offset = self.offset();
         let end = start.point + offset;
@@ -301,7 +303,13 @@ mod tests {
         assert_eq!(guide, Guide::Point(DVec3::new(34.0, 10.0, 0.0)));
 
         let before = doc.model_version();
+        let mut overlay = Overlay::default();
+        tool.overlay(&mut overlay);
+        assert_eq!(overlay.cursor_note, Some("+ Guide"));
         tool.toggle_guides();
+        let mut overlay = Overlay::default();
+        tool.overlay(&mut overlay);
+        assert_eq!(overlay.cursor_note, Some("Measure"), "Ctrl switched to measuring only");
         tool.click(&mut doc, screen, at(screen, 0.0, 0.0)).unwrap();
         tool.click(&mut doc, screen, at(screen, 10.0, 0.0)).unwrap();
         assert_eq!(tool.measurement(), "10\"");

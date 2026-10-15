@@ -171,6 +171,8 @@ pub struct Overlay {
     pub grips: Vec<(DVec3, bool)>,
     /// The inference point under the cursor.
     pub snap: Option<Snap>,
+    /// A short note shown beside the mouse pointer, like SketchUp's "+" on the Tape Measure.
+    pub cursor_note: Option<&'static str>,
     /// Dashed lines: the box around the group being edited.
     pub dashed: Vec<[DVec3; 2]>,
     /// The drawing's guides (and one being placed), and whether each is selected.

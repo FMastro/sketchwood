@@ -927,3 +927,19 @@ fn an_open_group_is_boxed_and_labeled() {
     assert_eq!(harness.state().document().path_names(), vec!["Shelf".to_owned()]);
     snapshot(&mut harness, "editing_group");
 }
+
+#[test]
+fn ctrl_switches_the_tape_between_guides_and_measuring() {
+    let mut harness = app();
+    type_text(&mut harness, "t");
+    harness.hover_at(pos2(600.0, 450.0));
+    harness.run();
+    assert!(!harness.state().tools().status().contains("Measuring only"));
+    // A tap of Ctrl on its own.
+    harness.event(Event::ModifiersChanged(Modifiers::COMMAND));
+    harness.run();
+    harness.event(Event::ModifiersChanged(Modifiers::NONE));
+    harness.run();
+    assert!(harness.state().tools().status().contains("Measuring only"));
+    snapshot(&mut harness, "tape_measure_only");
+}

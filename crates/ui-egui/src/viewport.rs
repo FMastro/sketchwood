@@ -100,8 +100,21 @@ impl Viewport {
             egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
             egui::Color32::WHITE,
         );
-        draw_overlay(&painter, rect, &self.camera, size, &tools.overlay(doc));
+        let overlay = tools.overlay(doc);
+        draw_overlay(&painter, rect, &self.camera, size, &overlay);
         editing_badge(&painter, rect, doc);
+        // The tool's mode beside the pointer (the Tape Measure's "+ Guide").
+        if let (Some(note), Some(pointer)) = (overlay.cursor_note, ui.input(|i| i.pointer.hover_pos()))
+            && rect.contains(pointer)
+        {
+            painter.text(
+                pointer + egui::vec2(14.0, -14.0),
+                egui::Align2::LEFT_BOTTOM,
+                note,
+                egui::FontId::proportional(12.0),
+                egui::Color32::from_gray(40),
+            );
+        }
     }
 
     /// Middle-drag orbits, Shift+middle-drag and right-drag pan, the wheel zooms at the cursor.

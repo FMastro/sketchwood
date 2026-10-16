@@ -38,6 +38,9 @@ pub struct Definition {
     pub name: String,
     pub kind: DefinitionKind,
     pub container: Container,
+    /// Its woodworking properties as a part (grain, cut); older files have the defaults.
+    #[serde(default)]
+    pub part: crate::part::PartInfo,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -398,7 +401,7 @@ impl Scene {
                 format!("Component#{}", self.next_component)
             }
         };
-        let definition = DefinitionId(self.definitions.insert(Definition { name, kind, container: inside }));
+        let definition = DefinitionId(self.definitions.insert(Definition { name, kind, container: inside, part: Default::default() }));
 
         // Take the originals out: faces, then edges no remaining face needs.
         let container = self.container_mut(path)?;

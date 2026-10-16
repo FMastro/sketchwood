@@ -7,6 +7,7 @@ mod icons;
 mod keys;
 mod materials;
 mod outliner;
+mod part;
 mod tags;
 mod viewport;
 

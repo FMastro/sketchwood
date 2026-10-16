@@ -125,3 +125,8 @@ add it there; when you finish an item, remove it.
    part's stock from its own size (a 1.5 x 3.5 x 84 stud of Pine Lumber -> 2x4, 8'). Library of
    species/products (`doc::library`); older drawings upgrade on open. Paint Bucket paints the
    whole object (Ctrl: one face).
+
+## Direction
+Specialized for woodworking: SketchUp-familiar modeling where parts know they're wood (species,
+grain, joinery, profiles, cut list, build sheets, movement checks). The ordered plan is at the
+top of `docs/BACKLOG.md` ("Woodworking direction"); keep general modeling working alongside it.

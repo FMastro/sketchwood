@@ -177,6 +177,8 @@ pub struct Overlay {
     /// "From Point": a dotted line from the remembered point to where the cursor lines up with
     /// it, in the axis color.
     pub alignment: Option<(DVec3, DVec3, Axis)>,
+    /// The selected part's grain direction: a line through it along the grain.
+    pub grain: Option<[DVec3; 2]>,
     /// Dashed lines: the box around the group being edited.
     pub dashed: Vec<[DVec3; 2]>,
     /// Guides to preview or highlight (the drawing's own guides are drawn by the renderer), and
@@ -284,7 +286,7 @@ impl Overlay {
     fn into_world(mut self, t: &DAffine3) -> Self {
         let p = |v: DVec3| t.transform_point3(v);
         let n = |v: DVec3| t.transform_vector3(v).normalize();
-        for segment in self.lines.iter_mut().chain(self.highlight.iter_mut()).chain(self.dashed.iter_mut()) {
+        for segment in self.lines.iter_mut().chain(self.highlight.iter_mut()).chain(self.dashed.iter_mut()).chain(self.grain.iter_mut()) {
             *segment = segment.map(p);
         }
         if let Some(snap) = &mut self.snap {
@@ -876,6 +878,11 @@ impl Tools {
     /// What to draw over the viewport, in world coordinates.
     pub fn overlay(&self, doc: &Document) -> Overlay {
         let mut overlay = Overlay::default();
+        // One part selected: show which way its grain runs.
+        let selected: Vec<sketchcraft_doc::Entity> = doc.selection().iter().collect();
+        if let [sketchcraft_doc::Entity::Instance(part)] = selected[..] {
+            overlay.grain = doc.grain_line(part);
+        }
         if let Some((lo, hi)) = doc.editing_box() {
             // Just outside the geometry, so the box doesn't hide behind the group's own edges.
             let margin = DVec3::splat(((hi - lo).length() * 0.02).max(0.125));

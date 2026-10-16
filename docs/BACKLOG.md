@@ -3,6 +3,34 @@
 Things we deliberately skipped or know are incomplete, to come back to. Newest first within
 each section. Remove items when they're done (mention them in the commit).
 
+## Woodworking direction (in this order)
+SketchUp-familiar modeling, specialized for woodworking: parts know they're wood. Keep general
+modeling (rooms, jigs, odd shapes) working; the wood features add on and stay optional.
+1. **Parts that know they're wood** (started): grain direction and cut per part, part section in
+   Entity Info and a grain arrow are done. Still to come: picking the reference face/edge on
+   the model (with build sheets), and the operations applied to a part (joints, profiles,
+   holes) stored on it so they can be edited and listed (with joinery).
+2. **Board from stock**: pick stock (2x4 x 8', 3/4" Plywood) and drag a board out at that
+   section; type `2x4x96`; Push/Pull snapping to standard thicknesses.
+3. **Joinery**: pick two parts and a joint (dado, rabbet, mortise and tenon, dowel, pocket
+   screw, box joint); both parts change, and the cut list includes tenons and the like.
+4. **Edge profiles**: router bits from parameters (roundover, chamfer, cove, ogee, bead) applied
+   to chosen edges, stored as an operation (change the bit later); a sweep along edges with
+   corners handled.
+5. **Build sheets**: per part, a dimensioned drawing and its operations measured from the
+   reference face and edge, in a sensible order (mill, joinery, profiles, sand). Describe what,
+   not how: no machine setups or orientations we can't be sure of.
+6. **Wood movement checks**: USDA Wood Handbook shrinkage per species (public domain) x width x
+   moisture swing, by cut; warn about cross-grain glue-ups (glued tops, breadboard ends, panels
+   in frames) with arrows and numbers ("this 18" panel moves about 3/16"").
+7. **Templates** (carcass, drawer, face frame, shelf unit from dimensions, editable after),
+   then **parametric hardware** (hinges, slides, pulls, screws, dowels, shelf pins; counted in
+   the cut list, no licensing), then **.skp import** through Trimble's SDK (the adoption hook;
+   check its redistribution terms early).
+8. Later: a community model library (a separate service: accounts, moderation, licensing;
+   3D Warehouse's terms forbid aggregating its models), cost estimates (board feet / sheets x
+   price), exploded views and assembly order.
+
 ## Geometry
 - **Auto-joining**: moved or copied geometry doesn't merge with geometry it lands on (shared
   vertices/edges aren't welded). Fine while boards should stay separate; revisit with groups.

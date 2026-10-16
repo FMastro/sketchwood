@@ -1100,3 +1100,34 @@ fn the_cut_list_calls_out_parts_needing_a_material() {
     assert!(harness.query_by_label("Editing Red Oak").is_some());
     assert_ne!(harness.state().tools().active(), ToolId::PaintBucket);
 }
+
+#[test]
+fn entity_info_shows_a_parts_grain_and_lets_you_turn_it() {
+    use egui_kittest::kittest::Queryable;
+    use glam::DVec3;
+    let mut harness = app();
+    let door = {
+        let doc = harness.state_mut().document_mut();
+        let oak = doc.add_preset(sketchcraft_doc::library::LIBRARY.iter().find(|p| p.name == "Red Oak").unwrap());
+        // A 30" wide, 12" tall door standing up.
+        let face = doc.edit(|m| m.add_rectangle(DVec3::ZERO, DVec3::X * 30.0, DVec3::Y * 0.75, DVec3::Z)).unwrap();
+        let door = doc.push_pull(face, 12.0, true).unwrap().unwrap();
+        doc.paint(&[sketchcraft_doc::Entity::Instance(door)], Some(oak));
+        doc.selection_mut().extend([sketchcraft_doc::Entity::Instance(door)]);
+        door
+    };
+    harness.run();
+    type_text(&mut harness, "Z");
+    assert!(harness.query_by_label("30\" x 12\" x 3/4\"").is_some(), "size, longest side first");
+    assert!(harness.query_by_label("Red Oak, 3/4\" board").is_some());
+    assert!(harness.state().tools().overlay(harness.state().document()).grain.is_some(), "a grain arrow");
+    snapshot(&mut harness, "part_grain_along_length");
+    // Turn the grain to run up the 12" side.
+    harness.get(egui_kittest::kittest::by().role(egui::accesskit::Role::ComboBox).value("Along its length")).click();
+    harness.run();
+    harness.get_by_label("Along the 12\" side").click();
+    harness.run();
+    assert_eq!(harness.state().document().part_size(door), Some([12.0, 30.0, 0.75]));
+    assert!(harness.query_by_label("12\" x 30\" x 3/4\"").is_some());
+    snapshot(&mut harness, "part_grain_turned");
+}

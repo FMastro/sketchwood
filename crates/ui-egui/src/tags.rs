@@ -100,6 +100,10 @@ pub fn entity_info(ui: &mut egui::Ui, doc: &mut Document, tools: &mut Tools) {
         }
     }
     crate::materials::entity_info_material(ui, doc, tools);
+    // One group or component: its part details (size, stock, grain, cut).
+    if let (1, 1, Some(instance)) = (count, instances, single) {
+        crate::part::show(ui, doc, instance);
+    }
     if instances == 0 {
         ui.weak("Tags go on groups and components. Group this first (Ctrl+G).");
         return;

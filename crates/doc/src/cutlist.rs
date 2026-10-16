@@ -7,7 +7,6 @@
 
 use std::collections::BTreeMap;
 
-use glam::DVec3;
 
 use crate::{Container, MaterialId, MaterialKind, Scene};
 
@@ -152,18 +151,14 @@ fn collect(scene: &Scene, container: &Container, inherited: Option<MaterialId>, 
         let material = instance.material.or(inherited);
         let linear = linear * instance.transform.matrix3;
         let model = &definition.container.model;
-        if model.faces().next().is_some() {
-            let points: Vec<DVec3> = model.vertices().map(|(_, p)| p).collect();
-            let lo = points.iter().copied().reduce(DVec3::min).unwrap_or_default();
-            let hi = points.iter().copied().reduce(DVec3::max).unwrap_or_default();
-            // Each local axis stretched by the scale along it (rotation doesn't change sizes).
-            let mut size = [0, 1, 2].map(|i| (hi - lo)[i] * (linear * DVec3::AXES[i]).length());
-            size.sort_by(f64::total_cmp);
+        // A part: its own faces, measured along its grain (the longest side unless set).
+        if let Some(extents) = crate::part::extents(definition, linear) {
+            let [length, width, thickness] = crate::part::size(extents, &definition.part);
             found.push(Found {
                 name: definition.name.clone(),
                 // Unpainted parts can still have painted faces: use the most common one.
                 material: material.or_else(|| most_common_face_material(model)),
-                size,
+                size: [thickness, width, length],
             });
         }
         collect(scene, &definition.container, material, linear, found);
@@ -216,6 +211,7 @@ pub fn to_csv(list: &CutList) -> String {
 
 #[cfg(test)]
 mod tests {
+    use glam::DVec3;
     use super::*;
     use crate::{DefinitionKind, Document, Entity};
 

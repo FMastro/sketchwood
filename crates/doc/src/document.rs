@@ -176,6 +176,60 @@ impl Document {
         });
     }
 
+    /// A group's or component's woodworking properties (grain, cut).
+    pub fn part_info(&self, id: InstanceId) -> Option<crate::part::PartInfo> {
+        let definition = self.container().instance(id)?.definition;
+        self.state.scene.definition(definition).map(|d| d.part)
+    }
+
+    /// Change a group's or component's woodworking properties (shared by every copy of a
+    /// component), as one undo step.
+    pub fn edit_part(&mut self, id: InstanceId, change: impl FnOnce(&mut crate::part::PartInfo)) {
+        let Some(definition) = self.container().instance(id).map(|i| i.definition) else { return };
+        let Some(mut info) = self.part_info(id) else { return };
+        change(&mut info);
+        if self.part_info(id) == Some(info) {
+            return;
+        }
+        self.edit_scene(|scene, _| {
+            if let Some(def) = scene.definition_mut(definition) {
+                def.part = info;
+            }
+        });
+    }
+
+    /// The size of a group or component as a part (`[length, width, thickness]`, length along
+    /// the grain), or `None` for an assembly of other parts.
+    pub fn part_size(&self, id: InstanceId) -> Option<crate::part::PartSize> {
+        let instance = self.container().instance(id)?;
+        let linear = self.context_transform().matrix3 * instance.transform.matrix3;
+        self.state.scene.part_size(instance.definition, linear)
+    }
+
+    /// A line through the middle of a part along its grain, in the edited container's
+    /// coordinates (most of its length), for showing the grain direction. `None` for assemblies.
+    pub fn grain_line(&self, id: InstanceId) -> Option<[DVec3; 2]> {
+        let instance = *self.container().instance(id)?;
+        let def = self.state.scene.definition(instance.definition)?;
+        let extents = self.part_extents(id)?;
+        let (lo, hi) = def.container.model.bounds()?;
+        let axis = def.part.grain.map_or_else(
+            || (0..3).max_by(|&a, &b| extents[a].total_cmp(&extents[b])).unwrap_or(0),
+            crate::part::PartAxis::index,
+        );
+        let center = (lo + hi) * 0.5;
+        let half = DVec3::AXES[axis] * (hi - lo)[axis] * 0.4;
+        Some([center - half, center + half].map(|p| instance.transform.transform_point3(p)))
+    }
+
+    /// How long a part is along each of its own axes (red, green, blue), or `None` for an
+    /// assembly.
+    pub fn part_extents(&self, id: InstanceId) -> Option<DVec3> {
+        let instance = self.container().instance(id)?;
+        let linear = self.context_transform().matrix3 * instance.transform.matrix3;
+        crate::part::extents(self.state.scene.definition(instance.definition)?, linear)
+    }
+
     /// Change the drawing's stock sizes and kerf. Edits merge into one undo step.
     pub fn set_cut_settings(&mut self, settings: crate::cutplan::Settings) {
         if self.state.scene.cut_settings == settings {

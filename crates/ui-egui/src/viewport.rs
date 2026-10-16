@@ -376,6 +376,27 @@ fn draw_overlay(painter: &egui::Painter, rect: egui::Rect, camera: &OrbitCamera,
 
     draw_guides(painter, camera, &screen, overlay);
 
+    // The selected part's grain: a wood-brown arrow both ways along it.
+    if let Some([a, b]) = overlay.grain
+        && let (Some(a), Some(b)) = (screen(a), screen(b))
+        && a.distance(b) > 12.0
+    {
+        let color = egui::Color32::from_rgb(150, 90, 30);
+        let stroke = egui::Stroke::new(2.5, color);
+        painter.line_segment([a, b], stroke);
+        let dir = (b - a).normalized();
+        let side = egui::vec2(-dir.y, dir.x);
+        for (tip, back) in [(a, dir), (b, -dir)] {
+            painter.line_segment([tip, tip + (back + side * 0.6) * 9.0], stroke);
+            painter.line_segment([tip, tip + (back - side * 0.6) * 9.0], stroke);
+        }
+        let mid = a + (b - a) * 0.5;
+        let galley = painter.layout_no_wrap("Grain".into(), egui::FontId::proportional(12.0), color);
+        let label = egui::Rect::from_center_size(mid + side * 14.0, galley.size()).expand(3.0);
+        painter.rect_filled(label, 3.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 220));
+        painter.galley(label.min + egui::vec2(3.0, 3.0), galley, color);
+    }
+
     // The box around the group being edited, dashed as in SketchUp.
     let dashed = egui::Stroke::new(1.0, egui::Color32::from_gray(70));
     for [a, b] in &overlay.dashed {

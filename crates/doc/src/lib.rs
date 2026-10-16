@@ -10,6 +10,7 @@ mod document;
 pub mod export;
 pub mod file;
 pub mod library;
+pub mod part;
 mod lines;
 mod model;
 mod offset;

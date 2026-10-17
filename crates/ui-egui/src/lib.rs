@@ -7,6 +7,7 @@ mod icons;
 mod keys;
 mod materials;
 mod board;
+mod joinery;
 mod outliner;
 mod part;
 mod tags;

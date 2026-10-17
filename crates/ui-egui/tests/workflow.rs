@@ -1226,3 +1226,59 @@ fn board_panel_adds_a_custom_lumber_size() {
     assert_eq!(picked.stock, woodsketch_doc::board::Stock::Section { thickness: 1.25, width: 2.5 });
     assert!(harness.query_by_label("Add to Pine Lumber").is_none(), "the form closes");
 }
+
+#[test]
+fn joinery_panel_cuts_a_dado_and_makes_a_mortise_and_tenon() {
+    use egui_kittest::kittest::Queryable;
+    use glam::DVec3;
+    use woodsketch_doc::board::Board;
+    let mut harness = app();
+    let (side, shelf, stile, rail) = {
+        let doc = harness.state_mut().document_mut();
+        let oak = doc.add_preset(woodsketch_doc::library::LIBRARY.iter().find(|p| p.name == "Red Oak").unwrap());
+        let mut add = |origin: DVec3, length_dir: DVec3, width_dir: DVec3, [length, width, thickness]: [f64; 3]| {
+            doc.add_board(&Board { origin, length_dir, width_dir, length, width, thickness }, Some(oak)).unwrap()
+        };
+        // A side standing up and a shelf reaching 1/4" into it.
+        let side = add(DVec3::ZERO, DVec3::Z, DVec3::Y, [30.0, 11.25, 0.75]);
+        let shelf = add(DVec3::new(-0.25, 0.0, 12.0), DVec3::X, DVec3::Y, [20.0, 11.25, 0.75]);
+        // A stile and a rail butting into it, off to the side.
+        let stile = add(DVec3::new(40.0, 0.0, 0.0), DVec3::Z, DVec3::X, [30.0, 3.0, 1.5]);
+        let rail = add(DVec3::new(43.0, 0.0, 12.5), DVec3::X, -DVec3::Z, [20.0, 2.5, 1.5]);
+        (side, shelf, stile, rail)
+    };
+    let select = |harness: &mut Harness<'_, WoodSketchApp>, parts: [woodsketch_doc::InstanceId; 2]| {
+        let doc = harness.state_mut().document_mut();
+        doc.selection_mut().clear();
+        doc.selection_mut().extend(parts.map(woodsketch_doc::Entity::Instance));
+        harness.run();
+    };
+    select(&mut harness, [shelf, side]);
+    type_text(&mut harness, "Z");
+    assert!(harness.query_by_label("Joinery").is_some(), "the Joinery panel shows for two parts");
+    harness.get_by_label("Cut Group#2 into Group#1").click();
+    harness.run();
+    assert_eq!(harness.state().document().joints_of(side).len(), 1);
+    assert!(harness.query_by_label("Dado cut in Group#1.").is_some());
+    snapshot(&mut harness, "joinery_dado");
+
+    select(&mut harness, [rail, stile]);
+    harness.get_by_label("Tenon on Group#4, mortise in Group#3").click();
+    harness.run();
+    let doc = harness.state().document();
+    assert_eq!(doc.joints_of(stile).len(), 1);
+    assert!(doc.part_size(rail).unwrap()[0] > 20.0, "the rail is longer by its tenon");
+    // Entity Info lists a part's joints.
+    harness.state_mut().document_mut().selection_mut().clear();
+    harness.state_mut().document_mut().selection_mut().extend([woodsketch_doc::Entity::Instance(side)]);
+    harness.run();
+    assert!(harness.query_by_label_contains("Dado with Group#2").is_some());
+    // Pull the shelf and rail out to see the dado, tenon and mortise.
+    let doc = harness.state_mut().document_mut();
+    doc.transform_entities(&[woodsketch_doc::Entity::Instance(shelf)], &[glam::DAffine3::from_translation(DVec3::new(6.0, 0.0, 6.0))], false).unwrap();
+    doc.transform_entities(&[woodsketch_doc::Entity::Instance(rail)], &[glam::DAffine3::from_translation(DVec3::new(6.0, 0.0, 0.0))], false).unwrap();
+    doc.selection_mut().clear();
+    harness.run();
+    type_text(&mut harness, "Z");
+    snapshot(&mut harness, "joinery_apart");
+}

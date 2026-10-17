@@ -10,6 +10,7 @@ pub mod cutsheet;
 mod document;
 pub mod export;
 pub mod file;
+pub mod joinery;
 pub mod library;
 pub mod part;
 mod lines;

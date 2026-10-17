@@ -216,6 +216,9 @@ pub struct Scene {
     /// Stock sizes and kerf for the cutting diagrams (older files get the US defaults).
     #[serde(default)]
     pub cut_settings: crate::cutplan::Settings,
+    /// Joints made between parts, for listing them (older files have none).
+    #[serde(default)]
+    pub joints: Vec<crate::joinery::Joint>,
     /// Counters for default names, like SketchUp's "Group#1", "Component#1".
     next_group: u32,
     next_component: u32,

@@ -134,6 +134,11 @@ add it there; when you finish an item, remove it.
    rectangle at their thickness; Board panel in the tray picks the stock. Custom size in the panel adds a
    size to the material (`Document::add_stock`); typed `3,6 1/2` / `3x6 1/2x96` is a one-off. Push/Pull on a free face
    snaps to the drawing's standard thicknesses.
+23. Joinery (first version): `doc::joinery` (`Document::joint_fit` reads how two sibling parts sit:
+   overlapping or end-to-face; `cut_overlap` cuts one's overlap out of the other, classified dado,
+   groove, rabbet, notch or mortise; `half_lap`; `mortise_and_tenon` adds a tenon to the rail and
+   cuts the mortise). Each is a rectangle drawn on a face and pushed/pulled, one undo step, recorded
+   in `Scene::joints`. Joinery panel in the tray for two selected parts; Entity Info lists joints.
 
 ## Direction
 Specialized for woodworking: SketchUp-familiar modeling where parts know they're wood (species,

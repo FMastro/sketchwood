@@ -3,6 +3,33 @@
 Things we deliberately skipped or know are incomplete, to come back to. Newest first within
 each section. Remove items when they're done (mention them in the commit).
 
+## Next up (recommended order, 2026-10-17)
+1. **Downloadable beta with auto-update, on Windows, macOS and Linux.** Today the site says to
+   build from source, which few woodworkers will do.
+   - Installers from a GitHub Actions release workflow on a version tag: Windows (installer,
+     x64 and ARM64), macOS (universal app in a DMG), Linux (AppImage, plus .deb/.rpm). Publish
+     to GitHub Releases with SHA-256 checksums; a Download button on woodsketch.net that picks the
+     visitor's OS.
+   - Auto-update: on startup, a background check of the latest GitHub release; when newer, it
+     downloads quietly and offers "Update ready, restart to update" (never interrupting). Option to
+     turn it off. Velopack (Rust crate + `vpk`) does install and update on all three; its packer
+     needs the .NET SDK on the build machine only (users need nothing). ArtCraft's alternative:
+     MSI (WiX v5), DMG, AppImage/deb/rpm/Flatpak from a shared workflow
+     (storytold/craft-common-actions `release.yml`), with updates done by a separate Launcher app
+     that checks each app's GitHub releases. WiX is also a .NET tool, so neither avoids .NET on CI.
+   - Signing: Windows with Azure Artifact Signing (~$9.99/month; individuals in the US/Canada; a
+     paid Azure subscription; identity validation takes days; CI signs via OIDC, no stored key).
+     macOS with an Apple Developer ID ($99/year) plus notarization, or Gatekeeper blocks it.
+     Linux needs none (optionally GPG-signed checksums). Ship unsigned until the accounts are
+     ready (SmartScreen and Gatekeeper warn).
+   - `.woodsketch` file association on all three; Help > About shows the version.
+2. **Shakedown on a real project**: design something you'd build (a nightstand, a small cabinet)
+   start to finish and fix every place it fights you.
+3. **Templates** (below, item 7): carcass, drawer, face frame, shelf unit from dimensions. They're
+   the building blocks for agent recipes, so before agent-ready.
+4. **Agent-ready** (below, item 8), then **parametric hardware**, then **.skp import**: check
+   Trimble's SketchUp SDK terms allow a free open-source app before any work on it.
+
 ## Woodworking direction (in this order)
 SketchUp-familiar modeling, specialized for woodworking: parts know they're wood. Keep general
 modeling (rooms, jigs, odd shapes) working; the wood features add on and stay optional.

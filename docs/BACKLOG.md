@@ -19,9 +19,11 @@ modeling (rooms, jigs, odd shapes) working; the wood features add on and stay op
    a joint after it's made (joints are listed, not yet parametric); a fit allowance (mortise a hair
    bigger); through and haunched tenons; parts in different groups (both must be side by side
    now); parts that aren't square to each other.
-4. **Edge profiles**: router bits from parameters (roundover, chamfer, cove, ogee, bead) applied
-   to chosen edges, stored as an operation (change the bit later); a sweep along edges with
-   corners handled.
+4. **Edge profiles** (done: roundover, chamfer, cove, ogee, around a face with mitered corners or
+   along a length, from the Edge profile panel). Still to come: bead and other bits; profiling a
+   board that already has joints or other cuts (profile first for now); edges around a face and
+   along the length on one board; clicking edges in the model to pick them; changing a profile
+   later (it's listed, not yet parametric); curved and angled edges.
 5. **Build sheets**: per part, a dimensioned drawing and its operations measured from the
    reference face and edge, in a sensible order (mill, joinery, profiles, sand). Describe what,
    not how: no machine setups or orientations we can't be sure of.

@@ -147,6 +147,11 @@ add it there; when you finish an item, remove it.
    circles drawn on faces and pushed/pulled on a copy of the scene, one undo step, recorded in
    `Scene::joints`. Joinery panel in the tray for two selected parts (joint picker, sizes, how to
    place the parts); Entity Info lists joints.
+24. Edge profiles: `doc::profile` (`Profile` roundover / chamfer / cove / ogee as a corner curve;
+   `Edges::AroundFace` (stacked inset rings, mitered corners) or `Edges::Along` (a profiled
+   cross-section extruded); `Document::profile_edges` rebuilds a plain board's geometry, one undo
+   step, recorded in `Scene::profiles`). Edge profile panel in the tray for one selected part, edges
+   named by where they face (Top, Front...).
 
 ## Direction
 Specialized for woodworking: SketchUp-familiar modeling where parts know they're wood (species,

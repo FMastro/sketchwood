@@ -13,6 +13,7 @@ pub mod file;
 pub mod joinery;
 pub mod library;
 pub mod part;
+pub mod profile;
 mod lines;
 mod model;
 mod offset;

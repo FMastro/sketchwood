@@ -11,6 +11,7 @@ mod board;
 mod joinery;
 mod outliner;
 mod part;
+mod profile;
 mod tags;
 mod viewport;
 

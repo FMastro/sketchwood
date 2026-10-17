@@ -333,6 +333,9 @@ impl WoodSketchApp {
                 if let Some(pair) = crate::joinery::selected_pair(&self.doc) {
                     tray_section(ui, "Joinery", |ui| crate::joinery::show(ui, &mut self.doc, pair));
                 }
+                if let [woodsketch_doc::Entity::Instance(part)] = self.doc.selection().iter().collect::<Vec<_>>()[..] {
+                    tray_section(ui, "Edge profile", |ui| crate::profile::show(ui, &mut self.doc, part));
+                }
                 tray_section(ui, "Materials", |ui| self.materials.show(ui, &mut self.doc, &mut self.tools));
                 tray_section(ui, "Tags", |ui| self.tags.show(ui, &mut self.doc));
                 tray_section(ui, "Outliner", |ui| outliner::show(ui, &mut self.doc, &mut self.tools));

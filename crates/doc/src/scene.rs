@@ -219,6 +219,9 @@ pub struct Scene {
     /// Joints made between parts, for listing them (older files have none).
     #[serde(default)]
     pub joints: Vec<crate::joinery::Joint>,
+    /// Edge profiles made on parts, for listing them.
+    #[serde(default)]
+    pub profiles: Vec<crate::profile::ProfileRecord>,
     /// Counters for default names, like SketchUp's "Group#1", "Component#1".
     next_group: u32,
     next_component: u32,

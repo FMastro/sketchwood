@@ -371,8 +371,8 @@ fn tag_a_board_and_hide_it_from_the_tags_panel() {
     type_text(&mut harness, " ");
     harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
     harness.run();
-    // Entity Info has a material dropdown, then the tag dropdown.
-    harness.get_all_by_role(egui::accesskit::Role::ComboBox).last().expect("tag dropdown").click();
+    // The tag dropdown, showing "Untagged".
+    harness.get(egui_kittest::kittest::by().role(egui::accesskit::Role::ComboBox).value("Untagged")).click();
     harness.run();
     snapshot(&mut harness, "tag_dropdown");
     harness.run();
@@ -776,7 +776,8 @@ fn rename_a_board_in_entity_info_for_the_cut_list() {
     type_text(&mut harness, " ");
     harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
     harness.run();
-    harness.get_by_role(egui::accesskit::Role::TextInput).click();
+    // The Name field: the first text field (the Edge profile panel below has its own).
+    harness.get_all_by_role(egui::accesskit::Role::TextInput).next().expect("name field").click();
     harness.run();
     // Replace the default "Group#1" while the field has focus; shortcuts don't fire.
     harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
@@ -1391,4 +1392,44 @@ fn outliner_shows_the_whole_tree_and_picks_nested_parts() {
     let picked = doc.selection().iter().next().unwrap();
     let woodsketch_doc::Entity::Instance(picked) = picked else { panic!("a part") };
     assert_eq!(doc.instance_name(picked), Some("Back leg"));
+}
+
+#[test]
+fn edge_profile_panel_rounds_over_a_tabletop_and_chamfers_a_leg() {
+    use egui_kittest::kittest::Queryable;
+    use glam::DVec3;
+    use woodsketch_doc::board::Board;
+    let mut harness = app();
+    let (top, leg) = {
+        let doc = harness.state_mut().document_mut();
+        let cherry = doc.add_preset(woodsketch_doc::library::LIBRARY.iter().find(|p| p.name == "Cherry").unwrap());
+        let top = doc.add_board(&Board { origin: DVec3::new(0.0, 0.0, 28.0), length_dir: DVec3::X, width_dir: DVec3::Y, length: 24.0, width: 16.0, thickness: 0.75 }, Some(cherry)).unwrap();
+        let leg = doc.add_board(&Board { origin: DVec3::new(30.0, 0.0, 0.0), length_dir: DVec3::Z, width_dir: DVec3::X, length: 28.0, width: 1.5, thickness: 1.5 }, Some(cherry)).unwrap();
+        doc.selection_mut().extend([woodsketch_doc::Entity::Instance(top)]);
+        (top, leg)
+    };
+    harness.run();
+    assert!(harness.query_by_label("Edge profile").is_some());
+    assert!(harness.query(egui_kittest::kittest::by().role(egui::accesskit::Role::ComboBox).value("Around the top")).is_some(), "a tabletop starts with its top edges");
+    harness.get_by_label("Rout the roundover").click();
+    harness.run();
+    assert_eq!(harness.state().document().profiles_of(top).len(), 1);
+    assert!(harness.query_by_label_contains("Roundover, 4 edges").is_some(), "listed in Entity Info");
+
+    let doc = harness.state_mut().document_mut();
+    doc.selection_mut().clear();
+    doc.selection_mut().extend([woodsketch_doc::Entity::Instance(leg)]);
+    harness.run();
+    assert!(harness.query(egui_kittest::kittest::by().role(egui::accesskit::Role::ComboBox).value("Around the top")).is_none(), "a leg starts along its length");
+    harness.get(egui_kittest::kittest::by().role(egui::accesskit::Role::ComboBox).value("Roundover")).click();
+    harness.run();
+    harness.get_by_label("Chamfer").click();
+    harness.run();
+    harness.get_by_label("Rout the chamfer").click();
+    harness.run();
+    let doc = harness.state().document();
+    assert_eq!(doc.profiles_of(leg)[0].describe(), "1/4\" Chamfer, 4 edges", "a standing leg starts with its four long corners");
+    harness.state_mut().document_mut().selection_mut().clear();
+    type_text(&mut harness, "Z");
+    snapshot(&mut harness, "edge_profiles");
 }

@@ -14,7 +14,7 @@
 //! length.
 
 use glam::{DVec3, Vec2};
-use woodsketch_doc::board::{Board, Stock, TypedBoard, parse_board, stock_options};
+use woodsketch_doc::board::{Board, Stock, TypedBoard, default_stock, parse_board, stock_options};
 use woodsketch_doc::units::{format_length, parse_length, parse_lengths};
 use woodsketch_doc::{Document, EPS, MaterialId};
 
@@ -100,7 +100,7 @@ impl BoardTool {
             return;
         }
         self.picked = doc.scene().materials().find_map(|(id, m)| {
-            let (name, stock) = stock_options(m).into_iter().next()?;
+            let (name, stock) = default_stock(m)?;
             Some(Picked { material: id, stock, name })
         });
     }

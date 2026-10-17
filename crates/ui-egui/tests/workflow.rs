@@ -1156,14 +1156,11 @@ fn board_tool_draws_a_stud_and_a_plywood_shelf_from_stock() {
     assert_eq!(doc.part_size(stud), Some([96.0, 3.5, 1.5]));
 
     // Plywood from the library, at 3/4", drawn as a rectangle.
-    harness.get_by_label_contains("Add wood from the library").click();
+    harness.get(egui_kittest::kittest::by().role(egui::accesskit::Role::ComboBox).value("Pine Lumber")).click();
     harness.run();
     harness.get_by_label("Baltic Birch Plywood").click();
     harness.run();
-    harness.get(egui_kittest::kittest::by().role(egui::accesskit::Role::ComboBox).value("1/8\" sheet")).click();
-    harness.run();
-    harness.get_by_label("3/4\" sheet").click();
-    harness.run();
+    assert_eq!(harness.state().tools().board().picked.as_ref().unwrap().name, "3/4\" sheet", "sheets start at 3/4\"");
     click(&mut harness, pos2(500.0, 550.0));
     harness.hover_at(pos2(420.0, 600.0));
     harness.run();
@@ -1179,4 +1176,25 @@ fn board_tool_draws_a_stud_and_a_plywood_shelf_from_stock() {
     assert_eq!((part.length, part.width, part.thickness), (30.0, 11.25, 0.75));
     type_text(&mut harness, "Z");
     snapshot(&mut harness, "board_tool");
+}
+
+#[test]
+fn board_panel_switches_material() {
+    use egui_kittest::kittest::Queryable;
+    let mut harness = app();
+    type_text(&mut harness, "w");
+    harness.get(egui_kittest::kittest::by().role(egui::accesskit::Role::ComboBox).value("Pick a material")).click();
+    harness.run();
+    harness.get_by_label("Pine Lumber").click();
+    harness.run();
+    harness.get(egui_kittest::kittest::by().role(egui::accesskit::Role::ComboBox).value("Pine Lumber")).click();
+    harness.run();
+    snapshot(&mut harness, "board_material_open");
+    let walnut = harness.query_by_label("Walnut");
+    assert!(walnut.is_some(), "other woods are offered");
+    walnut.unwrap().click();
+    harness.run();
+    let picked = harness.state().tools().board().picked.clone().unwrap();
+    let name = harness.state().document().scene().material(picked.material).unwrap().name.clone();
+    assert_eq!(name, "Walnut");
 }

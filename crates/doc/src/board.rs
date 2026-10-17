@@ -45,6 +45,17 @@ pub fn stock_options(material: &Material) -> Vec<(String, Stock)> {
     }
 }
 
+/// The stock to start with for a material: a 2x4 for lumber, 3/4" for sheets and solid wood, else
+/// its first size.
+pub fn default_stock(material: &Material) -> Option<(String, Stock)> {
+    let options = stock_options(material);
+    let common = |s: &Stock| match *s {
+        Stock::Section { thickness, width } => (thickness - 1.5).abs() < 1e-9 && (width - 3.5).abs() < 1e-9,
+        Stock::Thickness(t) => (t - 0.75).abs() < 1e-9,
+    };
+    options.iter().find(|(_, s)| common(s)).or(options.first()).cloned()
+}
+
 /// A board typed into the Measurements box: `2x4x96` or `2x4x8'` (a lumber section and a
 /// length), or `3/4x5.5x30` (thickness x width x length).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -166,6 +177,8 @@ mod tests {
         assert!(options.iter().any(|(name, s)| name == "2x4" && *s == Stock::Section { thickness: 1.5, width: 3.5 }));
         let birch = LIBRARY.iter().find(|p| p.name.starts_with("Baltic")).unwrap().material();
         assert!(stock_options(&birch).iter().any(|(name, s)| name == "3/4\" sheet" && *s == Stock::Thickness(0.75)));
+        assert_eq!(default_stock(&pine).unwrap().0, "2x4");
+        assert_eq!(default_stock(&birch).unwrap().0, "3/4\" sheet");
     }
 
     #[test]

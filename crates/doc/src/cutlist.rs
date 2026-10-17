@@ -14,7 +14,7 @@ use crate::{Container, MaterialId, MaterialKind, Scene};
 const SIZE_PRECISION: f64 = 1.0 / 64.0;
 
 /// One row of the cut list: identical parts.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct Part {
     /// "A", "B", ... in list order.
     pub label: String,
@@ -24,6 +24,8 @@ pub struct Part {
     pub length: f64,
     pub width: f64,
     pub thickness: f64,
+    /// Solid wood: whether it's glued up from narrower boards ([`crate::cutplan::glue_up`]).
+    pub glue_up: crate::part::GlueUp,
 }
 
 /// The parts made of one material.
@@ -76,12 +78,14 @@ impl CutList {
 
 /// Identical parts while grouping: their names, how many, and their exact size.
 type Group = (Vec<String>, usize, [f64; 3]);
+type GroupKey = (Option<MaterialId>, [i64; 3], crate::part::GlueUp);
 
 /// One part found in the drawing, before grouping.
 struct Found {
     name: String,
     material: Option<MaterialId>,
     size: [f64; 3],
+    glue_up: crate::part::GlueUp,
 }
 
 pub fn cut_list(scene: &Scene) -> CutList {
@@ -91,10 +95,10 @@ pub fn cut_list(scene: &Scene) -> CutList {
     // Group identical parts: same material, same rounded size.
     let key = |v: f64| (v / SIZE_PRECISION).round() as i64;
     // (material, rounded size) -> (names, count, exact size)
-    let mut groups: BTreeMap<(Option<MaterialId>, [i64; 3]), Group> = BTreeMap::new();
+    let mut groups: BTreeMap<GroupKey, Group> = BTreeMap::new();
     for part in found {
         let size_key = part.size.map(key);
-        let entry = groups.entry((part.material, size_key)).or_insert_with(|| (Vec::new(), 0, part.size));
+        let entry = groups.entry((part.material, size_key, part.glue_up)).or_insert_with(|| (Vec::new(), 0, part.size));
         if !entry.0.contains(&part.name) {
             entry.0.push(part.name);
         }
@@ -102,15 +106,8 @@ pub fn cut_list(scene: &Scene) -> CutList {
     }
 
     let mut by_material: BTreeMap<Option<MaterialId>, Vec<Part>> = BTreeMap::new();
-    for ((material, _), (names, count, [thickness, width, length])) in groups {
-        by_material.entry(material).or_default().push(Part {
-            label: String::new(),
-            names,
-            count,
-            length,
-            width,
-            thickness,
-        });
+    for ((material, _, glue_up), (names, count, [thickness, width, length])) in groups {
+        by_material.entry(material).or_default().push(Part { label: String::new(), names, count, length, width, thickness, glue_up });
     }
 
     let mut materials: Vec<MaterialParts> = by_material
@@ -159,6 +156,7 @@ fn collect(scene: &Scene, container: &Container, inherited: Option<MaterialId>, 
                 // Unpainted parts can still have painted faces: use the most common one.
                 material: material.or_else(|| most_common_face_material(model)),
                 size: [thickness, width, length],
+                glue_up: definition.part.glue_up,
             });
         }
         collect(scene, &definition.container, material, linear, found);

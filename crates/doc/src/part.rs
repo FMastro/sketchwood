@@ -62,6 +62,16 @@ impl Cut {
     }
 }
 
+/// Whether a solid-wood part is glued up from narrower boards.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum GlueUp {
+    /// Only when it's wider than any board the material comes in.
+    #[default]
+    Auto,
+    /// From this many boards (1: one board, never glued up).
+    Boards(u8),
+}
+
 /// A part's woodworking properties.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct PartInfo {
@@ -71,6 +81,8 @@ pub struct PartInfo {
     pub grain: Option<PartAxis>,
     #[serde(default)]
     pub cut: Cut,
+    #[serde(default)]
+    pub glue_up: GlueUp,
 }
 
 /// A part's size: `[length, width, thickness]`, length along the grain.

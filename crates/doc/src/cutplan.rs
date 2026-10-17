@@ -249,6 +249,39 @@ struct Piece {
 
 /// Plan the cuts for one material, or `None` if it isn't cut from stock (hardware, other, no
 /// material). Parts are grouped by the stock they match, and each group is planned on it.
+/// Extra width per board of a glue-up, for jointing its edges.
+pub const GLUE_JOINT: f64 = 0.25;
+/// Extra length for a glue-up, trimmed square after.
+pub const GLUE_TRIM: f64 = 1.0;
+/// Auto glue-ups aim for boards no wider than this (a flatter panel).
+const GLUE_BOARD: f64 = 7.25;
+
+/// How many boards a solid-wood part is glued up from (`None`: one board). Auto: only when it's
+/// wider than the widest board in `standard`, from boards about 7 1/4" wide or narrower.
+pub fn glue_up(part: &Part, standard: &Standard) -> Option<u32> {
+    match part.glue_up {
+        crate::part::GlueUp::Boards(n) if n >= 2 => Some(u32::from(n)),
+        crate::part::GlueUp::Boards(_) => None,
+        crate::part::GlueUp::Auto => {
+            let widest = standard.widths.iter().copied().reduce(f64::max)?;
+            if part.width <= widest + 1e-9 {
+                return None;
+            }
+            let mut n = ((part.width / GLUE_BOARD).ceil() as u32).max(2);
+            while part.width / f64::from(n) + GLUE_JOINT > widest + 1e-9 {
+                n += 1;
+            }
+            Some(n)
+        }
+    }
+}
+
+/// The size of each board of a part glued up from `boards`: `(length, width)`, with room to
+/// joint the edges and trim the ends.
+pub fn glue_up_board(part: &Part, boards: u32) -> (f64, f64) {
+    (part.length + GLUE_TRIM, part.width / f64::from(boards) + GLUE_JOINT)
+}
+
 pub fn plan(material: &MaterialParts, kerf: f64) -> Option<Plan> {
     let kind = material.kind?;
     if matches!(kind, MaterialKind::Hardware | MaterialKind::Other) {
@@ -261,10 +294,21 @@ pub fn plan(material: &MaterialParts, kerf: f64) -> Option<Plan> {
     for part in &material.parts {
         match match_stock(part, kind, standard) {
             Ok(stock) => {
-                let pieces = std::iter::repeat_n(Piece { label: part.label.clone(), length: part.length, width: part.width }, part.count);
+                // A solid-wood glue-up: its boards, B-1, B-2..., for each copy.
+                let boards = if kind == MaterialKind::SolidWood { glue_up(part, standard) } else { None };
+                let pieces: Vec<Piece> = match boards {
+                    Some(n) => {
+                        let (length, width) = glue_up_board(part, n);
+                        (0..part.count)
+                            .flat_map(|_| 1..=n)
+                            .map(|i| Piece { label: format!("{}-{i}", part.label), length, width })
+                            .collect()
+                    }
+                    None => std::iter::repeat_n(Piece { label: part.label.clone(), length: part.length, width: part.width }, part.count).collect(),
+                };
                 match groups.iter_mut().find(|(s, _)| *s == stock) {
                     Some((_, list)) => list.extend(pieces),
-                    None => groups.push((stock, pieces.collect())),
+                    None => groups.push((stock, pieces)),
                 }
             }
             Err(reason) => plan.unplaced.push((part.label.clone(), reason)),
@@ -610,9 +654,32 @@ mod tests {
                     length,
                     width,
                     thickness,
+                    glue_up: Default::default(),
                 })
                 .collect(),
         }
+    }
+
+    #[test]
+    fn a_wide_top_is_glued_up_from_narrower_boards() {
+        // A 36" x 20" cherry top: wider than the widest board (11 1/4").
+        let top = material(MaterialKind::SolidWood, true, &[("B", 1, 36.0, 20.0, 0.75)]);
+        let result = plan(&top, 0.125).unwrap();
+        assert!(result.unplaced.is_empty(), "{:?}", result.unplaced);
+        let mut labels: Vec<&str> = result.stocks.iter().flat_map(|s| &s.placements).map(|p| p.label.as_str()).collect();
+        labels.sort();
+        assert_eq!(labels, ["B-1", "B-2", "B-3"], "three boards, about 7\" wide");
+        let board = &result.stocks[0].placements[0];
+        assert!((board.length - 37.0).abs() < 1e-9 && (board.width - (20.0 / 3.0 + 0.25)).abs() < 1e-9);
+
+        // One board only: it can't be cut.
+        let mut one = top.clone();
+        one.parts[0].glue_up = crate::part::GlueUp::Boards(1);
+        assert_eq!(plan(&one, 0.125).unwrap().unplaced.len(), 1);
+        // Asked for two boards on a part that fits one.
+        let mut two = material(MaterialKind::SolidWood, true, &[("C", 1, 24.0, 10.0, 0.75)]);
+        two.parts[0].glue_up = crate::part::GlueUp::Boards(2);
+        assert_eq!(plan(&two, 0.125).unwrap().stocks.iter().map(|s| s.placements.len()).sum::<usize>(), 2);
     }
 
     /// Whether parts (x, y, length, width, each including its kerf) can be separated by
@@ -855,7 +922,9 @@ mod tests {
         let plan = plan(&m, Settings::default().kerf).unwrap();
         assert!(plan.stocks.is_empty());
         assert_eq!(plan.unplaced, vec![("A".to_owned(), "longer than the longest stock".to_owned())]);
-        let wide = material(MaterialKind::SolidWood, true, &[("B", 1, 30.0, 18.0, 0.75)]);
+        // Too wide for one board, and set to one board: it says to glue up a panel.
+        let mut wide = material(MaterialKind::SolidWood, true, &[("B", 1, 30.0, 18.0, 0.75)]);
+        wide.parts[0].glue_up = crate::part::GlueUp::Boards(1);
         let plan = super::plan(&wide, Settings::default().kerf).unwrap();
         assert!(plan.unplaced[0].1.contains("glue up"));
     }

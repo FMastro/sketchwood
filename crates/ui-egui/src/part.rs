@@ -5,8 +5,8 @@
 use eframe::egui;
 use egui_phosphor::regular as ph;
 use woodsketch_doc::cutlist::Part;
-use woodsketch_doc::cutplan::match_stock;
-use woodsketch_doc::part::{Cut, PartAxis};
+use woodsketch_doc::cutplan::{glue_up, match_stock};
+use woodsketch_doc::part::{Cut, GlueUp, PartAxis};
 use woodsketch_doc::units::format_length;
 use woodsketch_doc::{Document, Entity, InstanceId, MaterialKind};
 
@@ -30,11 +30,16 @@ pub fn show(ui: &mut egui::Ui, doc: &mut Document, instance: InstanceId) {
                 ui.colored_label(ui.visuals().warn_fg_color, "Needs a material");
             }
             Some(m) => {
-                let part = Part { label: String::new(), names: Vec::new(), count: 1, length, width, thickness };
+                let part = Part { count: 1, length, width, thickness, glue_up: info.glue_up, ..Part::default() };
                 match match_stock(&part, m.kind, &m.standard) {
-                    Ok(stock) => {
-                        ui.label(format!("{}, {}", m.name, stock.name));
-                    }
+                    Ok(stock) => match glue_up(&part, &m.standard).filter(|_| m.kind == MaterialKind::SolidWood) {
+                        Some(n) => {
+                            ui.label(format!("{}, {}, glued up from {n}", m.name, stock.name));
+                        }
+                        None => {
+                            ui.label(format!("{}, {}", m.name, stock.name));
+                        }
+                    },
                     Err(reason) if !matches!(m.kind, MaterialKind::Hardware | MaterialKind::Other) => {
                         ui.colored_label(ui.visuals().warn_fg_color, format!("{} {}", ph::WARNING, m.name)).on_hover_text(reason);
                     }
@@ -84,6 +89,31 @@ pub fn show(ui: &mut egui::Ui, doc: &mut Document, instance: InstanceId) {
             });
             if let Some(cut) = picked {
                 doc.edit_part(instance, |p| p.cut = cut);
+            }
+            ui.end_row();
+        }
+
+        // Solid wood: glued up from narrower boards (on its own when it's too wide for one).
+        if let Some(m) = material.as_ref().filter(|m| m.kind == MaterialKind::SolidWood) {
+            ui.label("Glue up");
+            let part = Part { count: 1, length, width, thickness, glue_up: info.glue_up, ..Part::default() };
+            let auto = Part { glue_up: GlueUp::Auto, ..part.clone() };
+            let boards = |n: Option<u32>| n.map_or_else(|| "one board".to_owned(), |n| format!("{n} boards"));
+            let label = |g: GlueUp| match g {
+                GlueUp::Auto => format!("Auto ({})", boards(glue_up(&auto, &m.standard))),
+                GlueUp::Boards(0 | 1) => "One board".to_owned(),
+                GlueUp::Boards(n) => format!("From {n} boards"),
+            };
+            let mut picked = None;
+            egui::ComboBox::from_id_salt(("part_glue", instance)).selected_text(label(info.glue_up)).show_ui(ui, |ui| {
+                for g in [GlueUp::Auto, GlueUp::Boards(1), GlueUp::Boards(2), GlueUp::Boards(3), GlueUp::Boards(4), GlueUp::Boards(5)] {
+                    if ui.selectable_label(info.glue_up == g, label(g)).clicked() {
+                        picked = Some(g);
+                    }
+                }
+            });
+            if let Some(g) = picked {
+                doc.edit_part(instance, |p| p.glue_up = g);
             }
             ui.end_row();
         }

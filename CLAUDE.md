@@ -147,6 +147,8 @@ add it there; when you finish an item, remove it.
    circles drawn on faces and pushed/pulled on a copy of the scene, one undo step, recorded in
    `Scene::joints`. Joinery panel in the tray for two selected parts (joint picker, sizes, how to
    place the parts); Entity Info lists joints.
+   Copies of a shared component: a cut, tenon or hole the design already has is recognized
+   (`already_done`, `repeat`), so one leg component turned to each corner gets two mortises.
 24. Edge profiles: `doc::profile` (`Profile` roundover / chamfer / cove / ogee as a corner curve;
    `Edges::AroundFace` (stacked inset rings, mitered corners) or `Edges::Along` (a profiled
    cross-section extruded); `Document::profile_edges` rebuilds a plain board's geometry, one undo
@@ -156,6 +158,9 @@ add it there; when you finish an item, remove it.
    letter, count, finished size, stock, grain; face / edge / end views as SVG to scale with overall
    dimensions; steps from `Scene::joints` and `Scene::profiles` in shop order). Cut List window >
    Print build sheets.
+   Wide solid-wood parts glue up from narrower boards (`PartInfo::glue_up`, `cutplan::glue_up`: auto
+   when wider than the widest board, aiming for boards 7 1/4" or narrower; strips B-1, B-2... in the
+   diagrams, a glue-up step on the build sheet; Entity Info picks Auto or 1-5 boards).
 26. Wood movement: `doc::movement` (`species` coefficients from the USDA Wood Handbook on
    `Material::movement`, filled from the library and by name for older drawings; `check` gives each
    solid-wood part's movement across its grain for `Scene::moisture_swing`, default 4%, and

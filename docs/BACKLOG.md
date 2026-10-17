@@ -19,6 +19,9 @@ modeling (rooms, jigs, odd shapes) working; the wood features add on and stay op
    a joint after it's made (joints are listed, not yet parametric); a fit allowance (mortise a hair
    bigger); through and haunched tenons; parts in different groups (both must be side by side
    now); parts that aren't square to each other.
+   Copies of a shared component: a joint already made in the design is recorded again rather
+   than cut twice; but the Joinery panel offers "Cut where they overlap" for those copies (their
+   tenons already overlap the other part), when it could say the joint is already there.
 4. **Edge profiles** (done: roundover, chamfer, cove, ogee, around a face with mitered corners or
    along a length, from the Edge profile panel). Still to come: bead and other bits; profiling a
    board that already has joints or other cuts (profile first for now); edges around a face and
@@ -116,6 +119,9 @@ modeling (rooms, jigs, odd shapes) working; the wood features add on and stay op
 ## Cut list
 - One sheet size per material (OpenCutList keeps a list of sheet sizes to choose from), and
   no offcuts inventory. Defaults are US sizes.
+- Glue-ups: strips are equal widths (no mixing a wide and a narrow board), with a fixed 1/4"
+  jointing allowance and 1" trim; edge-glued panels only (no face-glued thick parts like a
+  laminated leg); the build sheet doesn't draw the boards.
 - No edge banding, no veneer, and no hardware counts beyond listing.
 - Packing is heuristic (several orders and rules, best kept), not provably optimal; no
   offcut reuse across materials, no "use my leftover pieces first".

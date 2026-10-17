@@ -283,9 +283,19 @@ fn parts_tab(ui: &mut egui::Ui, list: &CutList, doc: &Document, edit: &mut Optio
                 ui.label(format_length(part.thickness));
                 // The standard stock it's cut from, or why there's none (flagged).
                 match material.kind.map(|kind| match_stock(part, kind, &material.standard)) {
-                    Some(Ok(stock)) => {
-                        ui.label(stock.name);
-                    }
+                    Some(Ok(stock)) => match (material.kind, cutplan::glue_up(part, &material.standard)) {
+                        (Some(MaterialKind::SolidWood), Some(boards)) => {
+                            let (length, width) = cutplan::glue_up_board(part, boards);
+                            ui.label(format!("{}, glued up from {boards}", stock.name)).on_hover_text(format!(
+                                "{boards} boards about {} x {}, edges jointed and glued, then cut to size",
+                                format_length(width),
+                                format_length(length)
+                            ));
+                        }
+                        _ => {
+                            ui.label(stock.name);
+                        }
+                    },
                     Some(Err(reason)) if material.kind.is_some_and(|k| !matches!(k, MaterialKind::Hardware | MaterialKind::Other)) => {
                         ui.colored_label(ui.visuals().warn_fg_color, format!("{} none", ph::WARNING)).on_hover_text(reason);
                     }

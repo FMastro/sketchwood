@@ -313,13 +313,15 @@ impl Document {
     pub fn let_in(&mut self, part: InstanceId, into: InstanceId, depth: f64) -> Result<JointKind, JoineryError> {
         self.joint_edit(|scene, path| {
             let p = Parts { scene, path };
-            let butt = p.butt(part, into)?.ok_or(JoineryError::NotTouching)?;
+            let Some(butt) = p.butt(part, into)? else {
+                return repeat(scene, path, part, into, |k| !matches!(k, JointKind::MortiseAndTenon | JointKind::Dowels | JointKind::BoxJoint | JointKind::HalfLap));
+            };
             let o = p.part_box(into, into)?;
             if depth <= EPS || depth > o.1[butt.k] - o.0[butt.k] + TOUCH {
                 return Err(JoineryError::Size("The depth must be more than zero and no more than the other part's thickness."));
             }
             let region = extrude(butt, depth);
-            grow_into(scene, path, part, into, region)?;
+            grow_into(scene, path, part, into, butt, region)?;
             let (kind, depth) = cut_box_in(scene, path, into, region)?;
             record(scene, path, kind, part, into, format!("{} deep", format_length(depth)))?;
             Ok(kind)
@@ -356,7 +358,9 @@ impl Document {
         }
         self.joint_edit(|scene, path| {
             let p = Parts { scene, path };
-            let butt = p.butt(rail, stile)?.ok_or(JoineryError::NotTouching)?;
+            let Some(butt) = p.butt(rail, stile)? else {
+                return repeat(scene, path, rail, stile, |k| k == JointKind::MortiseAndTenon).map(|_| ());
+            };
             let o = p.part_box(stile, stile)?;
             if tenon.length > o.1[butt.k] - o.0[butt.k] + TOUCH {
                 return Err(JoineryError::Size("The tenon is longer than the other part is deep."));
@@ -372,7 +376,7 @@ impl Document {
             region.1[thin] = mid + tenon.thickness / 2.0;
             region.0[wide] += tenon.shoulder;
             region.1[wide] -= tenon.shoulder;
-            grow_into(scene, path, rail, stile, region)?;
+            grow_into(scene, path, rail, stile, butt, region)?;
             cut_box_in(scene, path, stile, region)?;
             let detail = format!(
                 "{} long, {} x {} tenon",
@@ -392,7 +396,9 @@ impl Document {
         }
         self.joint_edit(|scene, path| {
             let p = Parts { scene, path };
-            let butt = p.butt(part, into)?.ok_or(JoineryError::NotTouching)?;
+            let Some(butt) = p.butt(part, into)? else {
+                return repeat(scene, path, part, into, |k| k == JointKind::Dowels).map(|_| ());
+            };
             let (thin, wide) = across(butt);
             let size = butt.contact.1 - butt.contact.0;
             let o = p.part_box(into, into)?;
@@ -442,7 +448,7 @@ impl Document {
                 let p = Parts { scene, path };
                 let butt = p.butt(rail, other)?.ok_or(JoineryError::NotCorner)?;
                 let o = p.part_box(other, other)?;
-                grow_into(scene, path, rail, other, extrude(butt, o.1[butt.k] - o.0[butt.k]))?;
+                grow_into(scene, path, rail, other, butt, extrude(butt, o.1[butt.k] - o.0[butt.k]))?;
             }
             let p = Parts { scene, path };
             let (ab, bb) = (p.part_box(a, b)?, p.part_box(b, b)?);
@@ -497,6 +503,17 @@ impl Document {
         self.edit_scene(|scene, _| *scene = trial);
         Ok(result)
     }
+}
+
+/// The parts don't touch, but these two designs already have this joint: another copy of a shared
+/// component made it (the back apron, a copy of the front, already has its tenons). Record it
+/// again, changing nothing; otherwise they don't touch.
+fn repeat(scene: &mut Scene, path: &[InstanceId], part: InstanceId, into: InstanceId, kind: impl Fn(JointKind) -> bool) -> Result<JointKind, JoineryError> {
+    let p = Parts { scene, path };
+    let (cut, into_def) = (p.definition(part)?, p.definition(into)?);
+    let earlier = scene.joints.iter().find(|j| j.cut == cut && j.into == into_def && kind(j.kind)).cloned().ok_or(JoineryError::NotTouching)?;
+    scene.joints.push(earlier.clone());
+    Ok(earlier.kind)
 }
 
 /// Note the joint on the drawing.
@@ -565,23 +582,15 @@ fn cut_box_in(scene: &mut Scene, path: &[InstanceId], instance: InstanceId, regi
 
 /// Grow `part` by `region` (in `frame`'s coordinates), which sits against its end: a let-in
 /// shelf's extra length, a tenon.
-fn grow_into(scene: &mut Scene, path: &[InstanceId], part: InstanceId, frame: InstanceId, region: Box3) -> Result<(), JoineryError> {
-    let in_part = transform_box(&Parts { scene, path }.relative(frame, part)?, region);
+fn grow_into(scene: &mut Scene, path: &[InstanceId], part: InstanceId, frame: InstanceId, butt: Butt, region: Box3) -> Result<(), JoineryError> {
+    let to_part = Parts { scene, path }.relative(frame, part)?;
+    let in_part = transform_box(&to_part, region);
     let (model, from_part) = model_mut(scene, path, part)?;
     let in_model = transform_box(&from_part, in_part);
-    let pb = model.bounds().ok_or(JoineryError::NoSurface)?;
-    let (axis, outward) = (0..3)
-        .find_map(|k| {
-            if in_model.0[k] >= pb.1[k] - TOUCH {
-                Some((k, 1.0))
-            } else if in_model.1[k] <= pb.0[k] + TOUCH {
-                Some((k, -1.0))
-            } else {
-                None
-            }
-        })
-        .ok_or(JoineryError::NoSurface)?;
-    add_box(model, in_model, axis, outward)
+    // It grows the way its end faces: toward the other part.
+    let toward = from_part.transform_vector3(to_part.transform_vector3(DVec3::AXES[butt.k] * butt.side));
+    let axis = (0..3).max_by(|&a, &b| toward[a].abs().total_cmp(&toward[b].abs())).unwrap_or(0);
+    add_box(model, in_model, axis, toward[axis].signum())
 }
 
 /// A round hole into `instance` (`center` and `normal` in its coordinates).
@@ -632,6 +641,10 @@ fn face_under(model: &Model, point: DVec3, normal: DVec3) -> Option<crate::FaceI
 /// `distance`. When the polygon is a whole existing face, that face is used.
 fn draw_and_push(model: &mut Model, points: &[DVec3], normal: DVec3, distance: f64) -> Result<(), JoineryError> {
     let center = points.iter().copied().sum::<DVec3>() / points.len() as f64;
+    // Already done here: another copy of a shared component got this same cut or tenon.
+    if face_under(model, center, normal).is_none() && already_done(model, center, normal, distance) {
+        return Ok(());
+    }
     let mut trial = model.clone();
     let face = match trial.draw_polygon(points, normal) {
         Some(face) => face,
@@ -644,6 +657,12 @@ fn draw_and_push(model: &mut Model, points: &[DVec3], normal: DVec3, distance: f
     trial.push_pull(face, distance).map_err(|e| JoineryError::Geometry(e.to_string()))?;
     *model = trial;
     Ok(())
+}
+
+/// Whether pushing or pulling the surface at `center` (facing `normal`) by `distance` was already
+/// done: there's a face where it would end, facing the same way (a pocket's floor, a tenon's end).
+fn already_done(model: &Model, center: DVec3, normal: DVec3, distance: f64) -> bool {
+    face_under(model, center + normal * distance, normal).is_some()
 }
 
 /// Cut the box `bx` out of the model: draw its face on the surface it opens onto (its largest
@@ -674,7 +693,7 @@ fn cut_box(
         .find(|&&(k, sign, _)| {
             let mut center = (bx.0 + bx.1) / 2.0;
             center[k] = at(k, sign);
-            face_under(model, center, DVec3::AXES[k] * sign).is_some()
+            face_under(model, center, DVec3::AXES[k] * sign).is_some() || already_done(model, center, DVec3::AXES[k] * sign, -size[k])
         })
         .ok_or(JoineryError::NoSurface)?;
     draw_and_push(model, &face_rect(bx, k, at(k, sign)), DVec3::AXES[k] * sign, -size[k])?;
@@ -927,5 +946,76 @@ mod tests {
         assert!(closed(&doc, side) && closed(&doc, front));
         assert_eq!(doc.part_size(side).unwrap()[0], 14.75, "the side grew through the front");
         assert_eq!(doc.joints_of(front)[0].0.detail, "9 fingers, ~ 11/16\" wide");
+    }
+}
+
+#[cfg(test)]
+mod components {
+    use glam::{DAffine3, DVec3};
+
+    use super::*;
+    use crate::board::Board;
+    use crate::{DefinitionKind, Entity};
+
+    fn component(doc: &mut Document, board: Board) -> InstanceId {
+        let id = doc.add_board(&board, None).unwrap();
+        doc.selection_mut().clear();
+        doc.selection_mut().extend([Entity::Instance(id)]);
+        doc.group_selection(DefinitionKind::Component).unwrap()
+    }
+
+    /// Copies of `part` turned `degrees` about the vertical through `center` and moved to `to`.
+    fn place(doc: &mut Document, part: InstanceId, center: DVec3, spots: &[(DVec3, f64)]) -> Vec<InstanceId> {
+        let transforms: Vec<DAffine3> = spots
+            .iter()
+            .map(|&(to, degrees)| DAffine3::from_translation(to) * DAffine3::from_rotation_z(degrees.to_radians()) * DAffine3::from_translation(-center))
+            .collect();
+        doc.transform_entities(&[Entity::Instance(part)], &transforms, true)
+            .unwrap()
+            .into_iter()
+            .map(|e| if let Entity::Instance(i) = e { i } else { panic!("an instance") })
+            .collect()
+    }
+
+    fn faces(doc: &Document, part: InstanceId) -> usize {
+        let def = doc.container().instance(part).unwrap().definition;
+        doc.scene().definition(def).unwrap().container.model.faces().count()
+    }
+
+    fn closed(doc: &Document, part: InstanceId) -> bool {
+        let def = doc.container().instance(part).unwrap().definition;
+        let model = &doc.scene().definition(def).unwrap().container.model;
+        model.edges().all(|(id, _)| model.edge_faces(id).len() == 2)
+    }
+
+    #[test]
+    fn a_table_with_one_leg_component_turned_to_each_corner_gets_two_mortises_per_leg() {
+        let mut doc = Document::default();
+        // A leg at the front left corner, its inside faces toward +X and +Y.
+        let fl = component(&mut doc, Board { origin: DVec3::new(1.0, 1.0, 0.0), length_dir: DVec3::Z, width_dir: DVec3::X, length: 29.25, width: 1.75, thickness: 1.75 });
+        let c = DVec3::new(1.875, 1.875, 0.0);
+        let legs = place(&mut doc, fl, c, &[(DVec3::new(34.125, 1.875, 0.0), 90.0), (DVec3::new(34.125, 18.125, 0.0), 180.0), (DVec3::new(1.875, 18.125, 0.0), 270.0)]);
+        let (fr, br, bl) = (legs[0], legs[1], legs[2]);
+        // Front apron and its copy at the back (turned about the table's center); side aprons too.
+        let front = component(&mut doc, Board { origin: DVec3::new(2.75, 1.25, 29.25), length_dir: DVec3::X, width_dir: -DVec3::Z, length: 30.5, width: 4.0, thickness: 0.75 });
+        let middle = DVec3::new(18.0, 10.0, 0.0);
+        let back = place(&mut doc, front, middle, &[(middle, 180.0)])[0];
+        let left = component(&mut doc, Board { origin: DVec3::new(2.0, 2.75, 29.25), length_dir: DVec3::Y, width_dir: -DVec3::Z, length: 14.5, width: 4.0, thickness: 0.75 });
+        let right = place(&mut doc, left, middle, &[(middle, 180.0)])[0];
+
+        let tenon = Tenon { length: 0.75, thickness: 0.25, shoulder: 0.25 };
+        for (apron, leg) in [(front, fl), (front, fr), (back, br), (back, bl), (left, fl), (left, bl), (right, fr), (right, br)] {
+            doc.mortise_and_tenon(apron, leg, tenon).unwrap();
+        }
+        // One leg design: six sides plus two mortises (four walls and a floor each).
+        assert_eq!(faces(&doc, fl), 6 + 2 * 5, "two mortises, not eight");
+        assert!(legs.iter().chain([&fl]).all(|&l| faces(&doc, l) == faces(&doc, fl)), "all four legs are the same component");
+        // Each apron design: a tenon at each end (four sides and an end each), the rest unchanged.
+        assert_eq!(faces(&doc, front), 6 + 2 * 5);
+        assert_eq!(faces(&doc, left), 6 + 2 * 5);
+        assert!([fl, front, left].iter().all(|&p| closed(&doc, p)));
+        assert_eq!(doc.part_size(front).unwrap()[0], 32.0, "30 1/2\" between the legs plus two 3/4\" tenons");
+        assert_eq!(doc.scene().joints.len(), 8, "every joint is listed");
+        assert_eq!(crate::cutlist::cut_list(doc.scene()).materials[0].parts.iter().map(|p| p.count).sum::<usize>(), 8);
     }
 }

@@ -130,7 +130,7 @@ fn write_sheet(html: &mut String, scene: &Scene, sheet: &Sheet, label: &str, row
     let stock = material.map_or_else(
         || "No material yet".to_owned(),
         |m| {
-            let part = Part { label: String::new(), names: Vec::new(), count: 1, length, width, thickness };
+            let part = Part { count: 1, length, width, thickness, ..Part::default() };
             match match_stock(&part, m.kind, &m.standard) {
                 Ok(stock) => format!("{}, {}", m.name, stock.name),
                 Err(_) => m.name.clone(),
@@ -153,16 +153,29 @@ fn write_sheet(html: &mut String, scene: &Scene, sheet: &Sheet, label: &str, row
     html.push_str(&views(&def.container.model, sheet.scale, axes, [length, width, thickness]));
 
     html.push_str("<b>Steps</b><ol>\n");
-    for step in steps(scene, sheet.definition, &stock, &size) {
+    // A solid-wood glue-up: its boards come first.
+    let glue = material.filter(|m| m.kind == crate::MaterialKind::SolidWood).and_then(|m| {
+        let part = Part { count: 1, length, width, thickness, glue_up: def.part.glue_up, ..Part::default() };
+        let n = crate::cutplan::glue_up(&part, &m.standard)?;
+        let (l, w) = crate::cutplan::glue_up_board(&part, n);
+        Some(format!("{n} boards {} x {} x {}", format_length(thickness), format_length(w), format_length(l)))
+    });
+    for step in steps(scene, sheet.definition, &stock, &size, glue.as_deref()) {
         let _ = writeln!(html, "<li>{}</li>", esc(&step));
     }
     html.push_str("</ol></section>\n");
 }
 
 /// What to do to the part, in shop order.
-fn steps(scene: &Scene, def: DefinitionId, stock: &str, size: &str) -> Vec<String> {
+fn steps(scene: &Scene, def: DefinitionId, stock: &str, size: &str, glue: Option<&str>) -> Vec<String> {
     let name = |d: DefinitionId| scene.definition(d).map_or_else(|| "another part".to_owned(), |d| d.name.clone());
-    let mut steps = vec![format!("Mill to {size} from {stock}, grain along the length.")];
+    let mut steps = match glue {
+        Some(boards) => vec![
+            format!("Mill {boards} from {stock}."),
+            format!("Glue them edge to edge, alternating the end grain (rings up, then down); when dry, flatten and cut to {size}, grain along the length."),
+        ],
+        None => vec![format!("Mill to {size} from {stock}, grain along the length.")],
+    };
     for joint in scene.joints.iter().filter(|j| j.cut == def || j.into == def) {
         let other = name(if joint.cut == def { joint.into } else { joint.cut });
         let kind = joint.kind.name().to_lowercase();
@@ -325,5 +338,16 @@ mod tests {
         assert_eq!(html.matches("<section class=\"sheet\">").count(), 1);
         assert!(html.contains("Make 4, all the same"));
         assert!(html.contains("Rout the edges: 1/8\" Chamfer, 4 edges."));
+    }
+
+    #[test]
+    fn a_wide_top_says_to_glue_it_up_first() {
+        let mut doc = Document::default();
+        board(&mut doc, DVec3::ZERO, DVec3::X, DVec3::Y, [36.0, 20.0, 0.75]);
+        let list = crate::cutlist::cut_list(doc.scene());
+        let html = to_html(doc.scene(), &list, "Table");
+        assert!(html.contains("Mill 3 boards 3/4\" x ~ 6 15/16\" x 37\" from Red Oak"), "{html}");
+        let glue = html.find("Glue them edge to edge").unwrap();
+        assert!(glue < html.find("Sand.").unwrap());
     }
 }

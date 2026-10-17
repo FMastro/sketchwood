@@ -1,17 +1,18 @@
 //! Writes a sample drawing with furniture built from WoodSketch's own operations, for trying
 //! the cut list, build sheets and wood movement checks:
 //!
-//! - a cherry side table: a top with a roundover, chamfered legs, aprons tenoned into the legs;
+//! - a cherry side table: a glued-up top with a roundover; one chamfered leg component turned
+//!   to each corner; front/back and side apron components tenoned into the legs;
 //! - a red oak bookcase: shelves let into the sides (dados, rabbets at the top), a plywood back.
 //!
 //! `cargo run -p woodsketch-doc --example sample_furniture -- "Sample Furniture.woodsketch"`
 
-use glam::DVec3;
+use glam::{DAffine3, DVec3};
 use woodsketch_doc::board::Board;
 use woodsketch_doc::joinery::Tenon;
 use woodsketch_doc::library::LIBRARY;
 use woodsketch_doc::profile::{Edges, Profile};
-use woodsketch_doc::{Document, InstanceId, MaterialId};
+use woodsketch_doc::{DefinitionKind, Document, Entity, InstanceId, MaterialId};
 
 fn wood(doc: &mut Document, name: &str) -> MaterialId {
     doc.add_preset(LIBRARY.iter().find(|p| p.name == name).expect("a library wood"))
@@ -23,27 +24,67 @@ fn board(doc: &mut Document, material: MaterialId, name: &str, origin: DVec3, le
     id
 }
 
+/// Make `part` a component named `name`.
+fn component(doc: &mut Document, part: InstanceId, name: &str) -> InstanceId {
+    doc.selection_mut().clear();
+    doc.selection_mut().extend([Entity::Instance(part)]);
+    let id = doc.group_selection(DefinitionKind::Component).expect("a component");
+    doc.rename_instance(id, name);
+    doc.selection_mut().clear();
+    id
+}
+
+/// Copies of `part` turned `degrees` about the vertical through `center`, then moved to `to`.
+fn copies(doc: &mut Document, part: InstanceId, center: DVec3, spots: &[(DVec3, f64)]) -> Vec<InstanceId> {
+    let transforms: Vec<DAffine3> = spots
+        .iter()
+        .map(|&(to, degrees)| DAffine3::from_translation(to) * DAffine3::from_rotation_z(degrees.to_radians()) * DAffine3::from_translation(-center))
+        .collect();
+    doc.transform_entities(&[Entity::Instance(part)], &transforms, true)
+        .expect("copies")
+        .into_iter()
+        .filter_map(|e| if let Entity::Instance(i) = e { Some(i) } else { None })
+        .collect()
+}
+
 fn side_table(doc: &mut Document) {
     let cherry = wood(doc, "Cherry");
-    // Legs: 1 3/4" square, 29 1/4" tall, set in 1" from the top's edges. Chamfer their corners
-    // first (profiles go on plain boards).
-    let mut legs = Vec::new();
-    for (x, y, name) in [(1.0, 1.0, "Front left leg"), (33.25, 1.0, "Front right leg"), (1.0, 17.25, "Back left leg"), (33.25, 17.25, "Back right leg")] {
-        let leg = board(doc, cherry, name, DVec3::new(x, y, 0.0), DVec3::Z, DVec3::X, [29.25, 1.75, 1.75]);
-        doc.profile_edges(leg, Profile::Chamfer, 0.125, Edges::Along { axis: 0, corners: [true; 4] }).expect("chamfer");
-        legs.push(leg);
-    }
-    // Aprons: 4" wide, 3/4" thick, set back 1/4" from the legs' outside faces, between the legs.
+    // One leg, 1 3/4" square and 29 1/4" tall, chamfered, made a component and turned to each
+    // corner so its two inside faces (where the mortises go) always face in.
+    let leg = board(doc, cherry, "Leg", DVec3::new(1.0, 1.0, 0.0), DVec3::Z, DVec3::X, [29.25, 1.75, 1.75]);
+    doc.profile_edges(leg, Profile::Chamfer, 0.125, Edges::Along { axis: 0, corners: [true; 4] }).expect("chamfer");
+    let front_left = component(doc, leg, "Leg");
+    let corner = DVec3::new(1.875, 1.875, 0.0);
+    let others = copies(doc, front_left, corner, &[(DVec3::new(34.125, 1.875, 0.0), 90.0), (DVec3::new(34.125, 18.125, 0.0), 180.0), (DVec3::new(1.875, 18.125, 0.0), 270.0)]);
+    let (front_right, back_right, back_left) = (others[0], others[1], others[2]);
+
+    // Aprons: 4" wide, 3/4" thick, set back 1/4" from the legs' outside faces. The back is a
+    // copy of the front turned around, the right a copy of the left.
+    let middle = DVec3::new(18.0, 10.0, 0.0);
     let front = board(doc, cherry, "Front apron", DVec3::new(2.75, 1.25, 29.25), DVec3::X, -DVec3::Z, [30.5, 4.0, 0.75]);
-    let back = board(doc, cherry, "Back apron", DVec3::new(2.75, 18.0, 29.25), DVec3::X, -DVec3::Z, [30.5, 4.0, 0.75]);
-    let left = board(doc, cherry, "Left apron", DVec3::new(2.0, 2.75, 29.25), DVec3::Y, -DVec3::Z, [14.5, 4.0, 0.75]);
-    let right = board(doc, cherry, "Right apron", DVec3::new(34.75, 2.75, 29.25), DVec3::Y, -DVec3::Z, [14.5, 4.0, 0.75]);
-    // Tenons 3/4" long, so the two mortises in each leg don't meet.
+    let front = component(doc, front, "Front and back apron");
+    let back = copies(doc, front, middle, &[(middle, 180.0)])[0];
+    let left = board(doc, cherry, "Side apron", DVec3::new(2.0, 2.75, 29.25), DVec3::Y, -DVec3::Z, [14.5, 4.0, 0.75]);
+    let left = component(doc, left, "Side apron");
+    let right = copies(doc, left, middle, &[(middle, 180.0)])[0];
+
+    // Tenons 3/4" long, so the two mortises in each leg don't meet. Joints already made in the
+    // shared leg and apron designs are just recorded.
     let tenon = Tenon { length: 0.75, thickness: 0.25, shoulder: 0.25 };
-    for (apron, leg) in [(front, 0), (front, 1), (back, 2), (back, 3), (left, 0), (left, 2), (right, 1), (right, 3)] {
-        doc.mortise_and_tenon(apron, legs[leg], tenon).expect("mortise and tenon");
+    for (apron, leg) in [
+        (front, front_left),
+        (front, front_right),
+        (back, back_right),
+        (back, back_left),
+        (left, front_left),
+        (left, back_left),
+        (right, front_right),
+        (right, back_right),
+    ] {
+        doc.mortise_and_tenon(apron, leg, tenon).expect("mortise and tenon");
     }
-    // The top, resting on the legs and aprons, with a roundover all around its top edges.
+    // The top, resting on the legs and aprons, with a roundover all around its top edges. It's
+    // wider than any cherry board, so the cut list glues it up from three.
     let top = board(doc, cherry, "Table top", DVec3::new(0.0, 0.0, 29.25), DVec3::X, DVec3::Y, [36.0, 20.0, 0.75]);
     doc.profile_edges(top, Profile::Roundover, 0.25, Edges::AroundFace { axis: 2, positive: true, sides: [true; 4] }).expect("roundover");
 }

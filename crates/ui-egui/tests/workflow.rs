@@ -1120,7 +1120,7 @@ fn entity_info_shows_a_parts_grain_and_lets_you_turn_it() {
     harness.run();
     type_text(&mut harness, "Z");
     assert!(harness.query_by_label("30\" x 12\" x 3/4\"").is_some(), "size, longest side first");
-    assert!(harness.query_by_label("Red Oak, 3/4\" board").is_some());
+    assert!(harness.query_by_label("Red Oak, 3/4\" board, glued up from 2").is_some(), "12\" is wider than any red oak board");
     assert!(harness.state().tools().overlay(harness.state().document()).grain.is_some(), "a grain arrow");
     snapshot(&mut harness, "part_grain_along_length");
     // Turn the grain to run up the 12" side.

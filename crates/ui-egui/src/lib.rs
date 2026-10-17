@@ -6,6 +6,7 @@ pub mod files;
 mod icons;
 mod keys;
 mod materials;
+mod autosave;
 mod board;
 mod joinery;
 mod outliner;
@@ -38,6 +39,12 @@ pub struct WoodSketchApp {
     export_units: woodsketch_doc::export::ExportUnits,
     /// Drawings opened or saved lately, newest first (File > Open Recent); kept between runs.
     recent: Vec<PathBuf>,
+    /// Writes unsaved changes now and then, for recovery after a crash.
+    autosave: autosave::Autosave,
+    /// Drawings autosaved by a session that crashed, offered back at start.
+    leftovers: Vec<autosave::Leftover>,
+    /// Autosave failed once (shown once, not every interval).
+    autosave_failed: bool,
 }
 
 impl WoodSketchApp {
@@ -48,6 +55,10 @@ impl WoodSketchApp {
             .expect("WoodSketch needs eframe's wgpu renderer");
         icons::install(&cc.egui_ctx);
         cc.egui_ctx.set_visuals(chrome::visuals());
+        // Autosave only for the real app (tests have no settings storage).
+        let dir = cc.storage.is_some().then(|| eframe::storage_dir("WoodSketch")).flatten().map(|d| d.join("autosave"));
+        let autosave = autosave::Autosave::new(dir);
+        let leftovers = autosave.leftovers();
         Self {
             doc: Document::default(),
             tools: Tools::default(),
@@ -61,6 +72,9 @@ impl WoodSketchApp {
             show_about: false,
             export_units: woodsketch_doc::export::ExportUnits::Inches,
             recent: cc.storage.and_then(|s| eframe::get_value(s, RECENT_KEY)).unwrap_or_default(),
+            autosave,
+            leftovers,
+            autosave_failed: false,
         }
     }
 
@@ -74,6 +88,7 @@ impl WoodSketchApp {
         self.viewport.document_replaced(&self.doc);
         self.files.path = path;
         self.files.mark_saved(&self.doc);
+        self.autosave.clear();
     }
 
     /// Start a new, empty drawing (without asking about unsaved changes).
@@ -97,8 +112,82 @@ impl WoodSketchApp {
 
     pub fn save_to(&mut self, path: &Path) -> Result<(), String> {
         self.files.save_to(&self.doc, path)?;
+        self.autosave.clear();
         files::remember(&mut self.recent, path);
         Ok(())
+    }
+
+    /// Autosave into `dir` (and offer back what's already there), as the app does with its
+    /// settings folder; for tests, which have none.
+    pub fn use_autosave_folder(&mut self, dir: PathBuf) {
+        self.autosave = autosave::Autosave::new(Some(dir));
+        self.leftovers = self.autosave.leftovers();
+    }
+
+    /// Write unsaved changes now and then, and offer back drawings a crash left behind.
+    fn autosave_and_recover(&mut self, ctx: &egui::Context) {
+        let dirty = self.is_dirty();
+        match self.autosave.tick(&self.doc, self.files.path.as_deref(), dirty, std::time::Instant::now()) {
+            Ok(Some(wait)) => ctx.request_repaint_after(wait),
+            Ok(None) => {}
+            Err(error) if !self.autosave_failed => {
+                self.autosave_failed = true;
+                self.files.show_error(error);
+            }
+            Err(_) => {}
+        }
+        if self.leftovers.is_empty() {
+            return;
+        }
+        let mut recover = None;
+        let mut discard = false;
+        egui::Modal::new(egui::Id::new("recover")).show(ctx, |ui| {
+            ui.set_max_width(380.0);
+            ui.heading("Recover unsaved work?");
+            ui.label("WoodSketch didn't close properly last time. It kept a copy of your unsaved changes:");
+            for leftover in &self.leftovers {
+                let when = match leftover.when.elapsed().map(|d| d.as_secs() / 60) {
+                    Ok(0) => ", just now".to_owned(),
+                    Ok(1) => ", a minute ago".to_owned(),
+                    Ok(m) if m < 120 => format!(", {m} minutes ago"),
+                    Ok(m) => format!(", {} hours ago", m / 60),
+                    Err(_) => String::new(),
+                };
+                ui.horizontal(|ui| {
+                    ui.label(format!("{}{when}", leftover.name()));
+                    if ui.button("Recover").clicked() {
+                        recover = Some(leftover.clone());
+                    }
+                });
+            }
+            ui.add_space(6.0);
+            if ui.button(if self.leftovers.len() > 1 { "Discard all" } else { "Discard" }).clicked() {
+                discard = true;
+            }
+        });
+        if let Some(leftover) = recover {
+            match files::Files::read(&leftover.file) {
+                Ok(doc) => {
+                    self.replace_document(doc, leftover.original.clone());
+                    // Recovered work isn't saved yet.
+                    self.files.mark_unsaved();
+                    leftover.discard();
+                    self.leftovers.retain(|l| l.file != leftover.file);
+                    // Any others wait for the next start.
+                    self.leftovers.clear();
+                }
+                Err(error) => {
+                    leftover.discard();
+                    self.leftovers.retain(|l| l.file != leftover.file);
+                    self.files.show_error(error);
+                }
+            }
+        }
+        if discard {
+            for leftover in self.leftovers.drain(..) {
+                leftover.discard();
+            }
+        }
     }
 
     /// Whether there are changes since the drawing was opened or last saved.
@@ -220,6 +309,11 @@ impl WoodSketchApp {
 }
 
 impl eframe::App for WoodSketchApp {
+    fn on_exit(&mut self) {
+        // Closed properly (saved, or the changes declined): nothing to recover.
+        self.autosave.clear();
+    }
+
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, RECENT_KEY, &self.recent);
     }
@@ -227,7 +321,8 @@ impl eframe::App for WoodSketchApp {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.handle_files(&ctx);
-        if !self.files.is_asking() {
+        self.autosave_and_recover(&ctx);
+        if !self.files.is_asking() && self.leftovers.is_empty() {
             self.keyboard.handle(&ctx, &mut self.doc, &mut self.tools, &mut self.viewport);
         }
 

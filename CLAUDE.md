@@ -70,6 +70,8 @@ add it there; when you finish an item, remove it.
 7. Groups and components (done): `doc::scene` (Scene, Container, Definition, Instance, View),
    editing path (double-click in, Esc / click outside out), G / Ctrl+G, explode, Outliner panel.
    G on one group (or Ctrl+G on one component) converts it in place instead of wrapping it.
+   The Outliner shows the whole model as a tree (clicking a nested part opens its group and
+   selects it; parts needing a material are flagged).
    Push/Pull auto-groups a board pulled from a free face (setting, on by default). Tools work
    in the edited container's coordinates via `Screen::in_context`; picking/snapping/drawing use
    the flattened `View` (edited geometry keeps its ids; picks resolve to instances).
@@ -83,7 +85,9 @@ add it there; when you finish an item, remove it.
 10. Save/open (done): `.woodsketch` JSON (`.scraft` before the rename, still opened) (`doc::file`, versioned header, serde derives on the scene),
    File menu + Ctrl+N/O/S/Shift+S, native dialogs (`rfd`), title shows `*` when unsaved,
    "Save changes?" before New/Open/Close, `woodsketch drawing.woodsketch` opens a file. File > Open Recent
-   (last 10, kept with eframe's persistence; the window itself isn't restored).
+   (last 10, kept with eframe's persistence; the window itself isn't restored). Saves write a temp file
+   and swap it in; unsaved changes autosave every 2 minutes to the settings folder
+   (`ui-egui::autosave`), offered back at start after a crash.
    Later: `.skp` import via the C SDK.
 11. Cut list (done): `doc::cutlist` (parts = visible groups/components with faces, grouped by
    material + size, labeled A, B...; CSV) and `doc::cutplan` (sheet goods + solid wood: 2D

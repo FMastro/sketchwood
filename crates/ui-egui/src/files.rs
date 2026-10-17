@@ -37,6 +37,11 @@ impl Files {
         self.saved_version = doc.model_version();
     }
 
+    /// Count the drawing as unsaved (recovered after a crash).
+    pub fn mark_unsaved(&mut self) {
+        self.saved_version = u64::MAX;
+    }
+
     pub fn is_dirty(&self, doc: &Document) -> bool {
         doc.model_version() != self.saved_version
     }
@@ -50,7 +55,7 @@ impl Files {
 
     /// Write the drawing to `path` and remember it as the drawing's file.
     pub fn save_to(&mut self, doc: &Document, path: &Path) -> Result<(), String> {
-        std::fs::write(path, file::to_string(doc.scene())).map_err(|e| format!("Couldn't save {}: {e}", path.display()))?;
+        crate::autosave::write_safely(path, &file::to_string(doc.scene())).map_err(|e| format!("Couldn't save {}: {e}", path.display()))?;
         self.path = Some(path.to_owned());
         self.mark_saved(doc);
         Ok(())

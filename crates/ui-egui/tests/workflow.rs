@@ -1325,3 +1325,70 @@ fn joinery_panel_lets_a_butted_top_into_a_rabbet() {
     assert_eq!(doc.part_size(top).unwrap()[0], 20.25, "the top grew into the rabbet");
     assert!(harness.query_by_label_contains("Rabbet cut in Group#1").is_some());
 }
+
+#[test]
+fn a_crash_leaves_unsaved_work_to_recover() {
+    use egui_kittest::kittest::Queryable;
+    let dir = std::env::temp_dir().join(format!("woodsketch-recover-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    // What a crashed session left: a drawing with a board, and the file it belonged to.
+    let mut doc = woodsketch_doc::Document::default();
+    doc.edit(|m| m.add_rectangle(glam::DVec3::ZERO, glam::DVec3::X * 3.0, glam::DVec3::Y * 2.0, glam::DVec3::Z));
+    std::fs::write(dir.join("autosave-1.woodsketch"), woodsketch_doc::file::to_string(doc.scene())).unwrap();
+    std::fs::write(dir.join("autosave-1.path"), "C:/Shop/Nightstand.woodsketch").unwrap();
+
+    let mut harness = app();
+    harness.state_mut().use_autosave_folder(dir.clone());
+    harness.run();
+    assert!(harness.query_by_label("Recover unsaved work?").is_some());
+    assert!(harness.query_by_label_contains("Nightstand").is_some());
+    snapshot(&mut harness, "recover");
+    harness.get_by_label("Recover").click();
+    harness.run();
+    assert_eq!(harness.state().document().model().faces().count(), 1, "the work is back");
+    assert!(harness.state().is_dirty(), "and not saved yet");
+    assert_eq!(harness.state().file_path(), Some(std::path::Path::new("C:/Shop/Nightstand.woodsketch")));
+    assert!(harness.query_by_label("Recover unsaved work?").is_none());
+    assert!(!dir.join("autosave-1.woodsketch").exists(), "the recovered copy is cleaned up");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn outliner_shows_the_whole_tree_and_picks_nested_parts() {
+    use egui_kittest::kittest::Queryable;
+    use glam::DVec3;
+    use woodsketch_doc::board::Board;
+    let mut harness = app();
+    let (assembly, legs) = {
+        let doc = harness.state_mut().document_mut();
+        let oak = doc.add_preset(woodsketch_doc::library::LIBRARY.iter().find(|p| p.name == "Red Oak").unwrap());
+        let painted = doc.add_board(&Board { origin: DVec3::ZERO, length_dir: DVec3::Z, width_dir: DVec3::X, length: 24.0, width: 1.5, thickness: 1.5 }, Some(oak)).unwrap();
+        let bare = doc.add_board(&Board { origin: DVec3::new(10.0, 0.0, 0.0), length_dir: DVec3::Z, width_dir: DVec3::X, length: 24.0, width: 1.5, thickness: 1.5 }, None).unwrap();
+        doc.rename_instance(painted, "Front leg");
+        doc.rename_instance(bare, "Back leg");
+        doc.selection_mut().extend([woodsketch_doc::Entity::Instance(painted), woodsketch_doc::Entity::Instance(bare)]);
+        let assembly = doc.group_selection(woodsketch_doc::DefinitionKind::Group).unwrap();
+        doc.rename_instance(assembly, "Base");
+        doc.selection_mut().clear();
+        // Open the base once, so its fold in the Outliner is open.
+        doc.enter(assembly);
+        (assembly, [painted, bare])
+    };
+    let _ = legs;
+    harness.run();
+    assert!(harness.query_by_label_contains("Front leg").is_some() && harness.query_by_label_contains("Back leg").is_some(), "nested parts are listed");
+    assert_eq!(harness.get_all_by_label(egui_phosphor::regular::WARNING).count(), 1, "only the unpainted leg needs a material");
+    harness.state_mut().document_mut().exit();
+    harness.run();
+    snapshot(&mut harness, "outliner_tree");
+    // From the top level, clicking a leg inside the base opens the base and selects the leg.
+    harness.get_by_label_contains("Back leg").click();
+    harness.run();
+    let doc = harness.state().document();
+    assert_eq!(doc.path(), &[assembly]);
+    assert_eq!(doc.selection().len(), 1);
+    let picked = doc.selection().iter().next().unwrap();
+    let woodsketch_doc::Entity::Instance(picked) = picked else { panic!("a part") };
+    assert_eq!(doc.instance_name(picked), Some("Back leg"));
+}

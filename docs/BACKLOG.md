@@ -100,9 +100,8 @@ modeling (rooms, jigs, odd shapes) working; the wood features add on and stay op
   Offset on a closed group's face opens the group, so the work goes into the board. (Paint
   still paints the whole group, as in SketchUp.)
 - Selected groups are tinted; SketchUp instead draws their bounding box in blue.
-- No renaming in the Outliner, no nested tree (only the current level is listed, so parts inside
-  assemblies can't be found or marked "needs a material" there), no
-  "make unique" command for components, no component browser to place more instances.
+- No renaming or drag-to-reparent in the Outliner, no "make unique" command for components, no
+  component browser to place more instances.
 - Move stretching doesn't reach into groups from outside (Move moves the whole group).
 - Undo snapshots copy every definition; fine now, heavy for big furniture assemblies.
 - Copies of a group share a definition until opened (SketchUp's behavior); opening one gives
@@ -116,7 +115,7 @@ modeling (rooms, jigs, odd shapes) working; the wood features add on and stay op
   offcut reuse across materials, no "use my leftover pieces first".
 - Solid wood assumes one board width per material (the narrowest standard width holding the
   widest part); real hardwood comes in random widths.
-- Parts are named by their group's name; rename in Entity Info. The Outliner can't rename yet.
+- Parts are named by their group's name; rename in Entity Info (the Outliner can't rename yet).
 - The cut sheet is a web page printed from the browser (or saved as PDF there), not a PDF
   written directly; no labels/stickers per part.
 
@@ -140,10 +139,8 @@ modeling (rooms, jigs, odd shapes) working; the wood features add on and stay op
 - Toggling a tag's visibility is an undo step (SketchUp does the same).
 
 ## Files
-- No autosave or crash recovery, no Windows file association (double-
+- No Windows file association (double-
   clicking a .woodsketch needs an installer or registry entry).
-- Saving writes the file in place; a crash mid-write could truncate it (write to a temp file and
-  rename instead).
 - File dialogs block the window while open (rfd's synchronous API).
 - Export: OBJ (+ MTL colors) and ASCII STL only; no glTF, DAE or DXF/SVG (2D for CNC), no
   textures, no "export selection only", and each part isn't a separate STL file. No .skp import.

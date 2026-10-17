@@ -31,7 +31,7 @@ impl Choice {
 
     fn name(self) -> &'static str {
         match self {
-            Self::LetIn => "Dado or rabbet",
+            Self::LetIn => "Dado, groove or rabbet",
             Self::Overlap => "Cut where they overlap",
             Self::MortiseAndTenon => "Mortise and tenon",
             Self::Dowels => "Dowels",
@@ -52,7 +52,7 @@ impl Choice {
     /// How to place the parts for this joint.
     fn setup(self) -> &'static str {
         match self {
-            Self::LetIn => "Butt one part's end against the other (a shelf against a side). It's let in by the depth: a dado in the middle, a rabbet at an edge.",
+            Self::LetIn => "Butt one part's end or edge against the other (a shelf against a side, a panel against a post). It's let in by the depth: a dado across the grain, a groove along it, a rabbet at an edge.",
             Self::MortiseAndTenon => "Butt the rail's end against the other part (a rail against a leg or stile).",
             Self::Dowels => "Butt one part's end against the other.",
             Self::BoxJoint => "Put the two parts' ends together at a corner (a drawer's front and side), butted or overlapping.",

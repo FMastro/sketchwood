@@ -1265,7 +1265,7 @@ fn joinery_panel_cuts_a_dado_and_makes_a_mortise_and_tenon() {
     select(&mut harness, [rail, stile]);
     // Butted: a dado or rabbet is offered first; pick mortise and tenon instead.
     assert!(harness.query_by_label("Let Group#4 into Group#3").is_some());
-    harness.get(egui_kittest::kittest::by().role(egui::accesskit::Role::ComboBox).value("Dado or rabbet")).click();
+    harness.get(egui_kittest::kittest::by().role(egui::accesskit::Role::ComboBox).value("Dado, groove or rabbet")).click();
     harness.run();
     harness.get_by_label("Mortise and tenon").click();
     harness.run();
@@ -1311,12 +1311,12 @@ fn joinery_panel_lets_a_butted_top_into_a_rabbet() {
     harness.run();
     type_text(&mut harness, "Z");
     // Every joint is listed; the ones that need the parts placed differently say so.
-    harness.get(egui_kittest::kittest::by().role(egui::accesskit::Role::ComboBox).value("Dado or rabbet")).click();
+    harness.get(egui_kittest::kittest::by().role(egui::accesskit::Role::ComboBox).value("Dado, groove or rabbet")).click();
     harness.run();
     assert!(harness.query_by_label("Half-lap (place the parts first)").is_some());
     assert!(harness.query_by_label("Box joint").is_some(), "a top flush with the side's end is a corner");
     snapshot(&mut harness, "joinery_picker");
-    harness.get_by_label("Dado or rabbet").click();
+    harness.get_by_label("Dado, groove or rabbet").click();
     harness.run();
     harness.get_by_label("Let Group#2 into Group#1").click();
     harness.run();

@@ -193,13 +193,24 @@ impl Parts<'_> {
         Ok(transform_box(&self.relative(part, frame)?, local))
     }
 
-    /// Where `rail`'s end (the smallest face of its box) touches `other`, wholly on it.
+    /// Where `rail`'s end or edge touches `other`, wholly on it: a rail's end against a stile, or
+    /// a panel's edge against a post. Its smallest touching face counts (not its broad face).
     fn butt(&self, rail: InstanceId, other: InstanceId) -> Result<Option<Butt>, JoineryError> {
         let (r, o) = (self.part_box(rail, other)?, self.part_box(other, other)?);
         let size = r.1 - r.0;
-        let k = (0..3)
-            .min_by(|&a, &b| (size[(a + 1) % 3] * size[(a + 2) % 3]).total_cmp(&(size[(b + 1) % 3] * size[(b + 2) % 3])))
-            .unwrap_or(0);
+        let area = |k: usize| size[(k + 1) % 3] * size[(k + 2) % 3];
+        let mut axes: Vec<usize> = (0..3).collect();
+        axes.sort_by(|&a, &b| area(a).total_cmp(&area(b)));
+        for &k in &axes[..2] {
+            if let Some(butt) = self.butt_along(r, o, k) {
+                return Ok(Some(butt));
+            }
+        }
+        Ok(None)
+    }
+
+    fn butt_along(&self, r: Box3, o: Box3, k: usize) -> Option<Butt> {
+        let size = r.1 - r.0;
         for (rail_at, other_at, side) in [(r.1[k], o.0[k], 1.0), (r.0[k], o.1[k], -1.0)] {
             if (rail_at - other_at).abs() > TOUCH {
                 continue;
@@ -209,10 +220,10 @@ impl Parts<'_> {
             hi[k] = rail_at;
             let whole = (0..3).filter(|&i| i != k).all(|i| (hi[i] - lo[i] - size[i]).abs() < TOUCH);
             if whole {
-                return Ok(Some(Butt { k, side, contact: (lo, hi) }));
+                return Some(Butt { k, side, contact: (lo, hi) });
             }
         }
-        Ok(None)
+        None
     }
 
     /// `rail` (butting `other`) is flush with `other`'s end: they meet at a corner.
@@ -268,7 +279,7 @@ impl Document {
             let (rail_thick, rail_wide) = (size[thin], size[wide]);
             let depth = o.1[butt.k] - o.0[butt.k];
             thick = rail_thick.min(depth);
-            fit.let_in_depth = sixteenth(depth / 3.0).max(0.125);
+            fit.let_in_depth = sixteenth((depth / 3.0).min(0.5)).max(0.125);
             fit.tenon = Tenon {
                 length: sixteenth((depth * 2.0 / 3.0).min(1.5)).max(0.25),
                 thickness: sixteenth(rail_thick / 3.0).max(0.125),
@@ -649,6 +660,8 @@ fn cut_box(
             if grain_axis == Some(along) { JointKind::Groove } else { JointKind::Dado }
         }
         (2, 1) | (1, 2) => JointKind::Rabbet,
+        // A pocket: long and narrow is a stopped groove (a panel's edge), else a mortise.
+        (0, 0) if reaches(k) < 2 && size[u].max(size[v]) > 3.0 * size[u].min(size[v]) => JointKind::Groove,
         (0, 0) if reaches(k) < 2 => JointKind::Mortise,
         _ => JointKind::Notch,
     };
@@ -762,6 +775,21 @@ mod tests {
         let panel = board(&mut doc, DVec3::new(0.0, 2.125, 0.25), DVec3::X, DVec3::Z, [24.0, 0.25, 10.0]);
         assert_eq!(doc.cut_overlap(panel, rail), Ok(JointKind::Groove));
         assert!(closed(&doc, rail));
+    }
+
+    #[test]
+    fn a_panels_edge_against_a_post_is_let_into_a_groove() {
+        let mut doc = Document::default();
+        // A post standing up (x 0..3 1/2, y 0..1 1/2) and a 3/4" panel whose long edge (24")
+        // butts its face at x = 3 1/2, centered on its thickness.
+        let post = board(&mut doc, DVec3::ZERO, DVec3::Z, DVec3::X, [84.0, 3.5, 1.5]);
+        let panel = board(&mut doc, DVec3::new(3.5, 0.375, 30.0), DVec3::Z, DVec3::X, [24.0, 12.0, 0.75]);
+        let fit = doc.joint_fit(panel, post).unwrap();
+        assert_eq!(fit.butt, Some((panel, post)), "an edge counts, not just an end");
+        assert_eq!(fit.let_in_depth, 0.5, "suggested depth tops out at 1/2\"");
+        assert_eq!(doc.let_in(panel, post, 0.5), Ok(JointKind::Groove));
+        assert!(closed(&doc, panel) && closed(&doc, post));
+        assert_eq!(doc.part_size(panel), Some([24.0, 12.5, 0.75]), "the panel grew into the groove");
     }
 
     #[test]

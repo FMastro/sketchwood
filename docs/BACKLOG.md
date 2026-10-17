@@ -34,10 +34,9 @@ each section. Remove items when they're done (mention them in the commit).
 ## Woodworking direction (in this order)
 SketchUp-familiar modeling, specialized for woodworking: parts know they're wood. Keep general
 modeling (rooms, jigs, odd shapes) working; the wood features add on and stay optional.
-1. **Parts that know they're wood** (started): grain direction and cut per part, part section in
-   Entity Info and a grain arrow are done. Still to come: picking the reference face/edge on
-   the model (with build sheets), and the operations applied to a part (joints, profiles,
-   holes) stored on it so they can be edited and listed (with joinery).
+1. **Parts that know they're wood** (done: grain direction and cut per part, a part section in
+   Entity Info, a grain arrow, and the joints and profiles made on a part listed with it). Still
+   to come: picking the reference face/edge on the model (for build sheets).
 2. **Board from stock** (done). Later: choose which side of the line a lumber board's width goes
    (it's always to the left of the drag now), Tab to cycle a board's faces against a surface, and
    picking stock straight from the Materials panel.
@@ -46,8 +45,8 @@ modeling (rooms, jigs, odd shapes) working; the wood features add on and stay op
    pocket screws (pockets drawn on the hidden face, not the angled bore), box joint, half-lap,
    cut where parts overlap; reinforced glue-up seams; a hardware list; Change and Remove on
    each joint). Still to come: a fit allowance (mortise a hair bigger); sliding and lapped
-   dovetails, variable dovetail spacing; Change keeps the joint's old sizes (it starts from the
-   suggestions); joints can't be removed after a part is changed by hand (use Undo); parts in
+   dovetails, variable dovetail spacing; Change should start from the joint's own sizes (it
+   starts from the suggestions); joints can't be removed after a part is changed by hand (use Undo); parts in
    different groups (both must be side by side now); parts that aren't square to each other.
 4. **Edge profiles** (done: roundover, chamfer, cove, ogee, around a face with mitered corners or
    along a length, from the Edge profile panel). Still to come: bead and other bits; profiling a
@@ -87,7 +86,7 @@ modeling (rooms, jigs, odd shapes) working; the wood features add on and stay op
 
 ## Geometry
 - **Auto-joining**: moved or copied geometry doesn't merge with geometry it lands on (shared
-  vertices/edges aren't welded). Fine while boards should stay separate; revisit with groups.
+  vertices/edges aren't welded). Fine while boards should stay separate.
 - **Coplanar face merging**: two faces on one plane that share an edge stay separate (a seam
   edge remains, e.g. boards glued end to end). Erasing the seam merges them, and Push/Pull
   merges walls flush with a side, but nothing merges automatically otherwise.
@@ -138,7 +137,7 @@ modeling (rooms, jigs, odd shapes) working; the wood features add on and stay op
   still paints the whole group, as in SketchUp.)
 - Selected groups are tinted; SketchUp instead draws their bounding box in blue.
 - No renaming or drag-to-reparent in the Outliner, no "make unique" command for components, no
-  component browser to place more instances.
+  component browser (copy and paste or Move with Ctrl place more instances).
 - Move stretching doesn't reach into groups from outside (Move moves the whole group).
 - Undo snapshots copy every definition; fine now, heavy for big furniture assemblies.
 - Copies of a group share a definition until opened (SketchUp's behavior); opening one gives
@@ -150,7 +149,8 @@ modeling (rooms, jigs, odd shapes) working; the wood features add on and stay op
 - Glue-ups: strips are equal widths (no mixing a wide and a narrow board), with a fixed 1/4"
   jointing allowance and 1" trim; edge-glued panels only (no face-glued thick parts like a
   laminated leg); the build sheet doesn't draw the boards.
-- No edge banding, no veneer, and no hardware counts beyond listing.
+- No edge banding or veneer. Hardware comes only from joints (dowels, biscuits, screws); hinges,
+  slides and pulls are Next up, item 2.
 - Packing is heuristic (several orders and rules, best kept), not provably optimal; no
   offcut reuse across materials, no "use my leftover pieces first".
 - Solid wood assumes one board width per material (the narrowest standard width holding the

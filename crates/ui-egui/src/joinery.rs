@@ -3,7 +3,7 @@
 //! them. Entity Info lists the joints a part has.
 
 use eframe::egui;
-use woodsketch_doc::joinery::{Dowels, Fit, Tenon};
+use woodsketch_doc::joinery::{BISCUITS, Dowels, Fit, LOOSE_TENONS, Slots, Tenon, pocket_screw_for};
 use woodsketch_doc::units::{format_length, parse_length};
 use woodsketch_doc::{Document, Entity, InstanceId};
 
@@ -22,12 +22,25 @@ enum Choice {
     Overlap,
     MortiseAndTenon,
     Dowels,
+    Biscuits,
+    LooseTenons,
+    PocketScrews,
     BoxJoint,
     HalfLap,
 }
 
 impl Choice {
-    const ALL: [Self; 6] = [Self::LetIn, Self::MortiseAndTenon, Self::Dowels, Self::BoxJoint, Self::HalfLap, Self::Overlap];
+    const ALL: [Self; 9] = [
+        Self::LetIn,
+        Self::MortiseAndTenon,
+        Self::Dowels,
+        Self::Biscuits,
+        Self::LooseTenons,
+        Self::PocketScrews,
+        Self::BoxJoint,
+        Self::HalfLap,
+        Self::Overlap,
+    ];
 
     fn name(self) -> &'static str {
         match self {
@@ -35,6 +48,9 @@ impl Choice {
             Self::Overlap => "Cut where they overlap",
             Self::MortiseAndTenon => "Mortise and tenon",
             Self::Dowels => "Dowels",
+            Self::Biscuits => "Biscuits",
+            Self::LooseTenons => "Loose tenons (Domino style)",
+            Self::PocketScrews => "Pocket screws",
             Self::BoxJoint => "Box joint",
             Self::HalfLap => "Half-lap",
         }
@@ -42,7 +58,7 @@ impl Choice {
 
     fn fits(self, fit: &Fit) -> bool {
         match self {
-            Self::LetIn | Self::MortiseAndTenon | Self::Dowels => fit.butt.is_some(),
+            Self::LetIn | Self::MortiseAndTenon | Self::Dowels | Self::Biscuits | Self::LooseTenons | Self::PocketScrews => fit.butt.is_some(),
             Self::Overlap => fit.overlap,
             Self::BoxJoint => fit.corner,
             Self::HalfLap => fit.half_lap,
@@ -54,7 +70,7 @@ impl Choice {
         match self {
             Self::LetIn => "Butt one part's end or edge against the other (a shelf against a side, a panel against a post). It's let in by the depth: a dado across the grain, a groove along it, a rabbet at an edge.",
             Self::MortiseAndTenon => "Butt the rail's end against the other part (a rail against a leg or stile).",
-            Self::Dowels => "Butt one part's end against the other.",
+            Self::Dowels | Self::Biscuits | Self::LooseTenons | Self::PocketScrews => "Butt one part's end or edge against the other.",
             Self::BoxJoint => "Put the two parts' ends together at a corner (a drawer's front and side), butted or overlapping.",
             Self::HalfLap => "Cross the two boards so they overlap through their whole thickness.",
             Self::Overlap => "Move one part into the other by the joint's depth (a shelf 1/4\" into the side).",
@@ -127,7 +143,7 @@ fn picker(ui: &mut egui::Ui, doc: &mut Document, (a, b): (InstanceId, InstanceId
                     message = Some(result(doc.box_joint(a, b, finger).map(|()| "Box joint made.".to_owned())));
                 }
             }
-            Choice::LetIn | Choice::MortiseAndTenon | Choice::Dowels => {
+            Choice::LetIn | Choice::MortiseAndTenon | Choice::Dowels | Choice::Biscuits | Choice::LooseTenons | Choice::PocketScrews => {
                 let (part, into) = fit.butt.expect("fits");
                 let (pn, inn) = (name(doc, part), name(doc, into));
                 ui.label(format!("{pn}'s end meets {inn}."));
@@ -141,8 +157,57 @@ fn picker(ui: &mut egui::Ui, doc: &mut Document, (a, b): (InstanceId, InstanceId
                             })));
                         }
                     }
+                    Choice::Biscuits | Choice::LooseTenons => {
+                        let (thick, wide) = fit.contact;
+                        let biscuits = choice == Choice::Biscuits;
+                        let size_id = egui::Id::new(("slot_size", biscuits, a, b));
+                        let suggested = if biscuits { Slots::suggested_biscuit(thick, wide) } else { Slots::suggested_loose_tenon(thick) };
+                        let mut size = ui.data(|d| d.get_temp::<usize>(size_id)).unwrap_or(suggested);
+                        let names: Vec<String> = if biscuits {
+                            BISCUITS.iter().map(|b| b.0.to_owned()).collect()
+                        } else {
+                            LOOSE_TENONS.iter().map(|(t, w, l)| format!("{t} x {w} x {l} mm")).collect()
+                        };
+                        ui.horizontal(|ui| {
+                            ui.label("Size");
+                            egui::ComboBox::from_id_salt(size_id).selected_text(&names[size]).show_ui(ui, |ui| {
+                                for (i, n) in names.iter().enumerate() {
+                                    ui.selectable_value(&mut size, i, n);
+                                }
+                            });
+                        });
+                        ui.data_mut(|d| d.insert_temp(size_id, size));
+                        let mut slots = if biscuits { Slots::biscuits(size, wide) } else { Slots::loose_tenons(size, wide) };
+                        let [count] = fields(ui, ("slot_count", a, b), [("Count", f64::from(slots.count), "Spread evenly across the joint")]);
+                        let label = if biscuits { "Cut biscuit slots" } else { "Cut loose tenon mortises" };
+                        if let (true, Some(count)) = (button(ui, count.is_some(), label), count) {
+                            slots.count = count.round().max(0.0) as u32;
+                            message = Some(result(doc.slots(part, into, &slots).map(|()| format!("{} slots cut in each part, for {} x {}.", slots.count, slots.count, slots.piece))));
+                        }
+                    }
+                    Choice::PocketScrews => {
+                        let (thick, wide) = fit.contact;
+                        let [count, screw] = fields(
+                            ui,
+                            ("pocket", a, b),
+                            [
+                                ("Count", ((wide / 4.0).round()).max(2.0), "About one every 4\""),
+                                ("Screw", pocket_screw_for(thick), "Length, for the thickness of the part they go through"),
+                            ],
+                        );
+                        ui.weak(format!("Drilled from the hidden face of {pn}; the holes aren't drawn."));
+                        if let (true, Some(count), Some(screw)) = (button(ui, count.is_some() && screw.is_some(), "Add pocket screws"), count, screw) {
+                            let n = count.round().max(0.0) as u32;
+                            message = Some(result(doc.pocket_screws(part, into, n, screw).map(|()| format!("{n} pocket screws added."))));
+                        }
+                    }
                     Choice::MortiseAndTenon => {
                         let t = fit.tenon;
+                        // Through: the tenon goes all the way and shows on the far side.
+                        let through_id = egui::Id::new(("through", a, b));
+                        let mut through = ui.data(|d| d.get_temp::<bool>(through_id)).unwrap_or(false);
+                        ui.checkbox(&mut through, format!("Through tenon ({} long, shows on the far side)", format_length(fit.depth)));
+                        ui.data_mut(|d| d.insert_temp(through_id, through));
                         let [length, thickness, shoulder] = fields(
                             ui,
                             ("tenon", a, b),
@@ -155,6 +220,7 @@ fn picker(ui: &mut egui::Ui, doc: &mut Document, (a, b): (InstanceId, InstanceId
                         if let (true, Some(length), Some(thickness), Some(shoulder)) =
                             (button(ui, length.is_some() && thickness.is_some() && shoulder.is_some(), &format!("Tenon on {pn}, mortise in {inn}")), length, thickness, shoulder)
                         {
+                            let length = if through { fit.depth } else { length };
                             message = Some(result(doc.mortise_and_tenon(part, into, Tenon { length, thickness, shoulder }).map(|()| {
                                 format!("Mortise and tenon made; {pn} is {} longer in the cut list.", format_length(length))
                             })));

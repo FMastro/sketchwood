@@ -72,6 +72,55 @@ pub enum GlueUp {
     Boards(u8),
 }
 
+/// What reinforces the seams of a glue-up, besides glue.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum EdgeJoint {
+    #[default]
+    Glue,
+    Dowels,
+    Biscuits,
+    LooseTenons,
+}
+
+impl EdgeJoint {
+    pub const ALL: [Self; 4] = [Self::Glue, Self::Dowels, Self::Biscuits, Self::LooseTenons];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Glue => "Glue only",
+            Self::Dowels => "Dowels",
+            Self::Biscuits => "Biscuits",
+            Self::LooseTenons => "Loose tenons",
+        }
+    }
+
+    /// The piece that goes in each seam for stock `thick` thick (`None` for glue only), and how
+    /// far apart they go along a seam.
+    pub fn piece(self, thick: f64) -> Option<(String, f64)> {
+        use crate::units::format_length;
+        match self {
+            Self::Glue => None,
+            Self::Dowels => {
+                let (d, l) = if thick >= 0.6 { (0.375, 2.0) } else { (0.25, 1.5) };
+                Some((format!("{} x {} dowel", format_length(d), format_length(l)), 6.0))
+            }
+            Self::Biscuits => {
+                let size = crate::joinery::Slots::suggested_biscuit(thick, 6.0);
+                Some((format!("{} biscuit", crate::joinery::BISCUITS[size].0), 8.0))
+            }
+            Self::LooseTenons => {
+                let size = crate::joinery::Slots::suggested_loose_tenon(thick);
+                Some((crate::joinery::Slots::loose_tenons(size, 1.0).piece, 8.0))
+            }
+        }
+    }
+
+    /// How many go in one seam `length` long: one every few inches, at least two.
+    pub fn per_seam(spacing: f64, length: f64) -> u32 {
+        ((length / spacing).floor() as u32).max(2)
+    }
+}
+
 /// A part's woodworking properties.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct PartInfo {
@@ -83,6 +132,9 @@ pub struct PartInfo {
     pub cut: Cut,
     #[serde(default)]
     pub glue_up: GlueUp,
+    /// A glue-up's seams: glue only, or reinforced.
+    #[serde(default)]
+    pub edge_joint: EdgeJoint,
 }
 
 /// A part's size: `[length, width, thickness]`, length along the grain.

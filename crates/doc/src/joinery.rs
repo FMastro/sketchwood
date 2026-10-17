@@ -34,6 +34,9 @@ pub enum JointKind {
     MortiseAndTenon,
     Dowels,
     BoxJoint,
+    Biscuits,
+    LooseTenons,
+    PocketScrews,
 }
 
 impl JointKind {
@@ -48,6 +51,9 @@ impl JointKind {
             Self::MortiseAndTenon => "Mortise and tenon",
             Self::Dowels => "Dowels",
             Self::BoxJoint => "Box joint",
+            Self::Biscuits => "Biscuits",
+            Self::LooseTenons => "Loose tenons",
+            Self::PocketScrews => "Pocket screws",
         }
     }
 }
@@ -61,6 +67,16 @@ pub struct Joint {
     pub into: DefinitionId,
     /// Sizes, like `1/4" deep`.
     pub detail: String,
+    /// What it takes besides glue: dowels, biscuits, screws.
+    #[serde(default)]
+    pub hardware: Option<Hardware>,
+}
+
+/// Pieces a joint uses, for the shopping list: `3 x 3/8" x 2" dowel`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Hardware {
+    pub name: String,
+    pub count: u32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -125,6 +141,10 @@ pub struct Fit {
     pub tenon: Tenon,
     pub dowels: Dowels,
     pub finger: f64,
+    /// How deep the other part is behind a butt joint (a through tenon's length).
+    pub depth: f64,
+    /// Where they butt: the butting part's thickness and width there.
+    pub contact: (f64, f64),
     /// The joints these two designs already have (made on these parts, or on other copies of
     /// the same components), as `(kind, detail)`.
     pub joined: Vec<(JointKind, String)>,
@@ -258,6 +278,8 @@ impl Document {
             tenon: Tenon { length: 1.0, thickness: 0.25, shoulder: 0.25 },
             dowels: Dowels { count: 2, diameter: 0.375, depth: 1.0 },
             finger: 0.5,
+            depth: 0.0,
+            contact: (0.0, 0.0),
             joined: Vec::new(),
         };
         // The thinner part's thickness sets the finger size.
@@ -283,6 +305,8 @@ impl Document {
             let (rail_thick, rail_wide) = (size[thin], size[wide]);
             let depth = o.1[butt.k] - o.0[butt.k];
             thick = rail_thick.min(depth);
+            fit.depth = depth;
+            fit.contact = (rail_thick, rail_wide);
             fit.let_in_depth = sixteenth((depth / 3.0).min(0.5)).max(0.125);
             fit.tenon = Tenon {
                 length: sixteenth((depth * 2.0 / 3.0).min(1.5)).max(0.25),
@@ -438,7 +462,8 @@ impl Document {
                 drill_in(scene, path, part, to_part.transform_point3(c), end_normal, radius, dowels.depth)?;
             }
             let detail = format!("{} x {} dowels, {} deep each side", dowels.count, format_length(dowels.diameter), format_length(dowels.depth));
-            record(scene, path, JointKind::Dowels, part, into, detail)
+            let hardware = Hardware { name: format!("{} x {} dowel", format_length(dowels.diameter), format_length(2.0 * dowels.depth)), count: dowels.count };
+            record_with(scene, path, JointKind::Dowels, part, into, detail, Some(hardware))
         })
     }
 
@@ -531,9 +556,22 @@ fn repeat(scene: &mut Scene, path: &[InstanceId], part: InstanceId, into: Instan
 
 /// Note the joint on the drawing.
 fn record(scene: &mut Scene, path: &[InstanceId], kind: JointKind, cut: InstanceId, into: InstanceId, detail: String) -> Result<(), JoineryError> {
+    record_with(scene, path, kind, cut, into, detail, None)
+}
+
+/// Note the joint and the pieces it uses.
+fn record_with(
+    scene: &mut Scene,
+    path: &[InstanceId],
+    kind: JointKind,
+    cut: InstanceId,
+    into: InstanceId,
+    detail: String,
+    hardware: Option<Hardware>,
+) -> Result<(), JoineryError> {
     let p = Parts { scene, path };
     let (cut, into) = (p.definition(cut)?, p.definition(into)?);
-    scene.joints.push(Joint { kind, cut, into, detail });
+    scene.joints.push(Joint { kind, cut, into, detail, hardware });
     Ok(())
 }
 
@@ -1033,5 +1071,251 @@ mod components {
         let fit = doc.joint_fit(back, br).unwrap();
         assert_eq!(fit.joined.first().map(|j| j.0), Some(JointKind::MortiseAndTenon));
         assert_eq!(crate::cutlist::cut_list(doc.scene()).materials[0].parts.iter().map(|p| p.count).sum::<usize>(), 8);
+    }
+}
+
+/// Slots cut into both parts across a butt joint, for a biscuit or a loose tenon each.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Slots {
+    pub kind: JointKind,
+    /// What goes in each slot, for the shopping list: `#20 biscuit`.
+    pub piece: String,
+    pub count: u32,
+    /// Along the joint.
+    pub length: f64,
+    /// Across the part's thickness.
+    pub thickness: f64,
+    /// Into each part.
+    pub depth: f64,
+}
+
+/// Biscuit sizes: the name and its slot (length, thickness, depth into each part).
+pub const BISCUITS: [(&str, f64, f64, f64); 3] = [("#0", 2.125, 0.15625, 0.3125), ("#10", 2.375, 0.15625, 0.375), ("#20", 2.625, 0.15625, 0.5)];
+
+/// Domino-style loose tenons: thickness x width x length in millimeters.
+pub const LOOSE_TENONS: [(u32, u32, u32); 4] = [(5, 19, 30), (6, 20, 40), (8, 22, 40), (10, 24, 50)];
+
+const MM: f64 = 1.0 / 25.4;
+
+impl Slots {
+    /// Biscuits of a size (`BISCUITS` index) across a joint `wide` along, about one per 6".
+    pub fn biscuits(size: usize, wide: f64) -> Self {
+        let (name, length, thickness, depth) = BISCUITS[size.min(BISCUITS.len() - 1)];
+        let count = ((wide / 6.0).round() as u32).max(1);
+        Slots { kind: JointKind::Biscuits, piece: format!("{name} biscuit"), count, length, thickness, depth }
+    }
+
+    /// Loose tenons of a size (`LOOSE_TENONS` index) across a joint `wide` along.
+    pub fn loose_tenons(size: usize, wide: f64) -> Self {
+        let (t, w, l) = LOOSE_TENONS[size.min(LOOSE_TENONS.len() - 1)];
+        let count = ((wide / 6.0).round() as u32).max(1);
+        Slots {
+            kind: JointKind::LooseTenons,
+            piece: format!("{t} x {w} x {l} mm loose tenon"),
+            count,
+            length: f64::from(w) * MM,
+            thickness: f64::from(t) * MM,
+            depth: f64::from(l) * MM / 2.0,
+        }
+    }
+
+    /// The biscuit size (`BISCUITS` index) for stock `thick` thick and a joint `wide` wide.
+    pub fn suggested_biscuit(thick: f64, wide: f64) -> usize {
+        if wide >= 3.0 && thick >= 0.625 {
+            2
+        } else if wide >= 2.5 {
+            1
+        } else {
+            0
+        }
+    }
+
+    /// The loose tenon size (`LOOSE_TENONS` index) for stock `thick` thick.
+    pub fn suggested_loose_tenon(thick: f64) -> usize {
+        if thick >= 1.25 {
+            3
+        } else if thick >= 0.875 {
+            2
+        } else if thick >= 0.625 {
+            1
+        } else {
+            0
+        }
+    }
+}
+
+/// The contact rectangle of `butt` pushed `depth` back into the butting part.
+fn extrude_back(butt: Butt, depth: f64) -> Box3 {
+    let (mut lo, mut hi) = butt.contact;
+    if butt.side > 0.0 {
+        lo[butt.k] = hi[butt.k] - depth;
+    } else {
+        hi[butt.k] = lo[butt.k] + depth;
+    }
+    (lo, hi)
+}
+
+impl Document {
+    /// Biscuits or loose tenons across a butt joint: matching slots in `part`'s end and
+    /// `into`'s face, spread evenly across the part's width.
+    pub fn slots(&mut self, part: InstanceId, into: InstanceId, slots: &Slots) -> Result<(), JoineryError> {
+        if slots.count == 0 || slots.length <= EPS || slots.thickness <= EPS || slots.depth <= EPS {
+            return Err(JoineryError::Size("The slots need a count and a size."));
+        }
+        self.joint_edit(|scene, path| {
+            let p = Parts { scene, path };
+            let Some(butt) = p.butt(part, into)? else {
+                return repeat(scene, path, part, into, |k| k == slots.kind).map(|_| ());
+            };
+            let (thin, wide) = across(butt);
+            let size = butt.contact.1 - butt.contact.0;
+            let o = p.part_box(into, into)?;
+            let r = p.part_box(part, into)?;
+            if slots.thickness >= size[thin] - 0.125 {
+                return Err(JoineryError::Size("The part is too thin for that size: pick a smaller one."));
+            }
+            // Into a face, at most 2/3 of the way through; a loose tenon's other end takes up the rest
+            // of its length in the butting part's end (a biscuit goes in equally either way).
+            let face_depth = slots.depth.min((o.1[butt.k] - o.0[butt.k]) * 2.0 / 3.0);
+            let end_depth = if slots.kind == JointKind::LooseTenons { 2.0 * slots.depth - face_depth } else { slots.depth };
+            if end_depth >= r.1[butt.k] - r.0[butt.k] - EPS {
+                return Err(JoineryError::Size("The slots would go right through a part."));
+            }
+            let spacing = size[wide] / f64::from(slots.count);
+            if spacing < slots.length + 0.25 {
+                return Err(JoineryError::Size("Too many for the width: use fewer, or a smaller size."));
+            }
+            let to_part = p.relative(into, part)?;
+            let mid = (butt.contact.0[thin] + butt.contact.1[thin]) / 2.0;
+            for i in 0..slots.count {
+                let center = butt.contact.0[wide] + spacing * (f64::from(i) + 0.5);
+                let narrow = |(mut lo, mut hi): Box3| {
+                    lo[thin] = mid - slots.thickness / 2.0;
+                    hi[thin] = mid + slots.thickness / 2.0;
+                    lo[wide] = center - slots.length / 2.0;
+                    hi[wide] = center + slots.length / 2.0;
+                    (lo, hi)
+                };
+                cut_box_in(scene, path, into, narrow(extrude(butt, face_depth)))?;
+                cut_box_in(scene, path, part, transform_box(&to_part, narrow(extrude_back(butt, end_depth))))?;
+            }
+            let detail = if (face_depth - end_depth).abs() < 1e-9 {
+                format!("{} x {}, {} deep each side", slots.count, slots.piece, format_length(face_depth))
+            } else {
+                format!("{} x {}, {} deep in the face, {} in the end", slots.count, slots.piece, format_length(face_depth), format_length(end_depth))
+            };
+            let hardware = Hardware { name: slots.piece.clone(), count: slots.count };
+            record_with(scene, path, slots.kind, part, into, detail, Some(hardware))
+        })
+    }
+
+    /// Pocket screws across a butt joint, driven from the hidden face of `part` into `into`.
+    /// Recorded for the build sheet and shopping list; the holes aren't drawn.
+    pub fn pocket_screws(&mut self, part: InstanceId, into: InstanceId, count: u32, screw: f64) -> Result<(), JoineryError> {
+        if count == 0 || screw <= EPS {
+            return Err(JoineryError::Size("Pocket screws need a count and a length."));
+        }
+        self.joint_edit(|scene, path| {
+            let p = Parts { scene, path };
+            if p.butt(part, into)?.is_none() {
+                return repeat(scene, path, part, into, |k| k == JointKind::PocketScrews).map(|_| ());
+            }
+            let detail = format!("{count} pocket holes in the hidden face, {} screws", format_length(screw));
+            let hardware = Hardware { name: format!("{} pocket screw", format_length(screw)), count };
+            record_with(scene, path, JointKind::PocketScrews, part, into, detail, Some(hardware))
+        })
+    }
+}
+
+/// The pocket screw length for stock `thick` thick: 1" for 1/2", 1 1/4" for 3/4", 1 1/2" for
+/// 1", 2 1/2" for 1 1/2".
+pub fn pocket_screw_for(thick: f64) -> f64 {
+    if thick >= 1.375 {
+        2.5
+    } else if thick >= 1.0 {
+        1.5
+    } else if thick >= 0.625 {
+        1.25
+    } else {
+        1.0
+    }
+}
+
+#[cfg(test)]
+mod more_joints {
+    use glam::DVec3;
+
+    use super::*;
+    use crate::board::Board;
+
+    fn board(doc: &mut Document, origin: DVec3, length_dir: DVec3, width_dir: DVec3, [l, w, t]: [f64; 3]) -> InstanceId {
+        doc.add_board(&Board { origin, length_dir, width_dir, length: l, width: w, thickness: t }, None).unwrap()
+    }
+
+    fn model(doc: &Document, part: InstanceId) -> &Model {
+        let def = doc.container().instance(part).unwrap().definition;
+        &doc.scene().definition(def).unwrap().container.model
+    }
+
+    fn closed(doc: &Document, part: InstanceId) -> bool {
+        let m = model(doc, part);
+        m.edges().all(|(id, _)| m.edge_faces(id).len() == 2)
+    }
+
+    /// A side standing up and a shelf butting it (as in the joinery tests).
+    fn side_and_shelf(doc: &mut Document) -> (InstanceId, InstanceId) {
+        let side = board(doc, DVec3::ZERO, DVec3::Z, DVec3::Y, [30.0, 11.25, 0.75]);
+        let shelf = board(doc, DVec3::new(0.0, 0.0, 12.0), DVec3::X, DVec3::Y, [20.0, 11.25, 0.75]);
+        (side, shelf)
+    }
+
+    #[test]
+    fn biscuits_cut_matching_slots_and_count_for_the_shopping_list() {
+        let mut doc = Document::default();
+        let (side, shelf) = side_and_shelf(&mut doc);
+        let slots = Slots::biscuits(Slots::suggested_biscuit(0.75, 11.25), 11.25);
+        assert_eq!((slots.piece.as_str(), slots.count), ("#20 biscuit", 2));
+        doc.slots(shelf, side, &slots).unwrap();
+        assert!(closed(&doc, side) && closed(&doc, shelf));
+        // Each slot: four walls and a floor.
+        assert_eq!(model(&doc, side).faces().count(), 6 + 2 * 5);
+        assert_eq!(model(&doc, shelf).faces().count(), 6 + 2 * 5);
+        assert_eq!(doc.part_size(shelf).unwrap()[0], 20.0, "the shelf keeps its length");
+        let joint = &doc.joints_of(side)[0].0;
+        assert_eq!(joint.hardware, Some(Hardware { name: "#20 biscuit".into(), count: 2 }));
+    }
+
+    #[test]
+    fn loose_tenons_cut_mortises_in_both_parts() {
+        let mut doc = Document::default();
+        let (side, shelf) = side_and_shelf(&mut doc);
+        let slots = Slots::loose_tenons(Slots::suggested_loose_tenon(0.75), 11.25);
+        assert_eq!(slots.piece, "6 x 20 x 40 mm loose tenon");
+        doc.slots(shelf, side, &slots).unwrap();
+        assert!(closed(&doc, side) && closed(&doc, shelf));
+        assert_eq!(doc.joints_of(shelf)[0].0.kind, JointKind::LooseTenons);
+    }
+
+    #[test]
+    fn pocket_screws_are_listed_without_cutting() {
+        let mut doc = Document::default();
+        let (side, shelf) = side_and_shelf(&mut doc);
+        doc.pocket_screws(shelf, side, 3, pocket_screw_for(0.75)).unwrap();
+        assert_eq!(model(&doc, side).faces().count(), 6);
+        let joint = &doc.joints_of(side)[0].0;
+        assert_eq!(joint.hardware, Some(Hardware { name: "1 1/4\" pocket screw".into(), count: 3 }));
+    }
+
+    #[test]
+    fn a_through_tenon_shows_on_the_far_side() {
+        let mut doc = Document::default();
+        // A stile 3" deep where the rail meets it: a 3" tenon goes right through.
+        let stile = board(&mut doc, DVec3::ZERO, DVec3::Z, DVec3::X, [30.0, 3.0, 1.5]);
+        let rail = board(&mut doc, DVec3::new(3.0, 0.0, 12.5), DVec3::X, -DVec3::Z, [20.0, 2.5, 1.5]);
+        let fit = doc.joint_fit(rail, stile).unwrap();
+        assert_eq!(fit.depth, 3.0);
+        doc.mortise_and_tenon(rail, stile, Tenon { length: fit.depth, thickness: 0.5, shoulder: 0.25 }).unwrap();
+        assert!(closed(&doc, rail) && closed(&doc, stile));
+        assert_eq!(doc.part_size(rail).unwrap()[0], 23.0);
     }
 }

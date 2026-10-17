@@ -84,9 +84,11 @@ fn side_table(doc: &mut Document) {
         doc.mortise_and_tenon(apron, leg, tenon).expect("mortise and tenon");
     }
     // The top, resting on the legs and aprons, with a roundover all around its top edges. It's
-    // wider than any cherry board, so the cut list glues it up from three.
+    // wider than any cherry board, so the cut list glues it up from three, with biscuits.
     let top = board(doc, cherry, "Table top", DVec3::new(0.0, 0.0, 29.25), DVec3::X, DVec3::Y, [36.0, 20.0, 0.75]);
     doc.profile_edges(top, Profile::Roundover, 0.25, Edges::AroundFace { axis: 2, positive: true, sides: [true; 4] }).expect("roundover");
+    // Biscuits along the glue-up's seams keep the boards aligned while it's clamped.
+    doc.edit_part(top, |p| p.edge_joint = woodsketch_doc::part::EdgeJoint::Biscuits);
 }
 
 fn bookcase(doc: &mut Document) {
@@ -107,11 +109,24 @@ fn bookcase(doc: &mut Document) {
     board(doc, plywood, "Back", DVec3::new(x, 11.25, 48.0), DVec3::X, -DVec3::Z, [31.5, 48.0, 0.25]);
 }
 
+/// Group everything at the top level (except `keep`) into a group named `name`.
+fn group_all(doc: &mut Document, name: &str, keep: &[InstanceId]) -> InstanceId {
+    let parts: Vec<Entity> = doc.container().instances().map(|(id, _)| id).filter(|id| !keep.contains(id)).map(Entity::Instance).collect();
+    doc.selection_mut().clear();
+    doc.selection_mut().extend(parts);
+    let group = doc.group_selection(DefinitionKind::Group).expect("a group");
+    doc.rename_instance(group, name);
+    doc.selection_mut().clear();
+    group
+}
+
 fn main() {
     let path = std::env::args().nth(1).unwrap_or_else(|| "Sample Furniture.woodsketch".into());
     let mut doc = Document::default();
     side_table(&mut doc);
+    let table = group_all(&mut doc, "Table", &[]);
     bookcase(&mut doc);
+    group_all(&mut doc, "Bookcase", &[table]);
     std::fs::write(&path, woodsketch_doc::file::to_string(doc.scene())).expect("write the drawing");
     let list = woodsketch_doc::cutlist::cut_list(doc.scene());
     let report = woodsketch_doc::movement::check(doc.scene(), doc.scene().moisture_swing());

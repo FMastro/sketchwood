@@ -1503,3 +1503,34 @@ fn wood_movement_tab_warns_about_a_top_fixed_to_its_aprons() {
     assert!(harness.query_all_by_label_contains("Left apron").count() >= 1);
     snapshot(&mut harness, "wood_movement");
 }
+
+#[test]
+fn joinery_panel_cuts_biscuits_and_the_cut_list_counts_them() {
+    use egui_kittest::kittest::Queryable;
+    use glam::DVec3;
+    use woodsketch_doc::board::Board;
+    let mut harness = app();
+    {
+        let doc = harness.state_mut().document_mut();
+        let oak = doc.add_preset(woodsketch_doc::library::LIBRARY.iter().find(|p| p.name == "Red Oak").unwrap());
+        let side = doc.add_board(&Board { origin: DVec3::ZERO, length_dir: DVec3::Z, width_dir: DVec3::Y, length: 30.0, width: 11.25, thickness: 0.75 }, Some(oak)).unwrap();
+        let shelf = doc.add_board(&Board { origin: DVec3::new(0.0, 0.0, 12.0), length_dir: DVec3::X, width_dir: DVec3::Y, length: 20.0, width: 11.25, thickness: 0.75 }, Some(oak)).unwrap();
+        doc.selection_mut().extend([woodsketch_doc::Entity::Instance(shelf), woodsketch_doc::Entity::Instance(side)]);
+    }
+    harness.run();
+    harness.get(egui_kittest::kittest::by().role(egui::accesskit::Role::ComboBox).value("Dado, groove or rabbet")).click();
+    harness.run();
+    harness.get_by_label("Biscuits").click();
+    harness.run();
+    assert!(harness.query(egui_kittest::kittest::by().role(egui::accesskit::Role::ComboBox).value("#20")).is_some(), "#20 for a 3/4\" shelf");
+    harness.get_by_label("Cut biscuit slots").click();
+    harness.run();
+    assert!(harness.query_by_label("Already joined:").is_some());
+    harness.state_mut().document_mut().selection_mut().clear();
+    harness.run();
+    harness.get_by_label(egui_phosphor::regular::TABLE).click();
+    harness.run();
+    assert!(harness.query_by_label_contains("Hardware").is_some());
+    assert!(harness.query_by_label("#20 biscuit").is_some());
+    snapshot(&mut harness, "hardware_list");
+}

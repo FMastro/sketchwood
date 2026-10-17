@@ -26,6 +26,8 @@ pub struct Part {
     pub thickness: f64,
     /// Solid wood: whether it's glued up from narrower boards ([`crate::cutplan::glue_up`]).
     pub glue_up: crate::part::GlueUp,
+    /// What reinforces a glue-up's seams.
+    pub edge_joint: crate::part::EdgeJoint,
 }
 
 /// The parts made of one material.
@@ -70,6 +72,23 @@ pub struct CutList {
 }
 
 impl CutList {
+    /// Everything besides wood, for the shopping list: `(piece, how many)`, from the joints made
+    /// (dowels, biscuits, loose tenons, screws) and the seams of reinforced glue-ups.
+    pub fn hardware(&self, scene: &Scene) -> Vec<(String, u32)> {
+        let mut total: BTreeMap<String, u32> = BTreeMap::new();
+        for hardware in scene.joints.iter().filter_map(|j| j.hardware.as_ref()) {
+            *total.entry(hardware.name.clone()).or_default() += hardware.count;
+        }
+        for material in self.materials.iter().filter(|m| m.kind == Some(MaterialKind::SolidWood)) {
+            for part in &material.parts {
+                let (Some(boards), Some((piece, spacing))) = (crate::cutplan::glue_up(part, &material.standard), part.edge_joint.piece(part.thickness)) else { continue };
+                let seams = (boards - 1) * crate::part::EdgeJoint::per_seam(spacing, part.length);
+                *total.entry(piece).or_default() += seams * part.count as u32;
+            }
+        }
+        total.into_iter().collect()
+    }
+
     /// How many parts (counting copies) have no material yet.
     pub fn needs_material(&self) -> usize {
         self.materials.iter().filter(|m| m.material.is_none()).map(MaterialParts::part_count).sum()
@@ -78,7 +97,7 @@ impl CutList {
 
 /// Identical parts while grouping: their names, how many, and their exact size.
 type Group = (Vec<String>, usize, [f64; 3]);
-type GroupKey = (Option<MaterialId>, [i64; 3], crate::part::GlueUp);
+type GroupKey = (Option<MaterialId>, [i64; 3], crate::part::GlueUp, crate::part::EdgeJoint);
 
 /// One part found in the drawing, before grouping.
 struct Found {
@@ -86,6 +105,7 @@ struct Found {
     material: Option<MaterialId>,
     size: [f64; 3],
     glue_up: crate::part::GlueUp,
+    edge_joint: crate::part::EdgeJoint,
 }
 
 pub fn cut_list(scene: &Scene) -> CutList {
@@ -98,7 +118,7 @@ pub fn cut_list(scene: &Scene) -> CutList {
     let mut groups: BTreeMap<GroupKey, Group> = BTreeMap::new();
     for part in found {
         let size_key = part.size.map(key);
-        let entry = groups.entry((part.material, size_key, part.glue_up)).or_insert_with(|| (Vec::new(), 0, part.size));
+        let entry = groups.entry((part.material, size_key, part.glue_up, part.edge_joint)).or_insert_with(|| (Vec::new(), 0, part.size));
         if !entry.0.contains(&part.name) {
             entry.0.push(part.name);
         }
@@ -106,8 +126,8 @@ pub fn cut_list(scene: &Scene) -> CutList {
     }
 
     let mut by_material: BTreeMap<Option<MaterialId>, Vec<Part>> = BTreeMap::new();
-    for ((material, _, glue_up), (names, count, [thickness, width, length])) in groups {
-        by_material.entry(material).or_default().push(Part { label: String::new(), names, count, length, width, thickness, glue_up });
+    for ((material, _, glue_up, edge_joint), (names, count, [thickness, width, length])) in groups {
+        by_material.entry(material).or_default().push(Part { label: String::new(), names, count, length, width, thickness, glue_up, edge_joint });
     }
 
     let mut materials: Vec<MaterialParts> = by_material
@@ -157,6 +177,7 @@ fn collect(scene: &Scene, container: &Container, inherited: Option<MaterialId>, 
                 material: material.or_else(|| most_common_face_material(model)),
                 size: [thickness, width, length],
                 glue_up: definition.part.glue_up,
+                edge_joint: definition.part.edge_joint,
             });
         }
         collect(scene, &definition.container, material, linear, found);
@@ -333,5 +354,42 @@ mod tests {
         let lines: Vec<&str> = csv.lines().collect();
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[1], "\"No material\",A,\"Group#1, Group#2\",2,30.0000,3.5000,1.5000");
+    }
+}
+
+#[cfg(test)]
+mod hardware_tests {
+    use glam::DVec3;
+
+    use crate::board::Board;
+    use crate::library::LIBRARY;
+    use crate::part::{EdgeJoint, GlueUp};
+    use crate::{Document, InstanceId};
+
+    fn board(doc: &mut Document, origin: DVec3, length_dir: DVec3, width_dir: DVec3, [l, w, t]: [f64; 3]) -> InstanceId {
+        let cherry = doc.add_preset(LIBRARY.iter().find(|p| p.name == "Cherry").unwrap());
+        doc.add_board(&Board { origin, length_dir, width_dir, length: l, width: w, thickness: t }, Some(cherry)).unwrap()
+    }
+
+    #[test]
+    fn joints_and_reinforced_glue_ups_add_up_to_a_hardware_list() {
+        let mut doc = Document::default();
+        // A 36" x 20" top glued up from 3 boards with biscuits: 2 seams x 4 biscuits.
+        let top = board(&mut doc, DVec3::ZERO, DVec3::X, DVec3::Y, [36.0, 20.0, 0.75]);
+        doc.edit_part(top, |p| p.edge_joint = EdgeJoint::Biscuits);
+        // A rail doweled into a stile.
+        let stile = board(&mut doc, DVec3::new(50.0, 0.0, 0.0), DVec3::Z, DVec3::X, [30.0, 3.0, 1.5]);
+        let rail = board(&mut doc, DVec3::new(53.0, 0.0, 12.5), DVec3::X, -DVec3::Z, [20.0, 2.5, 1.5]);
+        doc.dowels(rail, stile, crate::joinery::Dowels { count: 2, diameter: 0.375, depth: 1.0 }).unwrap();
+        let list = super::cut_list(doc.scene());
+        assert_eq!(list.hardware(doc.scene()), [("#20 biscuit".to_owned(), 8), ("3/8\" x 2\" dowel".to_owned(), 2)]);
+        // Glued only: no biscuits; one board: no seams.
+        doc.edit_part(top, |p| p.edge_joint = EdgeJoint::Glue);
+        assert_eq!(super::cut_list(doc.scene()).hardware(doc.scene()).len(), 1);
+        doc.edit_part(top, |p| {
+            p.edge_joint = EdgeJoint::Dowels;
+            p.glue_up = GlueUp::Boards(2);
+        });
+        assert!(super::cut_list(doc.scene()).hardware(doc.scene()).contains(&("3/8\" x 2\" dowel".to_owned(), 2 + 6)));
     }
 }

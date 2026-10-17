@@ -13,11 +13,12 @@ modeling (rooms, jigs, odd shapes) working; the wood features add on and stay op
 2. **Board from stock** (done). Later: choose which side of the line a lumber board's width goes
    (it's always to the left of the drag now), Tab to cycle a board's faces against a surface, and
    picking stock straight from the Materials panel.
-3. **Joinery** (done: dado and rabbet let in from a butt joint, mortise and tenon, dowels, box
-   joint, half-lap, cut where parts overlap). Still to come: pocket screws, dovetails (through
-   and half-blind), splines and biscuits; dowels in the cut list as hardware; editing or removing
+3. **Joinery** (done: dado, groove and rabbet let in from a butt joint, mortise and tenon (and
+   through), dowels, biscuits, loose tenons, pocket screws, box joint, half-lap, cut where parts
+   overlap; reinforced glue-up seams; a hardware list). Still to come: dovetails (through and
+   half-blind), splines; pocket holes drawn (they're listed, not modeled); haunched tenons; editing or removing
    a joint after it's made (joints are listed, not yet parametric); a fit allowance (mortise a hair
-   bigger); through and haunched tenons; parts in different groups (both must be side by side
+   bigger); parts in different groups (both must be side by side
    now); parts that aren't square to each other.
 4. **Edge profiles** (done: roundover, chamfer, cove, ogee, around a face with mitered corners or
    along a length, from the Edge profile panel). Still to come: bead and other bits; profiling a

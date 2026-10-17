@@ -149,6 +149,9 @@ add it there; when you finish an item, remove it.
    place the parts); Entity Info lists joints.
    Copies of a shared component: a cut, tenon or hole the design already has is recognized
    (`already_done`, `repeat`), so one leg component turned to each corner gets two mortises.
+   Biscuits and loose tenons (`Slots`: matching slots, shallower in a face), pocket screws (listed,
+   not drawn), through tenons; each joint's pieces (`Joint::hardware`) and glue-up seams
+   (`PartInfo::edge_joint`) add up in `CutList::hardware` (Parts tab, cut sheet).
 24. Edge profiles: `doc::profile` (`Profile` roundover / chamfer / cove / ogee as a corner curve;
    `Edges::AroundFace` (stacked inset rings, mitered corners) or `Edges::Along` (a profiled
    cross-section extruded); `Document::profile_edges` rebuilds a plain board's geometry, one undo

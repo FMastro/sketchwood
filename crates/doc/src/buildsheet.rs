@@ -158,24 +158,32 @@ fn write_sheet(html: &mut String, scene: &Scene, sheet: &Sheet, label: &str, row
         let part = Part { count: 1, length, width, thickness, glue_up: def.part.glue_up, ..Part::default() };
         let n = crate::cutplan::glue_up(&part, &m.standard)?;
         let (l, w) = crate::cutplan::glue_up_board(&part, n);
-        Some(format!("{n} boards {} x {} x {}", format_length(thickness), format_length(w), format_length(l)))
+        let boards = format!("{n} boards {} x {} x {}", format_length(thickness), format_length(w), format_length(l));
+        // Reinforced seams: what goes in each.
+        let seams = def.part.edge_joint.piece(thickness).map(|(piece, spacing)| {
+            let per_seam = crate::part::EdgeJoint::per_seam(spacing, l);
+            format!("{} {piece}s along each of the {} seams", per_seam, n - 1)
+        });
+        Some((boards, seams))
     });
-    for step in steps(scene, sheet.definition, &stock, &size, glue.as_deref()) {
+    for step in steps(scene, sheet.definition, &stock, &size, glue.as_ref().map(|(b, s)| (b.as_str(), s.as_deref()))) {
         let _ = writeln!(html, "<li>{}</li>", esc(&step));
     }
     html.push_str("</ol></section>\n");
 }
 
 /// What to do to the part, in shop order.
-fn steps(scene: &Scene, def: DefinitionId, stock: &str, size: &str, glue: Option<&str>) -> Vec<String> {
+fn steps(scene: &Scene, def: DefinitionId, stock: &str, size: &str, glue: Option<(&str, Option<&str>)>) -> Vec<String> {
     let name = |d: DefinitionId| scene.definition(d).map_or_else(|| "another part".to_owned(), |d| d.name.clone());
     let mut steps = match glue {
-        Some(boards) => vec![
+        Some((boards, seams)) => vec![
             format!("Mill {boards} from {stock}."),
+            seams.map_or_else(String::new, |s| format!("Cut for {s}.")),
             format!("Glue them edge to edge, alternating the end grain (rings up, then down); when dry, flatten and cut to {size}, grain along the length."),
         ],
         None => vec![format!("Mill to {size} from {stock}, grain along the length.")],
     };
+    steps.retain(|s| !s.is_empty());
     for joint in scene.joints.iter().filter(|j| j.cut == def || j.into == def) {
         let other = name(if joint.cut == def { joint.into } else { joint.cut });
         let kind = joint.kind.name().to_lowercase();
@@ -183,6 +191,10 @@ fn steps(scene: &Scene, def: DefinitionId, stock: &str, size: &str, glue: Option
             (JointKind::MortiseAndTenon, true) => format!("Cut the mortise for {other} ({}).", joint.detail),
             (JointKind::MortiseAndTenon, false) => format!("Cut the tenon that goes into {other} ({}).", joint.detail),
             (JointKind::Dowels, _) => format!("Drill for dowels to join {other} ({}).", joint.detail),
+            (JointKind::Biscuits, _) => format!("Cut biscuit slots to join {other} ({}).", joint.detail),
+            (JointKind::LooseTenons, _) => format!("Cut loose tenon mortises to join {other} ({}).", joint.detail),
+            (JointKind::PocketScrews, false) => format!("Drill pocket holes to screw into {other} ({}).", joint.detail),
+            (JointKind::PocketScrews, true) => format!("{other} is pocket-screwed to it ({}).", joint.detail),
             (JointKind::BoxJoint | JointKind::HalfLap, _) => format!("Cut the {kind} with {other} ({}).", joint.detail),
             (_, true) => format!("Cut the {kind} for {other} ({}).", joint.detail),
             // The part that fits into another's dado or rabbet: already sized for it.

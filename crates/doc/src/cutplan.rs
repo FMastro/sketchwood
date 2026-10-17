@@ -655,6 +655,7 @@ mod tests {
                     width,
                     thickness,
                     glue_up: Default::default(),
+                    edge_joint: Default::default(),
                 })
                 .collect(),
         }

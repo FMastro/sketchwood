@@ -93,6 +93,15 @@ svg text {{ font: 11px system-ui, sans-serif; }}
         }
         html.push_str("</section>\n");
     }
+    // Everything besides wood.
+    let hardware = list.hardware(scene);
+    if !hardware.is_empty() {
+        html.push_str("<section class=\"material\"><h2>Hardware</h2><table><tr><th>Piece</th><th>Qty</th></tr>\n");
+        for (piece, count) in hardware {
+            let _ = writeln!(html, "<tr><td>{}</td><td class=\"num\">{count}</td></tr>", esc(&piece));
+        }
+        html.push_str("</table></section>\n");
+    }
     html.push_str("</body></html>\n");
     html
 }

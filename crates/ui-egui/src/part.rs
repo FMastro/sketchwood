@@ -6,7 +6,7 @@ use eframe::egui;
 use egui_phosphor::regular as ph;
 use woodsketch_doc::cutlist::Part;
 use woodsketch_doc::cutplan::{glue_up, match_stock};
-use woodsketch_doc::part::{Cut, GlueUp, PartAxis};
+use woodsketch_doc::part::{Cut, EdgeJoint, GlueUp, PartAxis};
 use woodsketch_doc::units::format_length;
 use woodsketch_doc::{Document, Entity, InstanceId, MaterialKind};
 
@@ -116,6 +116,28 @@ pub fn show(ui: &mut egui::Ui, doc: &mut Document, instance: InstanceId) {
                 doc.edit_part(instance, |p| p.glue_up = g);
             }
             ui.end_row();
+
+            // Glued up: what reinforces the seams.
+            if glue_up(&part, &m.standard).is_some() {
+                ui.label("Edge joint");
+                let mut picked = None;
+                egui::ComboBox::from_id_salt(("part_edge_joint", instance)).selected_text(info.edge_joint.name()).show_ui(ui, |ui| {
+                    for e in EdgeJoint::ALL {
+                        let response = ui.selectable_label(info.edge_joint == e, e.name());
+                        let response = match e.piece(thickness) {
+                            Some((piece, spacing)) => response.on_hover_text(format!("{piece}s along each seam, about every {}", format_length(spacing))),
+                            None => response.on_hover_text("Edge-glued: a well-jointed glue line is stronger than the wood"),
+                        };
+                        if response.clicked() {
+                            picked = Some(e);
+                        }
+                    }
+                });
+                if let Some(e) = picked {
+                    doc.edit_part(instance, |p| p.edge_joint = e);
+                }
+                ui.end_row();
+            }
         }
     });
 }

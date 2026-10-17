@@ -307,6 +307,19 @@ fn parts_tab(ui: &mut egui::Ui, list: &CutList, doc: &Document, edit: &mut Optio
             }
         });
     }
+    // Everything besides wood: dowels, biscuits, loose tenons, screws.
+    let hardware = list.hardware(doc.scene());
+    if !hardware.is_empty() {
+        ui.add_space(8.0);
+        ui.strong(format!("{} Hardware", ph::NUT));
+        egui::Grid::new("hardware").striped(true).num_columns(2).spacing([16.0, 4.0]).show(ui, |ui| {
+            for (piece, count) in hardware {
+                ui.label(piece);
+                ui.label(count.to_string());
+                ui.end_row();
+            }
+        });
+    }
 }
 
 fn diagrams_tab(ui: &mut egui::Ui, list: &CutList, plans: &[Option<Plan>], doc: &Document) {

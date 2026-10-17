@@ -84,6 +84,27 @@ modeling (rooms, jigs, odd shapes) working; the wood features add on and stay op
    3D Warehouse's terms forbid aggregating its models), cost estimates (board feet / sheets x
    price), exploded views and assembly order.
 
+## Templates
+- Change size rebuilds from scratch, so edits made inside the group by hand are lost (the button's
+  tooltip warns). The wood can't be changed there either (paint the group instead).
+- Fixed stock: 3/4" cases and frames, a 1/2" drawer box, 1/4" plywood backs and bottoms, 1 3/4" legs,
+  3/4" x 4" aprons. Not yet chosen in the panel.
+- Cabinet: shelves are evenly spaced and fixed (no adjustable shelf-pin holes); the back is applied
+  over the back edges, not set in a rabbet; no face frame, toe kick or dividers.
+- Drawer: a box only (no applied false front); the bottom's corners aren't notched around the
+  corner joints.
+- Face frame: top and bottom rails only (no middle rails or mullions).
+- Table: tenon size, apron width and leg size aren't settable; no stretchers or drawer.
+- A new template goes a foot to the right of everything, not where you click.
+
+## Copy and paste
+- Guides aren't copied.
+- The copy stays inside one running WoodSketch: the system clipboard only gets a note, so it can't
+  be pasted into a second copy of WoodSketch or another app.
+- Paste is carried by its box's lowest corner; no picking a different grab point.
+- Pasted loose geometry doesn't merge with geometry it lands on (see Auto-joining below).
+- Duplicate always places 2" to the right; no repeat (Move with Ctrl and `3x` does arrays).
+
 ## Geometry
 - **Auto-joining**: moved or copied geometry doesn't merge with geometry it lands on (shared
   vertices/edges aren't welded). Fine while boards should stay separate.

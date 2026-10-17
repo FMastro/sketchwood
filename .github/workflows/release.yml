@@ -73,11 +73,27 @@ jobs:
       - name: Install vpk
         shell: bash
         run: dotnet tool install -g vpk --version "$VPK_VERSION"
+      - name: macOS icon (.icns from the PNGs)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set=assets/icon/WoodSketch.iconset
+          mkdir -p "$set"
+          for s in 16 32 128 256 512; do
+            cp "assets/icon/woodsketch-$s.png" "$set/icon_${s}x${s}.png"
+            cp "assets/icon/woodsketch-$((s * 2)).png" "$set/icon_${s}x${s}@2x.png"
+          done
+          iconutil -c icns "$set" -o assets/icon/woodsketch.icns
       - name: Pack
         shell: bash
         run: |
           mkdir -p publish releases
           cp "target/${{ matrix.target }}/release/${{ matrix.exe }}" publish/
+          case "${{ runner.os }}" in
+            Windows) icon=assets/icon/woodsketch.ico ;;
+            macOS) icon=assets/icon/woodsketch.icns ;;
+            *) icon=assets/icon/woodsketch-512.png ;;
+          esac
           vpk pack \
             --packId WoodSketch \
             --packVersion "$VERSION" \
@@ -87,6 +103,7 @@ jobs:
             --mainExe "${{ matrix.exe }}" \
             --channel "${{ matrix.channel }}" \
             --runtime "${{ matrix.runtime }}" \
+            --icon "$icon" \
             --outputDir releases
           ls -l releases
       - uses: actions/upload-artifact@v4

@@ -3478,10 +3478,12 @@ version = "1.1.8+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "20489e00e4d8741d6be680764cc12e270655e375a20d1011e844a9c3379e678d"
 dependencies = [
+ "indexmap",
  "serde_core",
  "serde_spanned",
  "toml_datetime",
  "toml_parser",
+ "toml_writer",
  "winnow",
 ]
 
@@ -3514,6 +3516,12 @@ checksum = "baa693a8032d7e1cada7d0041e96126df243179ff061456783ac7f12bda4744c"
 dependencies = [
  "winnow",
 ]
+
+[[package]]
+name = "toml_writer"
+version = "1.1.3+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06bdbd8cfc056b8d2e2e85f29b56a3bdbecb527cef81eb39e3e7b98af4652770"
 
 [[package]]
 name = "tracing"
@@ -4550,6 +4558,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "winresource"
+version = "0.1.34"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2bc6d36480b829272a5bdabf08e6dca8004761c1da7e35efef800540c66221b"
+dependencies = [
+ "toml",
+ "version_check",
+]
+
+[[package]]
 name = "wit-bindgen"
 version = "0.57.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4557,18 +4575,19 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "woodsketch"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "eframe",
  "env_logger",
  "log",
  "velopack",
+ "winresource",
  "woodsketch-ui-egui",
 ]
 
 [[package]]
 name = "woodsketch-doc"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "earcut",
  "glam",
@@ -4578,7 +4597,7 @@ dependencies = [
 
 [[package]]
 name = "woodsketch-render"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bytemuck",
  "glam",
@@ -4589,7 +4608,7 @@ dependencies = [
 
 [[package]]
 name = "woodsketch-tools"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "glam",
  "woodsketch-doc",
@@ -4598,7 +4617,7 @@ dependencies = [
 
 [[package]]
 name = "woodsketch-ui-egui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "eframe",
  "egui",
@@ -4616,7 +4635,7 @@ dependencies = [
 
 [[package]]
 name = "woodsketch-view"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "glam",
 ]

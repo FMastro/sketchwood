@@ -15,7 +15,8 @@ fn main() -> eframe::Result {
             .with_title("WoodSketch")
             .with_inner_size([1280.0, 800.0])
             .with_min_inner_size([640.0, 400.0])
-            .with_maximized(true),
+            .with_maximized(true)
+            .with_icon(std::sync::Arc::new(eframe::icon_data::from_png_bytes(include_bytes!("../../../assets/icon/woodsketch-256.png")).unwrap_or_default())),
         renderer: eframe::Renderer::Wgpu,
         // Open maximized (as SketchUp does) and centered when restored, so the window never
         // starts partly off a scaled-up screen.

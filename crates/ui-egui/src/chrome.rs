@@ -70,6 +70,21 @@ impl WoodSketchApp {
                 ui.close();
                 self.request(&ctx, files::Discard::Open);
             }
+            ui.add_enabled_ui(!self.recent.is_empty(), |ui| {
+                ui.menu_button("Open Recent", |ui| {
+                    let mut open = None;
+                    for (i, path) in self.recent.iter().enumerate() {
+                        let name = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
+                        if ui.button(format!("{} {name}", i + 1)).on_hover_text(path.display().to_string()).clicked() {
+                            open = Some(i);
+                        }
+                    }
+                    if let Some(i) = open {
+                        ui.close();
+                        self.request(&ctx, files::Discard::OpenRecent(i));
+                    }
+                });
+            });
             ui.separator();
             if ui.add(egui::Button::new("Save").shortcut_text("Ctrl+S")).clicked() {
                 ui.close();

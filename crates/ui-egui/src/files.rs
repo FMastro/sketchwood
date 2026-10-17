@@ -12,6 +12,8 @@ use woodsketch_doc::file::{self, EXTENSION, OLD_EXTENSION};
 pub enum Discard {
     New,
     Open,
+    /// Open the drawing at this place in the recent list.
+    OpenRecent(usize),
     Close,
 }
 
@@ -210,4 +212,34 @@ pub fn export_dialog(current: Option<&Path>, format: ExportFormat) -> Option<Pat
         dialog = dialog.set_directory(dir);
     }
     dialog.save_file()
+}
+
+/// How many drawings File > Open Recent lists.
+pub const RECENT_COUNT: usize = 10;
+
+/// Put `path` first in the recent list (once), keeping the newest [`RECENT_COUNT`].
+pub fn remember(recent: &mut Vec<PathBuf>, path: &Path) {
+    let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
+    recent.retain(|p| *p != path);
+    recent.insert(0, path);
+    recent.truncate(RECENT_COUNT);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recent_drawings_newest_first_once_each() {
+        let mut recent = Vec::new();
+        for name in ["a.woodsketch", "b.woodsketch", "a.woodsketch"] {
+            remember(&mut recent, Path::new(name));
+        }
+        let names: Vec<_> = recent.iter().map(|p| p.file_name().unwrap().to_str().unwrap()).collect();
+        assert_eq!(names, ["a.woodsketch", "b.woodsketch"]);
+        for i in 0..20 {
+            remember(&mut recent, Path::new(&format!("{i}.woodsketch")));
+        }
+        assert_eq!(recent.len(), RECENT_COUNT);
+    }
 }

@@ -184,6 +184,8 @@ pub struct Overlay {
     /// "From Point": a dotted line from the remembered point to where the cursor lines up with
     /// it, in the axis color.
     pub alignment: Option<(DVec3, DVec3, Axis)>,
+    /// Axis guide lines (Rotate's protractor): faint lines in the axis colors.
+    pub axis_lines: Vec<(DVec3, DVec3, Axis)>,
     /// The selected part's grain direction: a line through it along the grain.
     pub grain: Option<[DVec3; 2]>,
     /// Dashed lines: the box around the group being edited.
@@ -303,6 +305,10 @@ impl Overlay {
         if let Some(guide) = &mut self.guide {
             guide.from = p(guide.from);
             guide.to = p(guide.to);
+        }
+        for (from, to, _) in &mut self.axis_lines {
+            *from = p(*from);
+            *to = p(*to);
         }
         if let Some((from, to, _)) = &mut self.alignment {
             *from = p(*from);

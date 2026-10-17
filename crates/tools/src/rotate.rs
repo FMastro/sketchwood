@@ -40,6 +40,10 @@ struct Op {
     center: DVec3,
     normal: DVec3,
     stage: Stage,
+    /// The axis the direction under the cursor snapped to, and its direction in the plane.
+    axis: Option<(Axis, DVec3)>,
+    /// How far the starting point was from the center (sizes the axis guide lines).
+    reach: f64,
 }
 
 enum Stage {
@@ -99,7 +103,7 @@ impl RotateTool {
         self.hover = None;
         self.preview = None;
         self.snap = None;
-        self.op = Some(Op { entities, vertices, center, normal, stage: Stage::Rotate { from, angle: 0.0 } });
+        self.op = Some(Op { entities, vertices, center, normal, stage: Stage::Rotate { from, angle: 0.0 }, axis: None, reach: 0.0 });
     }
 
     pub fn hover(&mut self, doc: &Document, screen: Screen<'_>, cursor: Vec2) {
@@ -117,15 +121,28 @@ impl RotateTool {
             Some(s) => Some(s.point - op.normal * (s.point - op.center).dot(op.normal)),
             None => screen.ray(cursor).hit_plane(op.center, op.normal),
         };
+        // Near a red, green or blue direction in the protractor's plane (and not on a feature):
+        // snap to it.
+        op.axis = None;
+        let axis = point.filter(|_| self.snap.is_none()).and_then(|p| near_axis(p - op.center, op.normal));
         match &mut op.stage {
-            Stage::Start(start) => *start = point,
+            Stage::Start(start) => {
+                *start = match (point, axis) {
+                    (Some(p), Some((a, dir))) => {
+                        op.axis = Some((a, dir));
+                        Some(op.center + dir * (p - op.center).dot(dir))
+                    }
+                    _ => point,
+                };
+            }
             Stage::Rotate { from, angle } => {
                 if let Some(point) = point
                     && (point - op.center).length() > EPS
                 {
-                    let to = (point - op.center).normalize();
+                    let to = axis.map_or_else(|| (point - op.center).normalize(), |(_, dir)| dir);
                     let raw = from.cross(to).dot(op.normal).atan2(from.dot(to)).to_degrees();
-                    *angle = snap_angle(raw);
+                    *angle = if axis.is_some() { raw } else { snap_angle(raw) };
+                    op.axis = axis;
                 }
             }
         }
@@ -139,6 +156,7 @@ impl RotateTool {
                 let Some(start) = start.filter(|s| (*s - op.center).length() > EPS) else {
                     return Err("Pick a point away from the center".into());
                 };
+                op.reach = (start - op.center).length();
                 op.stage = Stage::Rotate { from: (start - op.center).normalize(), angle: 0.0 };
                 Ok(())
             }
@@ -237,6 +255,19 @@ impl RotateTool {
             }
         };
         overlay.protractor = Some(Protractor { center: op.center, normal: op.normal, from, to });
+        // The axes through the center, and the one the direction snapped to, in their colors.
+        let reach = match op.stage {
+            Stage::Start(Some(p)) => (p - op.center).length(),
+            _ => op.reach,
+        };
+        if reach > EPS {
+            for (axis, dir) in plane_axes(op.normal).into_iter().step_by(2) {
+                overlay.axis_lines.push((op.center - dir * reach * 1.5, op.center + dir * reach * 1.5, axis));
+            }
+            if let Some((axis, dir)) = op.axis {
+                overlay.guide = Some(crate::Guide { from: op.center, to: op.center + dir * reach, along: Some(crate::infer::Along::Axis(axis)) });
+            }
+        }
         if let Stage::Rotate { angle, .. } = op.stage {
             let turn = rotation(op.center, op.normal, angle.to_radians());
             for (_, edge) in model.edges() {
@@ -270,7 +301,7 @@ impl RotateTool {
         self.last = None;
         self.hover = None;
         self.preview = None;
-        self.op = Some(Op { entities, vertices, center, normal, stage: Stage::Start(None) });
+        self.op = Some(Op { entities, vertices, center, normal, stage: Stage::Start(None), axis: None, reach: 0.0 });
         Ok(())
     }
 
@@ -341,6 +372,28 @@ fn surface_normal(model: &Model, screen: Screen<'_>, cursor: Vec2) -> DVec3 {
 }
 
 /// Snap to the nearest multiple of [`ANGLE_STEP`] degrees when close to it.
+/// Directions within this many degrees of a red, green or blue axis snap to it.
+const AXIS_SNAP_DEGREES: f64 = 4.0;
+
+/// The model axes lying in the plane with `normal`, both ways along each.
+fn plane_axes(normal: DVec3) -> Vec<(Axis, DVec3)> {
+    Axis::ALL
+        .into_iter()
+        .filter_map(|a| {
+            let d = a.dir() - normal * a.dir().dot(normal);
+            (d.length() > 0.999).then(|| (a, d.normalize()))
+        })
+        .flat_map(|(a, d)| [(a, d), (a, -d)])
+        .collect()
+}
+
+/// The in-plane axis `dir` (from the center) is within [`AXIS_SNAP_DEGREES`] of.
+fn near_axis(dir: DVec3, normal: DVec3) -> Option<(Axis, DVec3)> {
+    let dir = dir.normalize_or_zero();
+    let limit = AXIS_SNAP_DEGREES.to_radians().cos();
+    plane_axes(normal).into_iter().filter(|(_, d)| d.dot(dir) >= limit).max_by(|a, b| a.1.dot(dir).total_cmp(&b.1.dot(dir)))
+}
+
 fn snap_angle(degrees: f64) -> f64 {
     let nearest = (degrees / ANGLE_STEP).round() * ANGLE_STEP;
     if (degrees - nearest).abs() <= ANGLE_SNAP_TOLERANCE { nearest } else { degrees }
@@ -393,6 +446,30 @@ mod tests {
 
     fn bounds(doc: &Document) -> (DVec3, DVec3) {
         doc.model().bounds().unwrap()
+    }
+
+    #[test]
+    fn directions_snap_to_the_axes_with_guide_lines() {
+        let (mut doc, camera) = setup();
+        let screen = Screen::new(&camera, SIZE);
+        let mut tool = RotateTool::default();
+        tool.click(&mut doc, screen, at(screen, 0.0, 0.0)).unwrap();
+        // Picking the start a hair off the red axis lands on it.
+        tool.hover(&doc, screen, at(screen, 6.0, 0.3));
+        let mut overlay = Overlay::default();
+        tool.overlay(&doc, &mut overlay);
+        let from = overlay.protractor.unwrap().from.unwrap();
+        assert!(from.y.abs() < 1e-9 && (from.x - 6.0).abs() < 1e-3, "on the red axis: {from}");
+        assert_eq!(overlay.axis_lines.len(), 2, "red and green lie in the ground's plane");
+        // Start off-axis (about 9.5 degrees), then turn to just past the green axis: the angle
+        // snaps so the start lands exactly on green (not to a 15 degree step).
+        tool.click(&mut doc, screen, at(screen, 6.0, 1.0)).unwrap();
+        tool.hover(&doc, screen, at(screen, -0.3, 6.0));
+        let mut overlay = Overlay::default();
+        tool.overlay(&doc, &mut overlay);
+        assert_eq!(overlay.guide.and_then(|g| g.along), Some(crate::infer::Along::Axis(Axis::Y)));
+        let to = overlay.protractor.unwrap().to.unwrap();
+        assert!(to.x.abs() < 1e-9 && to.y > 0.0, "the start direction turned onto green: {to}");
     }
 
     #[test]

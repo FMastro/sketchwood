@@ -415,8 +415,8 @@ impl Document {
                 let mut c = butt.contact.0;
                 c[thin] = (butt.contact.0[thin] + butt.contact.1[thin]) / 2.0;
                 c[wide] = butt.contact.0[wide] + spacing * (f64::from(i) + 0.5);
-                drill(model_mut(scene, path, into)?, c, face_normal, radius, dowels.depth)?;
-                drill(model_mut(scene, path, part)?, to_part.transform_point3(c), end_normal, radius, dowels.depth)?;
+                drill_in(scene, path, into, c, face_normal, radius, dowels.depth)?;
+                drill_in(scene, path, part, to_part.transform_point3(c), end_normal, radius, dowels.depth)?;
             }
             let detail = format!("{} x {} dowels, {} deep each side", dowels.count, format_length(dowels.diameter), format_length(dowels.depth));
             record(scene, path, JointKind::Dowels, part, into, detail)
@@ -525,38 +525,69 @@ fn across(butt: Butt) -> (usize, usize) {
     if size[u] <= size[v] { (u, v) } else { (v, u) }
 }
 
-/// The geometry of `instance` to change (a group shared with copies gets its own first).
-fn model_mut<'s>(scene: &'s mut Scene, path: &[InstanceId], instance: InstanceId) -> Result<&'s mut Model, JoineryError> {
+/// The definition holding a part's own faces, and the map from its coordinates to the part's:
+/// through wrappers (a component made from a group holds just that group).
+fn geometry(scene: &Scene, path: &[InstanceId], instance: InstanceId) -> Result<(DefinitionId, DAffine3), JoineryError> {
+    let mut def = Parts { scene, path }.definition(instance)?;
+    let mut to_part = DAffine3::IDENTITY;
+    for _ in 0..8 {
+        let container = &scene.definition(def).ok_or(JoineryError::NotParts)?.container;
+        if container.model.faces().next().is_some() {
+            break;
+        }
+        let mut inner = container.instances();
+        match (inner.next(), inner.next()) {
+            (Some((_, only)), None) => {
+                to_part *= only.transform;
+                def = only.definition;
+            }
+            _ => break,
+        }
+    }
+    Ok((def, to_part))
+}
+
+/// The geometry of `instance` to change (a group shared with copies gets its own first), and
+/// the map from the part's coordinates into it.
+fn model_mut<'s>(scene: &'s mut Scene, path: &[InstanceId], instance: InstanceId) -> Result<(&'s mut Model, DAffine3), JoineryError> {
     scene.make_unique_if_group(path, instance);
-    let def = Parts { scene, path }.definition(instance)?;
-    Ok(&mut scene.definition_mut(def).ok_or(JoineryError::NotParts)?.container.model)
+    let (def, to_part) = geometry(scene, path, instance)?;
+    Ok((&mut scene.definition_mut(def).ok_or(JoineryError::NotParts)?.container.model, to_part.inverse()))
 }
 
 /// Cut `region` (in `instance`'s coordinates) out of it.
 fn cut_box_in(scene: &mut Scene, path: &[InstanceId], instance: InstanceId, region: Box3) -> Result<(JointKind, f64), JoineryError> {
-    let def = Parts { scene, path }.definition(instance)?;
+    let (def, _) = geometry(scene, path, instance)?;
     let grain = scene.definition(def).map(|d| (d.part.grain, crate::part::extents(d, glam::DMat3::IDENTITY)));
-    cut_box(model_mut(scene, path, instance)?, region, grain)
+    let (model, from_part) = model_mut(scene, path, instance)?;
+    cut_box(model, transform_box(&from_part, region), grain)
 }
 
 /// Grow `part` by `region` (in `frame`'s coordinates), which sits against its end: a let-in
 /// shelf's extra length, a tenon.
 fn grow_into(scene: &mut Scene, path: &[InstanceId], part: InstanceId, frame: InstanceId, region: Box3) -> Result<(), JoineryError> {
-    let p = Parts { scene, path };
-    let in_part = transform_box(&p.relative(frame, part)?, region);
-    let pb = p.part_box(part, part)?;
+    let in_part = transform_box(&Parts { scene, path }.relative(frame, part)?, region);
+    let (model, from_part) = model_mut(scene, path, part)?;
+    let in_model = transform_box(&from_part, in_part);
+    let pb = model.bounds().ok_or(JoineryError::NoSurface)?;
     let (axis, outward) = (0..3)
         .find_map(|k| {
-            if in_part.0[k] >= pb.1[k] - TOUCH {
+            if in_model.0[k] >= pb.1[k] - TOUCH {
                 Some((k, 1.0))
-            } else if in_part.1[k] <= pb.0[k] + TOUCH {
+            } else if in_model.1[k] <= pb.0[k] + TOUCH {
                 Some((k, -1.0))
             } else {
                 None
             }
         })
         .ok_or(JoineryError::NoSurface)?;
-    add_box(model_mut(scene, path, part)?, in_part, axis, outward)
+    add_box(model, in_model, axis, outward)
+}
+
+/// A round hole into `instance` (`center` and `normal` in its coordinates).
+fn drill_in(scene: &mut Scene, path: &[InstanceId], instance: InstanceId, center: DVec3, normal: DVec3, radius: f64, depth: f64) -> Result<(), JoineryError> {
+    let (model, from_part) = model_mut(scene, path, instance)?;
+    drill(model, from_part.transform_point3(center), from_part.transform_vector3(normal).normalize(), radius, depth)
 }
 
 fn transform_box(t: &DAffine3, (lo, hi): Box3) -> Box3 {
@@ -790,6 +821,39 @@ mod tests {
         assert_eq!(doc.let_in(panel, post, 0.5), Ok(JointKind::Groove));
         assert!(closed(&doc, panel) && closed(&doc, post));
         assert_eq!(doc.part_size(panel), Some([24.0, 12.5, 0.75]), "the panel grew into the groove");
+    }
+
+    #[test]
+    fn components_wrapping_a_group_still_half_lap() {
+        let mut doc = Document::default();
+        let a = board(&mut doc, DVec3::ZERO, DVec3::X, DVec3::Y, [20.0, 3.0, 0.75]);
+        let b = board(&mut doc, DVec3::new(8.5, -8.0, 0.0), DVec3::Y, -DVec3::X, [20.0, 3.0, 0.75]);
+        // Components made the old way: each wraps the board's group.
+        let wrap = |doc: &mut Document, part: InstanceId| {
+            doc.edit_scene(|scene, path| scene.group(path, &[crate::Entity::Instance(part)], crate::DefinitionKind::Component)).unwrap()
+        };
+        let (a, b) = (wrap(&mut doc, a), wrap(&mut doc, b));
+        doc.half_lap(a, b).unwrap();
+        let inner = |doc: &Document, part: InstanceId| geometry(doc.scene(), &[], part).unwrap().0;
+        for part in [a, b] {
+            let model = &doc.scene().definition(inner(&doc, part)).unwrap().container.model;
+            assert!(model.faces().count() > 6, "the board inside was cut");
+            assert!(model.edges().all(|(id, _)| model.edge_faces(id).len() == 2));
+        }
+    }
+
+    #[test]
+    fn making_one_group_a_component_converts_it() {
+        let mut doc = Document::default();
+        let part = board(&mut doc, DVec3::ZERO, DVec3::X, DVec3::Y, [20.0, 3.0, 0.75]);
+        doc.selection_mut().extend([crate::Entity::Instance(part)]);
+        assert_eq!(doc.group_selection(crate::DefinitionKind::Component), Some(part), "the same part, not a wrapper");
+        let def = doc.scene().definition(doc.container().instance(part).unwrap().definition).unwrap();
+        assert_eq!(def.kind, crate::DefinitionKind::Component);
+        assert_eq!(def.name, "Component#1");
+        assert!(def.container.model.faces().count() == 6, "its own faces, no group inside");
+        doc.undo();
+        assert_eq!(doc.scene().definition(doc.container().instance(part).unwrap().definition).unwrap().kind, crate::DefinitionKind::Group);
     }
 
     #[test]

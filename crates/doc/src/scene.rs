@@ -458,6 +458,48 @@ impl Scene {
 
     /// A group's definition shared with copies gets its own before editing, so the edit
     /// changes only this copy (SketchUp's behavior). Components stay shared.
+    /// Turn a group into a component or back, in place (no wrapper around it). A definition
+    /// shared with other copies gets its own first. A default name (`Group#3`) becomes the next
+    /// default of the new kind; a name the user gave is kept.
+    pub fn convert_instance(&mut self, path: &Path, instance: InstanceId, kind: DefinitionKind) -> bool {
+        let Some(definition) = self.container(path).and_then(|c| c.instance(instance)).map(|i| i.definition) else { return false };
+        let Some(def) = self.definition(definition) else { return false };
+        if def.kind == kind {
+            return false;
+        }
+        let definition = if self.instance_count(definition) > 1 {
+            let new = DefinitionId(self.definitions.insert(def.clone()));
+            if let Some(inst) = self.container_mut(path).and_then(|c| c.instance_mut(instance)) {
+                inst.definition = new;
+            }
+            new
+        } else {
+            definition
+        };
+        let default_name = |name: &str| {
+            ["Group#", "Component#"].iter().any(|p| name.strip_prefix(p).is_some_and(|n| n.parse::<u32>().is_ok()))
+        };
+        let rename = self.definition(definition).is_some_and(|d| default_name(&d.name));
+        let name = match kind {
+            DefinitionKind::Group if rename => {
+                self.next_group += 1;
+                Some(format!("Group#{}", self.next_group))
+            }
+            DefinitionKind::Component if rename => {
+                self.next_component += 1;
+                Some(format!("Component#{}", self.next_component))
+            }
+            _ => None,
+        };
+        if let Some(def) = self.definition_mut(definition) {
+            def.kind = kind;
+            if let Some(name) = name {
+                def.name = name;
+            }
+        }
+        true
+    }
+
     pub fn make_unique_if_group(&mut self, path: &Path, instance: InstanceId) {
         let Some(container) = self.container(path) else { return };
         let Some(inst) = container.instance(instance) else { return };

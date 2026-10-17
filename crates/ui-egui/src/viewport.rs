@@ -454,6 +454,14 @@ fn draw_overlay(painter: &egui::Painter, rect: egui::Rect, camera: &OrbitCamera,
             }
         }
     }
+
+    // Axis guide lines through the protractor's center.
+    for &(from, to, axis) in &overlay.axis_lines {
+        if let (Some(a), Some(b)) = (screen(from), screen(to)) {
+            painter.extend(egui::Shape::dashed_line(&[a, b], egui::Stroke::new(1.0, axis_color(axis).gamma_multiply(0.6)), 6.0, 4.0));
+        }
+    }
+
     // "From Point": dotted in the axis color from the remembered point to where the cursor
     // lines up with it.
     if let Some((anchor, point, axis)) = overlay.alignment

@@ -614,6 +614,13 @@ impl Document {
         if entities.is_empty() {
             return None;
         }
+        // One group made a component (or back): convert it rather than wrapping it in another.
+        if let [Entity::Instance(only)] = entities[..]
+            && self.container().instance(only).and_then(|i| self.scene().definition(i.definition)).is_some_and(|d| d.kind != kind)
+        {
+            self.edit_scene(|scene, path| scene.convert_instance(path, only, kind));
+            return Some(only);
+        }
         let instance = self.edit_scene(|scene, path| scene.group(path, &entities, kind))?;
         let selection = self.selection_mut();
         selection.clear();

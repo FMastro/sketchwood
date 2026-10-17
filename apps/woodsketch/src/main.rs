@@ -16,6 +16,9 @@ fn main() -> eframe::Result {
         // Open maximized (as SketchUp does) and centered when restored, so the window never
         // starts partly off a scaled-up screen.
         centered: true,
+        // Settings (recent files) are kept between runs, but not the window: it always opens
+        // maximized and centered.
+        persist_window: false,
         ..Default::default()
     };
     // `woodsketch drawing.woodsketch` opens that drawing.

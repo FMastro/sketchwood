@@ -65,9 +65,11 @@ add it there; when you finish an item, remove it.
    distance or `x,y,z` / `<x,y,z>` / `[x,y,z]`.
 5. Midpoint and on-edge snapping (done): `pick::snap_feature`, priority endpoint > midpoint > on-edge
 6. Rotate (done): protractor tool (Q) + Move rotation grips on bounding-box faces; 15° snap,
-   typed angles, Ctrl-tap copy, `3x` / `/3` rotational arrays
+   typed angles, Ctrl-tap copy, `3x` / `/3` rotational arrays; axis guide lines through the center and
+   a 4° snap onto red/green/blue (over the 15° steps)
 7. Groups and components (done): `doc::scene` (Scene, Container, Definition, Instance, View),
    editing path (double-click in, Esc / click outside out), G / Ctrl+G, explode, Outliner panel.
+   G on one group (or Ctrl+G on one component) converts it in place instead of wrapping it.
    Push/Pull auto-groups a board pulled from a free face (setting, on by default). Tools work
    in the edited container's coordinates via `Screen::in_context`; picking/snapping/drawing use
    the flattened `View` (edited geometry keeps its ids; picks resolve to instances).
@@ -80,7 +82,8 @@ add it there; when you finish an item, remove it.
    Info material picker. Material edits merge into one undo step (`edit_scene_merging`).
 10. Save/open (done): `.woodsketch` JSON (`.scraft` before the rename, still opened) (`doc::file`, versioned header, serde derives on the scene),
    File menu + Ctrl+N/O/S/Shift+S, native dialogs (`rfd`), title shows `*` when unsaved,
-   "Save changes?" before New/Open/Close, `woodsketch drawing.woodsketch` opens a file.
+   "Save changes?" before New/Open/Close, `woodsketch drawing.woodsketch` opens a file. File > Open Recent
+   (last 10, kept with eframe's persistence; the window itself isn't restored).
    Later: `.skp` import via the C SDK.
 11. Cut list (done): `doc::cutlist` (parts = visible groups/components with faces, grouped by
    material + size, labeled A, B...; CSV) and `doc::cutplan` (sheet goods + solid wood: 2D

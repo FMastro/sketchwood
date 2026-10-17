@@ -20,6 +20,9 @@ use woodsketch_doc::Document;
 use woodsketch_tools::Tools;
 use viewport::Viewport;
 
+/// Where the recent-drawings list is kept in eframe's settings.
+const RECENT_KEY: &str = "recent_drawings";
+
 pub struct WoodSketchApp {
     doc: Document,
     tools: Tools,
@@ -33,6 +36,8 @@ pub struct WoodSketchApp {
     show_about: bool,
     /// Units for File > Export.
     export_units: woodsketch_doc::export::ExportUnits,
+    /// Drawings opened or saved lately, newest first (File > Open Recent); kept between runs.
+    recent: Vec<PathBuf>,
 }
 
 impl WoodSketchApp {
@@ -55,6 +60,7 @@ impl WoodSketchApp {
             show_tray: true,
             show_about: false,
             export_units: woodsketch_doc::export::ExportUnits::Inches,
+            recent: cc.storage.and_then(|s| eframe::get_value(s, RECENT_KEY)).unwrap_or_default(),
         }
     }
 
@@ -79,6 +85,7 @@ impl WoodSketchApp {
     pub fn open_path(&mut self, path: &Path) -> Result<(), String> {
         let doc = files::Files::read(path)?;
         self.replace_document(doc, Some(path.to_owned()));
+        files::remember(&mut self.recent, path);
         Ok(())
     }
 
@@ -89,7 +96,9 @@ impl WoodSketchApp {
     }
 
     pub fn save_to(&mut self, path: &Path) -> Result<(), String> {
-        self.files.save_to(&self.doc, path)
+        self.files.save_to(&self.doc, path)?;
+        files::remember(&mut self.recent, path);
+        Ok(())
     }
 
     /// Whether there are changes since the drawing was opened or last saved.
@@ -131,6 +140,15 @@ impl WoodSketchApp {
                 if let Some(path) = files::open_dialog(self.files.path.as_deref())
                     && let Err(error) = self.open_path(&path)
                 {
+                    self.files.show_error(error);
+                }
+            }
+            files::Discard::OpenRecent(i) => {
+                if let Some(path) = self.recent.get(i).cloned()
+                    && let Err(error) = self.open_path(&path)
+                {
+                    // Gone or unreadable: drop it from the list.
+                    self.recent.retain(|p| *p != path);
                     self.files.show_error(error);
                 }
             }
@@ -202,6 +220,10 @@ impl WoodSketchApp {
 }
 
 impl eframe::App for WoodSketchApp {
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        eframe::set_value(storage, RECENT_KEY, &self.recent);
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.handle_files(&ctx);

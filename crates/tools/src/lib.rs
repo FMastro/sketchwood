@@ -2,6 +2,7 @@
 //! keyboard input into calls on [`Tools`], and draws what [`Tools::overlay`] returns.
 
 mod arc;
+mod board;
 mod circle;
 mod eraser;
 pub mod infer;
@@ -23,6 +24,8 @@ use woodsketch_view::OrbitCamera;
 
 pub use pick::{Snap, SnapKind};
 use arc::ArcTool;
+use board::BoardTool;
+pub use board::Picked;
 use circle::CircleTool;
 use eraser::EraserTool;
 use line::LineTool;
@@ -47,6 +50,7 @@ pub enum ToolId {
     Arc,
     Rectangle,
     Circle,
+    Board,
     PushPull,
     Move,
     Rotate,
@@ -59,7 +63,7 @@ pub enum ToolId {
 }
 
 impl ToolId {
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 17] = [
         Self::Select,
         Self::Eraser,
         Self::PaintBucket,
@@ -67,6 +71,7 @@ impl ToolId {
         Self::Arc,
         Self::Rectangle,
         Self::Circle,
+        Self::Board,
         Self::PushPull,
         Self::Move,
         Self::Rotate,
@@ -87,6 +92,7 @@ impl ToolId {
             Self::Arc => "Arc",
             Self::Rectangle => "Rectangle",
             Self::Circle => "Circle",
+            Self::Board => "Board",
             Self::PushPull => "Push/Pull",
             Self::Move => "Move",
             Self::Rotate => "Rotate",
@@ -109,6 +115,7 @@ impl ToolId {
             Self::Arc => 'a',
             Self::Rectangle => 'r',
             Self::Circle => 'c',
+            Self::Board => 'w',
             Self::PushPull => 'p',
             Self::Move => 'm',
             Self::Rotate => 'q',
@@ -347,6 +354,7 @@ pub struct Tools {
     offset: OffsetTool,
     arc: ArcTool,
     circle: CircleTool,
+    board: BoardTool,
     scale: ScaleTool,
     eraser: EraserTool,
     rectangle: RectangleTool,
@@ -376,6 +384,7 @@ impl Default for Tools {
             offset: OffsetTool::default(),
             arc: ArcTool::default(),
             circle: CircleTool::default(),
+            board: BoardTool::default(),
             scale: ScaleTool::default(),
             eraser: EraserTool::default(),
             rectangle: RectangleTool::default(),
@@ -393,6 +402,15 @@ impl Default for Tools {
 }
 
 impl Tools {
+    /// The Board tool: the stock it draws with, and whether lumber stands on edge.
+    pub fn board(&self) -> &BoardTool {
+        &self.board
+    }
+
+    pub fn board_mut(&mut self) -> &mut BoardTool {
+        &mut self.board
+    }
+
     pub fn active(&self) -> ToolId {
         self.active
     }
@@ -456,6 +474,7 @@ impl Tools {
         self.offset.cancel();
         self.arc.cancel();
         self.circle.cancel();
+        self.board.cancel();
         self.scale.cancel();
         self.eraser.cancel();
         self.rectangle.cancel();
@@ -562,6 +581,15 @@ impl Tools {
             (ToolId::Circle, PointerEvent::Click { pos, .. }) => {
                 self.typed.clear();
                 self.circle.click(doc, screen, pos)
+            }
+            (ToolId::Board, PointerEvent::Move(pos) | PointerEvent::Drag { pos, .. }) => {
+                self.board.ensure_stock(doc);
+                self.board.hover(doc, screen, pos);
+                Ok(())
+            }
+            (ToolId::Board, PointerEvent::Click { pos, .. }) => {
+                self.typed.clear();
+                self.board.click(doc, screen, pos)
             }
             (ToolId::Offset, PointerEvent::Move(pos) | PointerEvent::Drag { pos, .. }) => {
                 self.offset.hover(doc, screen, pos);
@@ -678,6 +706,7 @@ impl Tools {
         self.line.set_shift(shift);
         self.move_tool.set_shift(shift);
         self.tape.set_shift(shift);
+        self.board.set_shift(shift);
     }
 
     /// A tap of Ctrl on its own: toggles copying in Move.
@@ -687,6 +716,7 @@ impl Tools {
             ToolId::Move => self.move_tool.toggle_copy(),
             ToolId::Rotate => self.rotate.toggle_copy(),
             ToolId::TapeMeasure => self.tape.cycle_mode(),
+            ToolId::Board => self.board.toggle_on_edge(),
             ToolId::Scale => self.scale.toggle_center(),
             _ => {}
         }
@@ -697,6 +727,7 @@ impl Tools {
         match self.active {
             ToolId::Line => self.line.lock_axis(axis),
             ToolId::TapeMeasure => self.tape.lock_axis(axis),
+            ToolId::Board => self.board.lock_axis(axis),
             ToolId::Move => self.move_tool.lock_axis(axis),
             ToolId::Rotate => self.rotate.lock_axis(axis),
             _ => {}
@@ -735,6 +766,7 @@ impl Tools {
             ToolId::Offset => self.offset.enter(doc, &typed),
             ToolId::Arc => self.arc.enter(doc, &typed),
             ToolId::Circle => self.circle.enter(doc, &typed),
+            ToolId::Board => self.board.enter(doc, &typed),
             ToolId::Scale => self.scale.enter(doc, &typed),
             ToolId::Rectangle => self.rectangle.enter(doc, &typed),
             ToolId::PushPull => self.push_pull.enter(doc, &typed),
@@ -757,6 +789,7 @@ impl Tools {
             || self.offset.is_busy()
             || self.arc.is_busy()
             || self.circle.is_busy()
+            || self.board.is_busy()
             || self.scale.is_busy()
             || self.eraser.is_busy()
             || self.rectangle.is_busy()
@@ -826,6 +859,7 @@ impl Tools {
             ToolId::Offset => self.offset.status().into(),
             ToolId::Arc => self.arc.status(),
             ToolId::Circle => self.circle.status(),
+            ToolId::Board => self.board.status(),
             ToolId::Scale => self.scale.status(),
             ToolId::Eraser => self.eraser.status().into(),
             ToolId::Rectangle => self.rectangle.status().into(),
@@ -847,6 +881,7 @@ impl Tools {
             ToolId::Line | ToolId::TapeMeasure => "Length",
             ToolId::Arc => self.arc.measurement_label(),
             ToolId::Circle => "Radius",
+            ToolId::Board => self.board.measurement_label(),
             ToolId::Scale => "Scale",
             ToolId::PushPull | ToolId::Move | ToolId::Offset => "Distance",
             ToolId::Rotate => "Angle",
@@ -865,6 +900,7 @@ impl Tools {
             ToolId::Offset => self.offset.measurement(),
             ToolId::Arc => self.arc.measurement(),
             ToolId::Circle => self.circle.measurement(),
+            ToolId::Board => self.board.measurement(),
             ToolId::Scale => self.scale.measurement(),
             ToolId::Rectangle => self.rectangle.measurement(),
             ToolId::PushPull => self.push_pull.measurement(),
@@ -895,6 +931,7 @@ impl Tools {
             ToolId::Offset => self.offset.overlay(doc, &mut overlay),
             ToolId::Arc => self.arc.overlay(&mut overlay),
             ToolId::Circle => self.circle.overlay(&mut overlay),
+            ToolId::Board => self.board.overlay(&mut overlay),
             ToolId::Scale => self.scale.overlay(&mut overlay),
             ToolId::Eraser => self.eraser.overlay(doc, &mut overlay),
             ToolId::Rectangle => self.rectangle.overlay(&mut overlay),

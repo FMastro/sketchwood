@@ -6,6 +6,7 @@ pub mod files;
 mod icons;
 mod keys;
 mod materials;
+mod board;
 mod outliner;
 mod part;
 mod tags;

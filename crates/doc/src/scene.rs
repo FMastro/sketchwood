@@ -345,6 +345,21 @@ impl Scene {
         transform
     }
 
+    /// Add `contents` as a new group in the container at `path`, placed by `transform` and
+    /// painted with `material`. Returns the new instance.
+    pub fn place_group(&mut self, path: &Path, contents: Container, transform: DAffine3, material: Option<MaterialId>) -> Option<InstanceId> {
+        self.container(path)?;
+        self.next_group += 1;
+        let name = format!("Group#{}", self.next_group);
+        let definition = DefinitionId(self.definitions.insert(Definition {
+            name,
+            kind: DefinitionKind::Group,
+            container: contents,
+            part: Default::default(),
+        }));
+        Some(self.container_mut(path)?.add_instance(Instance { definition, transform, tag: None, material }))
+    }
+
     /// Group (or componentize) `entities` of the container at `path`: their geometry and
     /// instances move into a new definition, replaced by one instance of it. The definition's
     /// origin is the corner of their bounding box. Returns the new instance, or `None` if

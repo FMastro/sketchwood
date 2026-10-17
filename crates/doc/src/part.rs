@@ -77,8 +77,10 @@ pub fn extents(definition: &Definition, linear: DMat3) -> Option<DVec3> {
     let points: Vec<DVec3> = model.vertices().map(|(_, p)| p).collect();
     let lo = points.iter().copied().reduce(DVec3::min)?;
     let hi = points.iter().copied().reduce(DVec3::max)?;
-    // Rotation doesn't change sizes; scale along each axis does.
-    Some(DVec3::from_array([0, 1, 2].map(|i| (hi - lo)[i] * (linear * DVec3::AXES[i]).length())))
+    // Rotation doesn't change sizes; scale along each axis does. Rounded to a billionth of an
+    // inch, so a turned board is still exactly 96" rather than 95.99999999999999".
+    let size = |i: usize| (hi - lo)[i] * (linear * DVec3::AXES[i]).length();
+    Some(DVec3::from_array([0, 1, 2].map(|i| (size(i) * 1e9).round() / 1e9)))
 }
 
 /// `[length, width, thickness]` from a part's extents: length along the grain (the longest side

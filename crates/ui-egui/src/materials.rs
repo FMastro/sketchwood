@@ -95,7 +95,6 @@ impl MaterialsPanel {
     }
 }
 
-/// The + menu: library materials, or a blank one of a type.
 /// The + menu: library materials, or a blank one of a type. Returns the material added.
 fn add_menu(ui: &mut egui::Ui, doc: &mut Document, tools: &mut Tools) -> Option<MaterialId> {
     let mut added = None;

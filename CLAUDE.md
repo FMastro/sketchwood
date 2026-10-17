@@ -125,6 +125,14 @@ add it there; when you finish an item, remove it.
    part's stock from its own size (a 1.5 x 3.5 x 84 stud of Pine Lumber -> 2x4, 8'). Library of
    species/products (`doc::library`); older drawings upgrade on open. Paint Bucket paints the
    whole object (Ctrl: one face).
+21. Parts know their grain (done): `doc::part` (`PartInfo` on each definition: grain axis or longest
+   side, flat-sawn / quartersawn); the cut list measures length along the grain; Entity Info part
+   section (size, stock, grain, cut) and a grain arrow on the selected part.
+22. Board from stock (done): `doc::board` (`Stock`, `stock_options`, `parse_board` for `2x4x96` /
+   `3/4x11 1/4x30`, `Document::add_board`: a group whose own axes are length, width, thickness).
+   Board tool (W): lumber drags out its length (flat, Ctrl on edge), sheets and solid wood drag a
+   rectangle at their thickness; Board panel in the tray picks the stock. Push/Pull on a free face
+   snaps to the drawing's standard thicknesses.
 
 ## Direction
 Specialized for woodworking: SketchUp-familiar modeling where parts know they're wood (species,

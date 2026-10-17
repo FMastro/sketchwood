@@ -16,7 +16,7 @@ const BUTTON_SIZE: f32 = 32.0;
 /// The Large Tool Set, two columns, grouped as in SketchUp.
 const TOOL_SET: &[&[ToolId]] = &[
     &[ToolId::Select, ToolId::Eraser, ToolId::PaintBucket],
-    &[ToolId::Line, ToolId::Arc, ToolId::Rectangle, ToolId::Circle],
+    &[ToolId::Line, ToolId::Arc, ToolId::Rectangle, ToolId::Circle, ToolId::Board],
     &[ToolId::PushPull, ToolId::Move, ToolId::Rotate, ToolId::Scale, ToolId::Offset],
     &[ToolId::TapeMeasure],
     &[ToolId::Orbit, ToolId::Pan, ToolId::Zoom],
@@ -51,7 +51,7 @@ impl WoodSketchApp {
                 self.edit_menu(ui);
                 self.view_menu(ui);
                 self.camera_menu(ui);
-                tool_menu(ui, &mut self.tools, "Draw", &[ToolId::Line, ToolId::Arc, ToolId::Rectangle, ToolId::Circle]);
+                tool_menu(ui, &mut self.tools, "Draw", &[ToolId::Line, ToolId::Arc, ToolId::Rectangle, ToolId::Circle, ToolId::Board]);
                 self.tools_menu(ui);
                 self.window_menu(ui);
                 self.help_menu(ui);
@@ -311,6 +311,9 @@ impl WoodSketchApp {
             });
             ui.separator();
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                if self.tools.active() == ToolId::Board {
+                    tray_section(ui, "Board", |ui| crate::board::show(ui, &mut self.doc, &mut self.tools));
+                }
                 tray_section(ui, "Entity Info", |ui| tags::entity_info(ui, &mut self.doc, &mut self.tools));
                 tray_section(ui, "Materials", |ui| self.materials.show(ui, &mut self.doc, &mut self.tools));
                 tray_section(ui, "Tags", |ui| self.tags.show(ui, &mut self.doc));

@@ -37,6 +37,11 @@ struct Op {
     distance: f64,
     /// Started by press-and-drag; finishes on release.
     dragging: bool,
+    /// Pulling a free-standing face into a board: the standard thicknesses of the drawing's
+    /// materials, which the distance snaps to.
+    standards: Vec<f64>,
+    /// The distance snapped to one of them.
+    on_standard: bool,
 }
 
 struct Done {
@@ -74,6 +79,13 @@ impl PushPullTool {
             Some(s) => (s.point - op.anchor).dot(op.normal),
             None => closest_on_line(op.anchor, op.normal, &screen.ray(cursor)).unwrap_or(op.distance),
         };
+        op.on_standard = false;
+        if self.snap.is_none()
+            && let Some(t) = nearest_standard(op, screen)
+        {
+            op.distance = t;
+            op.on_standard = true;
+        }
     }
 
     pub fn click(&mut self, doc: &mut Document, screen: Screen<'_>, cursor: Vec2, count: u8) -> Result<(), String> {
@@ -158,6 +170,9 @@ impl PushPullTool {
 
     pub fn overlay(&self, model: &Model, overlay: &mut Overlay) {
         overlay.snap = self.snap;
+        if self.op.as_ref().is_some_and(|op| op.on_standard) {
+            overlay.cursor_note = Some("Standard thickness");
+        }
         let face_id = self.op.as_ref().map(|op| op.face).or(self.hover);
         let Some(face) = face_id.and_then(|id| model.face(id)) else { return };
         let loops: Vec<Vec<DVec3>> = face.loops().map(|l| model.loop_points(l)).collect();
@@ -183,7 +198,10 @@ impl PushPullTool {
         let Some((face, anchor)) = active_face(doc, screen, cursor)? else { return Ok(()) };
         let normal = doc.model().face(face).expect("hit a live face").normal;
         self.last = None;
-        self.op = Some(Op { face, anchor, normal, distance: 0.0, dragging });
+        let model = doc.model();
+        let free = model.face_edges(face).into_iter().all(|e| model.edge_faces(e).len() <= 1);
+        let standards = if free { standard_thicknesses(doc) } else { Vec::new() };
+        self.op = Some(Op { face, anchor, normal, distance: 0.0, dragging, standards, on_standard: false });
         Ok(())
     }
 
@@ -209,6 +227,38 @@ impl PushPullTool {
 
 /// The face of the container being edited under the cursor, and where it was hit. (Clicking a
 /// closed group's face opens the group first; see `Tools::open_group_to_draw_on`.)
+/// Screen distance (points) within which a pull snaps to a standard thickness.
+const STANDARD_SNAP_POINTS: f32 = 8.0;
+
+/// Every thickness the drawing's materials come in: sheet and solid-wood thicknesses, and
+/// both sides of lumber sections (a 2x4 pulled up flat is 1 1/2", on edge 3 1/2").
+fn standard_thicknesses(doc: &Document) -> Vec<f64> {
+    let mut all: Vec<f64> = doc
+        .scene()
+        .materials()
+        .flat_map(|(_, m)| {
+            let s = &m.standard;
+            s.thicknesses.iter().copied().chain(s.sections.iter().flat_map(|&(t, w)| [t, w])).collect::<Vec<_>>()
+        })
+        .collect();
+    all.sort_by(f64::total_cmp);
+    all.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+    all
+}
+
+/// The standard thickness the free distance is near on screen, in its direction.
+fn nearest_standard(op: &Op, screen: Screen<'_>) -> Option<f64> {
+    let at = |d: f64| screen.project(op.anchor + op.normal * d);
+    let here = at(op.distance)?;
+    let sign = if op.distance < 0.0 { -1.0 } else { 1.0 };
+    op.standards
+        .iter()
+        .filter_map(|&t| Some((t * sign, at(t * sign)?.distance(here))))
+        .filter(|&(_, gap)| gap <= STANDARD_SNAP_POINTS)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(t, _)| t)
+}
+
 fn active_face(doc: &Document, screen: Screen<'_>, cursor: Vec2) -> Result<Option<(FaceId, DVec3)>, String> {
     let view = doc.view();
     match hit_face(view.model(), &screen.ray(cursor)) {
@@ -266,6 +316,23 @@ mod tests {
         assert_eq!(doc.container().instances().count(), 1);
         assert_eq!(doc.view().model().faces().count(), 6);
         assert_eq!(tool.measurement(), "96\"");
+    }
+
+    #[test]
+    fn pulling_a_new_board_snaps_to_its_materials_thicknesses() {
+        let (mut doc, camera, _) = setup();
+        doc.add_preset(woodsketch_doc::library::LIBRARY.iter().find(|p| p.name.starts_with("Baltic")).unwrap());
+        let screen = Screen::new(&camera, SIZE);
+        let mut tool = PushPullTool::default();
+        let center = DVec3::new(0.75, 1.75, 0.0);
+        tool.click(&mut doc, screen, at(screen, center), 1).unwrap();
+        tool.hover(&doc, screen, at(screen, center + DVec3::Z * 0.78));
+        assert_eq!(tool.measurement(), "3/4\"", "near 3/4\": snaps to it");
+        tool.hover(&doc, screen, at(screen, center + DVec3::Z * 2.3));
+        assert_ne!(tool.measurement(), "3/4\"", "far from any standard: free");
+        tool.hover(&doc, screen, at(screen, center + DVec3::Z * 0.49));
+        tool.click(&mut doc, screen, at(screen, center + DVec3::Z * 0.49), 1).unwrap();
+        assert_eq!(height(&doc), 0.5);
     }
 
     #[test]

@@ -10,8 +10,9 @@ modeling (rooms, jigs, odd shapes) working; the wood features add on and stay op
    Entity Info and a grain arrow are done. Still to come: picking the reference face/edge on
    the model (with build sheets), and the operations applied to a part (joints, profiles,
    holes) stored on it so they can be edited and listed (with joinery).
-2. **Board from stock**: pick stock (2x4 x 8', 3/4" Plywood) and drag a board out at that
-   section; type `2x4x96`; Push/Pull snapping to standard thicknesses.
+2. **Board from stock** (done). Later: choose which side of the line a lumber board's width goes
+   (it's always to the left of the drag now), Tab to cycle a board's faces against a surface, and
+   picking stock straight from the Materials panel.
 3. **Joinery**: pick two parts and a joint (dado, rabbet, mortise and tenon, dowel, pocket
    screw, box joint); both parts change, and the cut list includes tenons and the like.
 4. **Edge profiles**: router bits from parameters (roundover, chamfer, cove, ogee, bead) applied

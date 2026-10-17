@@ -1131,3 +1131,52 @@ fn entity_info_shows_a_parts_grain_and_lets_you_turn_it() {
     assert!(harness.query_by_label("12\" x 30\" x 3/4\"").is_some());
     snapshot(&mut harness, "part_grain_turned");
 }
+
+#[test]
+fn board_tool_draws_a_stud_and_a_plywood_shelf_from_stock() {
+    use egui_kittest::kittest::Queryable;
+    let mut harness = app();
+    type_text(&mut harness, "w");
+    assert_eq!(harness.state().tools().active(), ToolId::Board);
+    assert!(harness.query_by_label("Board").is_some(), "the Board panel shows");
+
+    // A whole board typed: picks a 2x4 (adding Pine Lumber), then click, aim and type the length.
+    type_text(&mut harness, "2x4x96");
+    harness.key_press(Key::Enter);
+    harness.run();
+    assert_eq!(harness.state().tools().board().picked.as_ref().unwrap().name, "2x4");
+    click(&mut harness, pos2(600.0, 450.0));
+    harness.hover_at(pos2(760.0, 470.0));
+    harness.run();
+    type_text(&mut harness, "8'");
+    harness.key_press(Key::Enter);
+    harness.run();
+    let doc = harness.state().document();
+    let stud = doc.container().instances().next().expect("a board").0;
+    assert_eq!(doc.part_size(stud), Some([96.0, 3.5, 1.5]));
+
+    // Plywood from the library, at 3/4", drawn as a rectangle.
+    harness.get_by_label_contains("Add wood from the library").click();
+    harness.run();
+    harness.get_by_label("Baltic Birch Plywood").click();
+    harness.run();
+    harness.get(egui_kittest::kittest::by().role(egui::accesskit::Role::ComboBox).value("1/8\" sheet")).click();
+    harness.run();
+    harness.get_by_label("3/4\" sheet").click();
+    harness.run();
+    click(&mut harness, pos2(500.0, 550.0));
+    harness.hover_at(pos2(420.0, 600.0));
+    harness.run();
+    type_text(&mut harness, "30,11 1/4");
+    harness.key_press(Key::Enter);
+    harness.run();
+
+    let list = woodsketch_doc::cutlist::cut_list(harness.state().document().scene());
+    let names: Vec<&str> = list.materials.iter().map(|m| m.name.as_str()).collect();
+    assert!(names.contains(&"Pine Lumber") && names.contains(&"Baltic Birch Plywood"), "{names:?}");
+    let shelf = list.materials.iter().find(|m| m.name == "Baltic Birch Plywood").unwrap();
+    let part = &shelf.parts[0];
+    assert_eq!((part.length, part.width, part.thickness), (30.0, 11.25, 0.75));
+    type_text(&mut harness, "Z");
+    snapshot(&mut harness, "board_tool");
+}

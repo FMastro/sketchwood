@@ -154,7 +154,7 @@ pub fn match_stock(part: &Part, kind: MaterialKind, standard: &Standard) -> Resu
 }
 
 /// `2x4` for a standard lumber section, else its actual size.
-fn section_name(t: f64, w: f64) -> String {
+pub(crate) fn section_name(t: f64, w: f64) -> String {
     lumber_sizes()
         .into_iter()
         .find(|(_, st, sw)| (st - t).abs() < 1e-9 && (sw - w).abs() < 1e-9)

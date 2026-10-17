@@ -98,8 +98,9 @@ pub struct Report {
     pub conflicts: Vec<Conflict>,
 }
 
-/// Less than this over a joint isn't worth a warning (1/32").
-const NEGLIGIBLE: f64 = 1.0 / 32.0;
+/// Less than this over a joint isn't worth a warning (1/16"): ordinary apron tenons glued into
+/// legs move a few hundredths, which glue and the tenon's give take without trouble.
+const NEGLIGIBLE: f64 = 1.0 / 16.0;
 const TOUCH: f64 = 1e-3;
 
 /// A part placed in the drawing, square to the axes.

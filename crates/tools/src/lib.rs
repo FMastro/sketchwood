@@ -378,6 +378,8 @@ pub struct Tools {
     typed: String,
     /// One-off feedback (errors, "coming soon"), shown until the next action.
     message: Option<String>,
+    /// What Copy or Cut took, for Paste.
+    clip: Option<woodsketch_doc::clipboard::Clip>,
 }
 
 impl Default for Tools {
@@ -403,6 +405,7 @@ impl Default for Tools {
             grip_rotated: false,
             typed: String::new(),
             message: None,
+            clip: None,
         }
     }
 }
@@ -805,6 +808,10 @@ impl Tools {
         if self.is_typing() {
             self.typed.clear();
         } else if busy {
+            if self.move_tool.is_pasting() {
+                // Esc while carrying a paste takes it out again.
+                doc.undo();
+            }
             self.cancel();
         } else if self.active == ToolId::Select && !doc.selection().is_empty() {
             doc.selection_mut().clear();
@@ -959,6 +966,66 @@ fn box_edges(lo: DVec3, hi: DVec3) -> Vec<[DVec3; 2]> {
     let pairs = [(0, 1), (2, 3), (4, 5), (6, 7), (0, 2), (1, 3), (4, 6), (5, 7), (0, 4), (1, 5), (2, 6), (3, 7)];
     pairs.iter().map(|&(a, b)| [corner(a), corner(b)]).collect()
 }
+/// Copy and paste (Edit menu, Ctrl+C / Ctrl+X / Ctrl+V).
+impl Tools {
+    /// Copy the selection.
+    pub fn copy(&mut self, doc: &Document) {
+        match doc.copy_selection() {
+            Some(clip) => self.clip = Some(clip),
+            None => self.message = Some("Select something to copy".into()),
+        }
+    }
+
+    /// Copy the selection, then delete it.
+    pub fn cut(&mut self, doc: &mut Document) {
+        self.cancel();
+        self.copy(doc);
+        if self.clip.is_some() && self.message.is_none() {
+            doc.erase_selection();
+        }
+    }
+
+    pub fn can_paste(&self) -> bool {
+        self.clip.is_some()
+    }
+
+    /// Paste, carried by the corner of its box with the Move tool until a click puts it down
+    /// (as in SketchUp).
+    pub fn paste(&mut self, doc: &mut Document) {
+        let Some(clip) = self.clip.clone() else {
+            self.message = Some("Nothing to paste: copy something first".into());
+            return;
+        };
+        self.cancel();
+        let pasted = doc.paste(&clip, DVec3::ZERO);
+        self.active = ToolId::Move;
+        self.move_tool.carry(doc, pasted, clip.bounds().0);
+    }
+
+    /// Paste where it was copied from.
+    pub fn paste_in_place(&mut self, doc: &mut Document) {
+        let Some(clip) = self.clip.clone() else {
+            self.message = Some("Nothing to paste: copy something first".into());
+            return;
+        };
+        self.cancel();
+        doc.paste(&clip, DVec3::ZERO);
+    }
+
+    /// A copy of the selection right beside it (to the right, 2" apart), selected. Doesn't
+    /// touch what Copy holds.
+    pub fn duplicate(&mut self, doc: &mut Document) {
+        self.cancel();
+        let Some(clip) = doc.copy_selection() else {
+            self.message = Some("Select something to duplicate".into());
+            return;
+        };
+        let (lo, hi) = clip.bounds();
+        doc.paste(&clip, DVec3::new(hi.x - lo.x + 2.0, 0.0, 0.0));
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;

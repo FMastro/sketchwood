@@ -31,12 +31,29 @@ impl Keyboard {
             // Follow Ctrl in event order, so even a tap within one frame registers.
             match &event {
                 egui::Event::ModifiersChanged(modifiers) => self.track_ctrl(modifiers.command, tools),
-                egui::Event::Key { pressed: true, .. } | egui::Event::PointerButton { pressed: true, .. } => {
+                // Ctrl+C, Ctrl+X and Ctrl+V arrive as these rather than key presses; they aren't taps.
+                egui::Event::Key { pressed: true, .. }
+                | egui::Event::PointerButton { pressed: true, .. }
+                | egui::Event::Copy
+                | egui::Event::Cut
+                | egui::Event::Paste(_) => {
                     self.ctrl_tap_pending = false;
                 }
                 _ => {}
             }
             match event {
+                // Copies stay inside WoodSketch; a note goes on the system clipboard too, since egui
+                // only reports Ctrl+V while it holds text.
+                egui::Event::Copy => {
+                    tools.copy(doc);
+                    note_copy(ctx, tools);
+                }
+                egui::Event::Cut => {
+                    tools.cut(doc);
+                    note_copy(ctx, tools);
+                }
+                egui::Event::Paste(_) if ctx.input(|i| i.modifiers.shift) => tools.paste_in_place(doc),
+                egui::Event::Paste(_) => tools.paste(doc),
                 egui::Event::Text(text) => {
                     for c in text.chars() {
                         if tools.is_typing() || Tools::starts_value(c) {
@@ -70,6 +87,7 @@ impl Keyboard {
                         egui::Key::Y if command => redo(doc, tools),
                         egui::Key::A if command => doc.select_all(),
                         egui::Key::G if command => tools.make_group(doc, DefinitionKind::Group),
+                        egui::Key::D if command => tools.duplicate(doc),
                         // SketchUp for Windows also binds Zoom Extents to Ctrl+Shift+E.
                         egui::Key::E if command && modifiers.shift => viewport.request_zoom_extents(),
                         _ => {}
@@ -103,4 +121,11 @@ fn undo(doc: &mut Document, tools: &mut Tools) {
 fn redo(doc: &mut Document, tools: &mut Tools) {
     tools.cancel();
     doc.redo();
+}
+
+/// Put a note of what was copied on the system clipboard.
+pub(crate) fn note_copy(ctx: &egui::Context, tools: &Tools) {
+    if tools.can_paste() {
+        ctx.copy_text("WoodSketch drawing parts (paste them in WoodSketch)".into());
+    }
 }

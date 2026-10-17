@@ -3,6 +3,7 @@
 
 mod arena;
 pub mod board;
+pub mod clipboard;
 pub mod buildsheet;
 pub mod curves;
 pub mod cutlist;

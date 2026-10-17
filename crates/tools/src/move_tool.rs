@@ -55,6 +55,9 @@ pub struct MoveTool {
     hints: Hints,
     copy: bool,
     last: Option<Done>,
+    /// Carrying what was just pasted: putting it down joins the paste's undo step; Esc takes it
+    /// out again.
+    pasting: bool,
 }
 
 struct Op {
@@ -89,6 +92,21 @@ impl MoveTool {
         self.shift_lock = None;
         self.last = None;
         self.grips = None;
+        self.pasting = false;
+    }
+
+    /// Start carrying `entities` (just pasted) by `base`: they follow the cursor until a click
+    /// puts them down.
+    pub fn carry(&mut self, doc: &Document, entities: Vec<Entity>, base: DVec3) {
+        self.cancel();
+        let vertices = doc.view().vertices_of(&entities);
+        self.op = Some(Op { entities, vertices, base, offset: DVec3::ZERO, direction: None, from: None, dragging: false });
+        self.pasting = true;
+    }
+
+    /// Whether it's carrying what was just pasted.
+    pub fn is_pasting(&self) -> bool {
+        self.pasting && self.op.is_some()
     }
 
     /// Holding Shift locks the direction showing; letting go unlocks it.
@@ -224,6 +242,9 @@ impl MoveTool {
 
     pub fn status(&self) -> String {
         let copy = if self.copy { " (copying)" } else { "" };
+        if self.is_pasting() {
+            return "Click to put down what was pasted (it snaps to points), or type a distance. Esc takes it out.".into();
+        }
         if self.op.is_some() {
             format!("Pick the destination, or enter a distance{copy}. Arrow keys lock an axis; tap Ctrl to copy.")
         } else {
@@ -340,6 +361,12 @@ impl MoveTool {
         self.apply(doc, done)?;
         self.op = None;
         self.snap = None;
+        if self.pasting {
+            // Pasting and putting it down are one step; there's no move to retype.
+            doc.join_last_step();
+            self.pasting = false;
+            self.last = None;
+        }
         // Copy mode lasts one move, as in SketchUp; `3x` or `/3` can still extend this copy.
         self.copy = false;
         Ok(())

@@ -185,3 +185,13 @@ add it there; when you finish an item, remove it.
 Specialized for woodworking: SketchUp-familiar modeling where parts know they're wood (species,
 grain, joinery, profiles, cut list, build sheets, movement checks). The ordered plan is at the
 top of `docs/BACKLOG.md` ("Woodworking direction"); keep general modeling working alongside it.
+28. Templates: `doc::template` (`Template` cabinet / drawer / face frame / table, each from a few sizes
+   and a joint choice, built from boards and the joinery API, grouped, one undo step via
+   `Document::as_one_step`, sizes kept on the definition as `Made` so `rebuild_template` changes
+   them in place). Templates panel in the tray; "<Template> sizes" for a selected one.
+29. Copy and paste: `doc::clipboard` (`Clip` = the source scene with only the copies at the top, in
+   world coordinates; pasting into the same drawing reuses definitions, into another imports
+   definitions, materials by name, tags, joints and profiles). `Tools::copy / cut / paste /
+   paste_in_place / duplicate`; Paste is carried by Move (`MoveTool::carry`) until a click, joined
+   into one undo step, Esc takes it out. Ctrl+C/X/V arrive as egui `Copy`/`Cut`/`Paste` events (a
+   note goes on the system clipboard so Ctrl+V is reported); Ctrl+D duplicates.

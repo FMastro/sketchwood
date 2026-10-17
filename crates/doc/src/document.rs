@@ -73,7 +73,11 @@ pub struct Document {
     /// The key of the last merging edit, while further edits with it join the same undo step.
     coalescing: Option<String>,
     version: u64,
+    /// Tells this drawing apart from others opened in the same run (for pasting).
+    drawing: u64,
 }
+
+static NEXT_DRAWING: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 impl Default for Document {
     fn default() -> Self {
@@ -88,6 +92,7 @@ impl Default for Document {
             model_version: 0,
             coalescing: None,
             version: 0,
+            drawing: NEXT_DRAWING.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         }
     }
 }
@@ -99,6 +104,10 @@ impl Document {
         doc.state.scene = scene;
         doc.changed();
         doc
+    }
+
+    pub(crate) fn drawing(&self) -> u64 {
+        self.drawing
     }
 
     pub fn scene(&self) -> &Scene {
@@ -313,6 +322,13 @@ impl Document {
         }
         self.changed();
         result
+    }
+
+    /// Make the last edit part of the undo step before it (a paste, and where it was put down).
+    pub fn join_last_step(&mut self) {
+        if self.undo.len() >= 2 {
+            self.undo.pop();
+        }
     }
 
     fn push_undo(&mut self) {

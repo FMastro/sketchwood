@@ -29,9 +29,7 @@ each section. Remove items when they're done (mention them in the commit).
    - `.woodsketch` file association on all three; Help > About shows the version.
 2. **Shakedown on a real project**: design something you'd build (a nightstand, a small cabinet)
    start to finish and fix every place it fights you.
-3. **Templates** (below, item 7): carcass, drawer, face frame, shelf unit from dimensions. They're
-   the building blocks for agent recipes, so before agent-ready.
-4. **Agent-ready** (below, item 8), then **parametric hardware**, then **.skp import**: check
+3. **Agent-ready** (below, item 8), then **parametric hardware**, then **.skp import**: check
    Trimble's SketchUp SDK terms allow a free open-source app before any work on it.
 
 ## Woodworking direction (in this order)
@@ -67,8 +65,9 @@ modeling (rooms, jigs, odd shapes) working; the wood features add on and stay op
    fastening from a glued one (every touching cross-grain meeting is flagged now); species data
    for custom woods (only names matching a known species get it); movement in thickness and
    along the grain; parts at an angle.
-7. **Templates** (carcass, drawer, face frame, shelf unit from dimensions, editable after),
-   then **parametric hardware** (hinges, slides, pulls, screws, dowels, shelf pins; counted in
+7. **Templates, more of them** (done: cabinet, drawer, face frame, table; still: a drawer front
+   and runners sized to a cabinet opening, doors, a frame-and-panel; templates keep only their
+   sizes, so Change size loses edits made inside), then **parametric hardware** (hinges, slides, pulls, screws, dowels, shelf pins; counted in
    the cut list, no licensing), then **.skp import** through Trimble's SDK (the adoption hook;
    check its redistribution terms early).
 8. **Agent-ready**: let AI agents design with WoodSketch, so a woodworker can ask their assistant

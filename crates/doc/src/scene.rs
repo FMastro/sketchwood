@@ -257,6 +257,11 @@ impl Scene {
         self.definitions.get_mut(id.0)
     }
 
+    /// Add a definition as it is (pasted from another drawing).
+    pub(crate) fn add_definition(&mut self, definition: Definition) -> DefinitionId {
+        DefinitionId(self.definitions.insert(definition))
+    }
+
     pub fn definitions(&self) -> impl Iterator<Item = (DefinitionId, &Definition)> {
         self.definitions.iter().map(|(i, d)| (DefinitionId(i), d))
     }

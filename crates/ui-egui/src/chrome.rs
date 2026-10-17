@@ -130,6 +130,31 @@ impl WoodSketchApp {
                 self.redo();
             }
             ui.separator();
+            let selected = !self.doc.selection().is_empty();
+            if ui.add_enabled(selected, egui::Button::new("Cut").shortcut_text("Ctrl+X")).clicked() {
+                ui.close();
+                self.tools.cut(&mut self.doc);
+                crate::keys::note_copy(ui.ctx(), &self.tools);
+            }
+            if ui.add_enabled(selected, egui::Button::new("Copy").shortcut_text("Ctrl+C")).clicked() {
+                ui.close();
+                self.tools.copy(&self.doc);
+                crate::keys::note_copy(ui.ctx(), &self.tools);
+            }
+            let can_paste = self.tools.can_paste();
+            if ui.add_enabled(can_paste, egui::Button::new("Paste").shortcut_text("Ctrl+V")).on_hover_text("Follows the mouse; click to put it down").clicked() {
+                ui.close();
+                self.tools.paste(&mut self.doc);
+            }
+            if ui.add_enabled(can_paste, egui::Button::new("Paste in Place").shortcut_text("Ctrl+Shift+V")).clicked() {
+                ui.close();
+                self.tools.paste_in_place(&mut self.doc);
+            }
+            if ui.add_enabled(selected, egui::Button::new("Duplicate").shortcut_text("Ctrl+D")).on_hover_text("A copy right beside it").clicked() {
+                ui.close();
+                self.tools.duplicate(&mut self.doc);
+            }
+            ui.separator();
             if ui.add(egui::Button::new("Delete").shortcut_text("Delete")).clicked() {
                 ui.close();
                 self.tools.cancel();

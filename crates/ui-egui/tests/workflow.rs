@@ -1615,3 +1615,61 @@ fn templates_panel_adds_a_drawer_and_changes_its_size() {
     let (lo, hi) = harness.state().document().bounds().unwrap();
     assert!((hi.z - lo.z - 6.0).abs() < 1e-9, "6\" tall now: {}", hi.z - lo.z);
 }
+
+#[test]
+fn copy_and_paste_carries_a_board_to_where_you_click() {
+    let mut harness = app();
+    let board = {
+        let doc = harness.state_mut().document_mut();
+        let board = add_board(doc, glam::DVec3::ZERO, 24.0, 3.5, 1.5);
+        doc.selection_mut().extend([board]);
+        board
+    };
+    harness.event(Event::Copy);
+    harness.run();
+    harness.event(Event::Paste("WoodSketch".into()));
+    harness.run();
+    assert_eq!(harness.state().tools().active(), woodsketch_tools::ToolId::Move, "the paste is carried with Move");
+    assert_eq!(harness.state().document().container().instances().count(), 2);
+    // It follows the cursor; a click puts it down, away from the original.
+    for x in [300.0, 320.0, 340.0] {
+        harness.hover_at(egui::pos2(x, 600.0));
+        harness.run();
+    }
+    click(&mut harness, egui::pos2(340.0, 600.0));
+    let doc = harness.state().document();
+    let copy = doc.selection().iter().next().expect("the pasted board is selected");
+    assert_ne!(copy, board);
+    let woodsketch_doc::Entity::Instance(copy) = copy else { panic!("a group") };
+    assert!(doc.container().instance(copy).unwrap().transform.translation.length() > 1.0, "moved off the original");
+    // Paste and put down: one undo step.
+    harness.state_mut().document_mut().undo();
+    assert_eq!(harness.state().document().container().instances().count(), 1);
+}
+
+#[test]
+fn escape_takes_a_carried_paste_back_out_and_duplicate_places_beside() {
+    let mut harness = app();
+    {
+        let doc = harness.state_mut().document_mut();
+        let board = add_board(doc, glam::DVec3::ZERO, 24.0, 3.5, 1.5);
+        doc.selection_mut().extend([board]);
+    }
+    harness.event(Event::Copy);
+    harness.run();
+    harness.event(Event::Paste("WoodSketch".into()));
+    harness.run();
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert_eq!(harness.state().document().container().instances().count(), 1, "Esc took the paste out");
+
+    let doc = harness.state().document();
+    let all: Vec<_> = doc.container().instances().map(|(id, _)| woodsketch_doc::Entity::Instance(id)).collect();
+    harness.state_mut().document_mut().selection_mut().extend(all);
+    harness.key_press_modifiers(Modifiers::COMMAND, egui::Key::D);
+    harness.run();
+    let doc = harness.state().document();
+    assert_eq!(doc.container().instances().count(), 2);
+    let (lo, hi) = doc.bounds().unwrap();
+    assert!((hi.x - lo.x - 9.0).abs() < 1e-9, "3.5\" wide, 2\" apart: {}", hi.x - lo.x);
+}

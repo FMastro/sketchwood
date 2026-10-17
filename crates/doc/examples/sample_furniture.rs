@@ -70,7 +70,7 @@ fn side_table(doc: &mut Document) {
 
     // Tenons 3/4" long, so the two mortises in each leg don't meet. Joints already made in the
     // shared leg and apron designs are just recorded.
-    let tenon = Tenon { length: 0.75, thickness: 0.25, shoulder: 0.25 };
+    let tenon = Tenon { length: 0.75, thickness: 0.25, shoulder: 0.25, haunch: 0.0 };
     for (apron, leg) in [
         (front, front_left),
         (front, front_right),

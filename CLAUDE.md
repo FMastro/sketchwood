@@ -152,6 +152,10 @@ add it there; when you finish an item, remove it.
    Biscuits and loose tenons (`Slots`: matching slots, shallower in a face), pocket screws (listed,
    not drawn), through tenons; each joint's pieces (`Joint::hardware`) and glue-up seams
    (`PartInfo::edge_joint`) add up in `CutList::hardware` (Parts tab, cut sheet).
+   Dovetails (`Document::dovetails`: tails grown into the pins board, trapezoid sockets and waste
+   at 1:8), splines (`Spline`), haunched tenons, pocket-hole pockets. Each joint keeps its cuts
+   (`Joint::ops`, `Scene::joint_bases`), so `Document::remove_joint` rebuilds its parts without it
+   (refused if a part was changed by hand since); the panel's Change removes and re-picks it.
 24. Edge profiles: `doc::profile` (`Profile` roundover / chamfer / cove / ogee as a corner curve;
    `Edges::AroundFace` (stacked inset rings, mitered corners) or `Edges::Along` (a profiled
    cross-section extruded); `Document::profile_edges` rebuilds a plain board's geometry, one undo

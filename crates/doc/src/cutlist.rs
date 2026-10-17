@@ -81,8 +81,8 @@ impl CutList {
         }
         for material in self.materials.iter().filter(|m| m.kind == Some(MaterialKind::SolidWood)) {
             for part in &material.parts {
-                let (Some(boards), Some((piece, spacing))) = (crate::cutplan::glue_up(part, &material.standard), part.edge_joint.piece(part.thickness)) else { continue };
-                let seams = (boards - 1) * crate::part::EdgeJoint::per_seam(spacing, part.length);
+                let (Some(boards), Some((piece, per_seam))) = (crate::cutplan::glue_up(part, &material.standard), part.edge_joint.seam(part.thickness, part.length)) else { continue };
+                let seams = (boards - 1) * per_seam;
                 *total.entry(piece).or_default() += seams * part.count as u32;
             }
         }

@@ -160,9 +160,9 @@ fn write_sheet(html: &mut String, scene: &Scene, sheet: &Sheet, label: &str, row
         let (l, w) = crate::cutplan::glue_up_board(&part, n);
         let boards = format!("{n} boards {} x {} x {}", format_length(thickness), format_length(w), format_length(l));
         // Reinforced seams: what goes in each.
-        let seams = def.part.edge_joint.piece(thickness).map(|(piece, spacing)| {
-            let per_seam = crate::part::EdgeJoint::per_seam(spacing, l);
-            format!("{} {piece}s along each of the {} seams", per_seam, n - 1)
+        let seams = def.part.edge_joint.seam(thickness, length).map(|(piece, per_seam)| {
+            let each = if per_seam == 1 { format!("a {piece}") } else { format!("{per_seam} {piece}s") };
+            format!("{each} along each of the {} seams", n - 1)
         });
         Some((boards, seams))
     });
@@ -192,6 +192,9 @@ fn steps(scene: &Scene, def: DefinitionId, stock: &str, size: &str, glue: Option
             (JointKind::MortiseAndTenon, false) => format!("Cut the tenon that goes into {other} ({}).", joint.detail),
             (JointKind::Dowels, _) => format!("Drill for dowels to join {other} ({}).", joint.detail),
             (JointKind::Biscuits, _) => format!("Cut biscuit slots to join {other} ({}).", joint.detail),
+            (JointKind::Dovetails, true) => format!("Cut the pins for {other}'s dovetails ({}).", joint.detail),
+            (JointKind::Dovetails, false) => format!("Cut the dovetails that go into {other} ({}); its length includes them.", joint.detail),
+            (JointKind::Splines, _) => format!("Cut the spline groove to join {other} ({}).", joint.detail),
             (JointKind::LooseTenons, _) => format!("Cut loose tenon mortises to join {other} ({}).", joint.detail),
             (JointKind::PocketScrews, false) => format!("Drill pocket holes to screw into {other} ({}).", joint.detail),
             (JointKind::PocketScrews, true) => format!("{other} is pocket-screwed to it ({}).", joint.detail),

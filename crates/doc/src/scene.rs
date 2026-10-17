@@ -228,6 +228,12 @@ pub struct Scene {
     /// Joints made between parts, for listing them (older files have none).
     #[serde(default)]
     pub joints: Vec<crate::joinery::Joint>,
+    /// How parts looked before their first joint, to rebuild them when one is taken out.
+    #[serde(default)]
+    pub joint_bases: Vec<(crate::DefinitionId, crate::Model)>,
+    /// Cuts made by the joint being made, until it's recorded.
+    #[serde(skip)]
+    pub(crate) pending_ops: Vec<crate::joinery::JointOp>,
     /// Edge profiles made on parts, for listing them.
     #[serde(default)]
     pub profiles: Vec<crate::profile::ProfileRecord>,

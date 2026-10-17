@@ -37,6 +37,8 @@ pub enum JointKind {
     Biscuits,
     LooseTenons,
     PocketScrews,
+    Dovetails,
+    Splines,
 }
 
 impl JointKind {
@@ -54,6 +56,8 @@ impl JointKind {
             Self::Biscuits => "Biscuits",
             Self::LooseTenons => "Loose tenons",
             Self::PocketScrews => "Pocket screws",
+            Self::Dovetails => "Dovetails",
+            Self::Splines => "Spline",
         }
     }
 }
@@ -70,6 +74,9 @@ pub struct Joint {
     /// What it takes besides glue: dowels, biscuits, screws.
     #[serde(default)]
     pub hardware: Option<Hardware>,
+    /// The cuts and additions it made to each part, to take it out again.
+    #[serde(default)]
+    pub ops: Vec<JointOp>,
 }
 
 /// Pieces a joint uses, for the shopping list: `3 x 3/8" x 2" dowel`.
@@ -115,6 +122,9 @@ pub struct Tenon {
     pub thickness: f64,
     /// How far the tenon is set in from the rail's edges (across its width).
     pub shoulder: f64,
+    /// A haunch: a short stub of tenon filling the shoulder at the stile's end, as deep as this
+    /// (0 for none), to fill a panel groove there.
+    pub haunch: f64,
 }
 
 /// Dowel joint sizes.
@@ -275,7 +285,7 @@ impl Document {
             butt: None,
             corner: false,
             let_in_depth: 0.25,
-            tenon: Tenon { length: 1.0, thickness: 0.25, shoulder: 0.25 },
+            tenon: Tenon { length: 1.0, thickness: 0.25, shoulder: 0.25, haunch: 0.0 },
             dowels: Dowels { count: 2, diameter: 0.375, depth: 1.0 },
             finger: 0.5,
             depth: 0.0,
@@ -309,6 +319,7 @@ impl Document {
             fit.contact = (rail_thick, rail_wide);
             fit.let_in_depth = sixteenth((depth / 3.0).min(0.5)).max(0.125);
             fit.tenon = Tenon {
+                haunch: 0.0,
                 length: sixteenth((depth * 2.0 / 3.0).min(1.5)).max(0.25),
                 thickness: sixteenth(rail_thick / 3.0).max(0.125),
                 shoulder: if rail_wide > 1.5 { 0.25 } else { 0.0 },
@@ -413,13 +424,34 @@ impl Document {
             region.1[thin] = mid + tenon.thickness / 2.0;
             region.0[wide] += tenon.shoulder;
             region.1[wide] -= tenon.shoulder;
-            grow_into(scene, path, rail, stile, butt, region)?;
-            cut_box_in(scene, path, stile, region)?;
+            // A haunch fills the shoulder toward the stile's nearer end (a panel groove runs out there):
+            // the tenon and haunch come out together as deep as the haunch, then the tenon goes on.
+            let haunched = tenon.haunch > EPS && tenon.shoulder > EPS && tenon.haunch < tenon.length;
+            if haunched {
+                let k = butt.k;
+                let mut both = region;
+                if butt.contact.0[wide] - o.0[wide] < o.1[wide] - butt.contact.1[wide] {
+                    both.0[wide] = butt.contact.0[wide];
+                } else {
+                    both.1[wide] = butt.contact.1[wide];
+                }
+                let c = butt.contact.0[k];
+                let step = c + butt.side * tenon.haunch;
+                let toward = DVec3::AXES[k] * butt.side;
+                push_polygon_in(scene, path, rail, stile, &face_rect(both, k, c), toward, -tenon.haunch)?;
+                push_polygon_in(scene, path, rail, stile, &face_rect(region, k, step), toward, -(tenon.length - tenon.haunch))?;
+                push_polygon_in(scene, path, stile, stile, &face_rect(both, k, c), -toward, tenon.haunch)?;
+                push_polygon_in(scene, path, stile, stile, &face_rect(region, k, step), -toward, tenon.length - tenon.haunch)?;
+            } else {
+                grow_into(scene, path, rail, stile, butt, region)?;
+                cut_box_in(scene, path, stile, region)?;
+            }
             let detail = format!(
-                "{} long, {} x {} tenon",
+                "{} long, {} x {} tenon{}",
                 format_length(tenon.length),
                 format_length(tenon.thickness),
-                format_length(size[wide] - 2.0 * tenon.shoulder)
+                format_length(size[wide] - 2.0 * tenon.shoulder),
+                if haunched { format!(", {} haunch", format_length(tenon.haunch)) } else { String::new() }
             );
             record(scene, path, JointKind::MortiseAndTenon, rail, stile, detail)
         })
@@ -571,7 +603,8 @@ fn record_with(
 ) -> Result<(), JoineryError> {
     let p = Parts { scene, path };
     let (cut, into) = (p.definition(cut)?, p.definition(into)?);
-    scene.joints.push(Joint { kind, cut, into, detail, hardware });
+    let ops = std::mem::take(&mut scene.pending_ops);
+    scene.joints.push(Joint { kind, cut, into, detail, hardware, ops });
     Ok(())
 }
 
@@ -615,20 +648,56 @@ fn geometry(scene: &Scene, path: &[InstanceId], instance: InstanceId) -> Result<
     Ok((def, to_part))
 }
 
-/// The geometry of `instance` to change (a group shared with copies gets its own first), and
-/// the map from the part's coordinates into it.
-fn model_mut<'s>(scene: &'s mut Scene, path: &[InstanceId], instance: InstanceId) -> Result<(&'s mut Model, DAffine3), JoineryError> {
+/// One cut or addition a joint made to a part's geometry, in that geometry's coordinates: a
+/// polygon drawn on the surface facing `normal`, pushed (negative) or pulled by `distance`.
+/// Joints keep theirs, so one can be taken out by rebuilding its parts without it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct JointOp {
+    pub part: DefinitionId,
+    pub points: Vec<DVec3>,
+    pub normal: DVec3,
+    pub distance: f64,
+}
+
+/// A planned push or pull, before it's made.
+struct Plan {
+    points: Vec<DVec3>,
+    normal: DVec3,
+    distance: f64,
+}
+
+/// Make a planned cut or addition on `instance`'s geometry (a group shared with copies gets its
+/// own first), and log it for the joint being made. `plan` gets the geometry and the map from
+/// the part's coordinates into it.
+fn apply<R>(
+    scene: &mut Scene,
+    path: &[InstanceId],
+    instance: InstanceId,
+    plan: impl FnOnce(&Model, DAffine3) -> Result<(Plan, R), JoineryError>,
+) -> Result<R, JoineryError> {
     scene.make_unique_if_group(path, instance);
     let (def, to_part) = geometry(scene, path, instance)?;
-    Ok((&mut scene.definition_mut(def).ok_or(JoineryError::NotParts)?.container.model, to_part.inverse()))
+    let model = &scene.definition(def).ok_or(JoineryError::NotParts)?.container.model;
+    let (op, result) = plan(model, to_part.inverse())?;
+    // How the part looked before its first joint, to rebuild it without one later.
+    if !scene.joint_bases.iter().any(|(d, _)| *d == def) {
+        let base = model.clone();
+        scene.joint_bases.push((def, base));
+    }
+    let model = &mut scene.definition_mut(def).ok_or(JoineryError::NotParts)?.container.model;
+    draw_and_push(model, &op.points, op.normal, op.distance)?;
+    scene.pending_ops.push(JointOp { part: def, points: op.points, normal: op.normal, distance: op.distance });
+    Ok(result)
 }
 
 /// Cut `region` (in `instance`'s coordinates) out of it.
 fn cut_box_in(scene: &mut Scene, path: &[InstanceId], instance: InstanceId, region: Box3) -> Result<(JointKind, f64), JoineryError> {
     let (def, _) = geometry(scene, path, instance)?;
     let grain = scene.definition(def).map(|d| (d.part.grain, crate::part::extents(d, glam::DMat3::IDENTITY)));
-    let (model, from_part) = model_mut(scene, path, instance)?;
-    cut_box(model, transform_box(&from_part, region), grain)
+    apply(scene, path, instance, |model, from_part| {
+        let (plan, kind, depth) = plan_cut(model, transform_box(&from_part, region), grain)?;
+        Ok((plan, (kind, depth)))
+    })
 }
 
 /// Grow `part` by `region` (in `frame`'s coordinates), which sits against its end: a let-in
@@ -636,18 +705,48 @@ fn cut_box_in(scene: &mut Scene, path: &[InstanceId], instance: InstanceId, regi
 fn grow_into(scene: &mut Scene, path: &[InstanceId], part: InstanceId, frame: InstanceId, butt: Butt, region: Box3) -> Result<(), JoineryError> {
     let to_part = Parts { scene, path }.relative(frame, part)?;
     let in_part = transform_box(&to_part, region);
-    let (model, from_part) = model_mut(scene, path, part)?;
-    let in_model = transform_box(&from_part, in_part);
-    // It grows the way its end faces: toward the other part.
-    let toward = from_part.transform_vector3(to_part.transform_vector3(DVec3::AXES[butt.k] * butt.side));
-    let axis = (0..3).max_by(|&a, &b| toward[a].abs().total_cmp(&toward[b].abs())).unwrap_or(0);
-    add_box(model, in_model, axis, toward[axis].signum())
+    apply(scene, path, part, |_, from_part| {
+        let in_model = transform_box(&from_part, in_part);
+        // It grows the way its end faces: toward the other part.
+        let toward = from_part.transform_vector3(to_part.transform_vector3(DVec3::AXES[butt.k] * butt.side));
+        let axis = (0..3).max_by(|&a, &b| toward[a].abs().total_cmp(&toward[b].abs())).unwrap_or(0);
+        let outward = toward[axis].signum();
+        let at = if outward > 0.0 { in_model.0[axis] } else { in_model.1[axis] };
+        let plan = Plan {
+            points: face_rect(in_model, axis, at).to_vec(),
+            normal: DVec3::AXES[axis] * outward,
+            distance: in_model.1[axis] - in_model.0[axis],
+        };
+        Ok((plan, ()))
+    })
 }
 
 /// A round hole into `instance` (`center` and `normal` in its coordinates).
 fn drill_in(scene: &mut Scene, path: &[InstanceId], instance: InstanceId, center: DVec3, normal: DVec3, radius: f64, depth: f64) -> Result<(), JoineryError> {
-    let (model, from_part) = model_mut(scene, path, instance)?;
-    drill(model, from_part.transform_point3(center), from_part.transform_vector3(normal).normalize(), radius, depth)
+    apply(scene, path, instance, |_, from_part| {
+        let normal = from_part.transform_vector3(normal).normalize();
+        let points = circle_points(from_part.transform_point3(center), normal, radius, 24);
+        Ok((Plan { points, normal, distance: -depth }, ()))
+    })
+}
+
+/// Push a polygon (in `frame`'s coordinates, on the surface facing `normal`) into `instance` by
+/// `depth`: a dovetail socket, the waste between tails.
+fn push_polygon_in(
+    scene: &mut Scene,
+    path: &[InstanceId],
+    instance: InstanceId,
+    frame: InstanceId,
+    points: &[DVec3],
+    normal: DVec3,
+    depth: f64,
+) -> Result<(), JoineryError> {
+    let to_part = Parts { scene, path }.relative(frame, instance)?;
+    apply(scene, path, instance, |_, from_part| {
+        let t = from_part * to_part;
+        let points = points.iter().map(|&p| t.transform_point3(p)).collect();
+        Ok((Plan { points, normal: t.transform_vector3(normal).normalize(), distance: -depth }, ()))
+    })
 }
 
 fn transform_box(t: &DAffine3, (lo, hi): Box3) -> Box3 {
@@ -716,15 +815,11 @@ fn already_done(model: &Model, center: DVec3, normal: DVec3, distance: f64) -> b
     face_under(model, center + normal * distance, normal).is_some()
 }
 
-/// Cut the box `bx` out of the model: draw its face on the surface it opens onto (its largest
-/// face lying on the part's outside) and push it in. Returns what kind of cut that is and its
+/// Plan cutting the box `bx` out of the model: its face on the surface it opens onto (its
+/// largest face lying on the part's outside), pushed in. Also what kind of cut that is and its
 /// depth. `grain` (the part's grain axis and extents) tells a groove (along the grain) from a
 /// dado.
-fn cut_box(
-    model: &mut Model,
-    bx: Box3,
-    grain: Option<(Option<crate::part::PartAxis>, Option<DVec3>)>,
-) -> Result<(JointKind, f64), JoineryError> {
+fn plan_cut(model: &Model, bx: Box3, grain: Option<(Option<crate::part::PartAxis>, Option<DVec3>)>) -> Result<(Plan, JointKind, f64), JoineryError> {
     let (plo, phi) = model.bounds().ok_or(JoineryError::NoSurface)?;
     let size = bx.1 - bx.0;
     let mut entries: Vec<(usize, f64, f64)> = Vec::new(); // (axis, sign, area)
@@ -747,7 +842,7 @@ fn cut_box(
             face_under(model, center, DVec3::AXES[k] * sign).is_some() || already_done(model, center, DVec3::AXES[k] * sign, -size[k])
         })
         .ok_or(JoineryError::NoSurface)?;
-    draw_and_push(model, &face_rect(bx, k, at(k, sign)), DVec3::AXES[k] * sign, -size[k])?;
+    let plan = Plan { points: face_rect(bx, k, at(k, sign)).to_vec(), normal: DVec3::AXES[k] * sign, distance: -size[k] };
 
     // What kind of cut: which of the part's other faces the box reaches.
     let (u, v) = ((k + 1) % 3, (k + 2) % 3);
@@ -766,18 +861,80 @@ fn cut_box(
         (0, 0) if reaches(k) < 2 => JointKind::Mortise,
         _ => JointKind::Notch,
     };
-    Ok((kind, size[k]))
+    Ok((plan, kind, size[k]))
 }
 
-/// Add the box `bx` to the model, growing out of its face at the `axis` side facing `outward`.
-fn add_box(model: &mut Model, bx: Box3, axis: usize, outward: f64) -> Result<(), JoineryError> {
-    let at = if outward > 0.0 { bx.0[axis] } else { bx.1[axis] };
-    draw_and_push(model, &face_rect(bx, axis, at), DVec3::AXES[axis] * outward, bx.1[axis] - bx.0[axis])
+/// The geometry of each part the joint at `index` changed, rebuilt from how it looked before
+/// its first joint with every other joint's cuts. Errors if a part was changed by hand since
+/// (rebuilding would lose that), or the joint was made before joints kept their cuts.
+fn rebuilt_without(scene: &Scene, index: usize) -> Result<Vec<(DefinitionId, Model)>, JoineryError> {
+    let joint = scene.joints.get(index).ok_or(JoineryError::NotParts)?;
+    if joint.ops.is_empty() && joint.kind != JointKind::PocketScrews {
+        // Shared components: a copy's record has no cuts of its own when another copy made them.
+        let shared = scene.joints.iter().enumerate().any(|(i, j)| i != index && j.cut == joint.cut && j.into == joint.into && j.kind == joint.kind);
+        if !shared {
+            return Err(JoineryError::Size("That joint was made in an older version of WoodSketch, so it can't be taken out on its own. Use Undo, or rebuild the parts."));
+        }
+    }
+    let parts: std::collections::BTreeSet<DefinitionId> = joint.ops.iter().map(|o| o.part).collect();
+    let replay = |base: &Model, def: DefinitionId, skip: Option<usize>| -> Result<Model, JoineryError> {
+        let mut model = base.clone();
+        for (i, j) in scene.joints.iter().enumerate() {
+            if Some(i) == skip {
+                continue;
+            }
+            for op in j.ops.iter().filter(|o| o.part == def) {
+                draw_and_push(&mut model, &op.points, op.normal, op.distance)?;
+            }
+        }
+        Ok(model)
+    };
+    let same = |a: &Model, b: &Model| serde_json::to_string(a).ok() == serde_json::to_string(b).ok();
+    let mut rebuilt = Vec::new();
+    for def in parts {
+        let (Some((_, base)), Some(current)) = (scene.joint_bases.iter().find(|(d, _)| *d == def), scene.definition(def)) else {
+            return Err(JoineryError::Size("That joint can't be taken out on its own. Use Undo, or rebuild the parts."));
+        };
+        if !same(&replay(base, def, None)?, &current.container.model) {
+            return Err(JoineryError::Size(
+                "A part in that joint was changed by hand after its joints were made, and taking the joint out would lose that. Use Undo instead.",
+            ));
+        }
+        rebuilt.push((def, replay(base, def, Some(index))?));
+    }
+    Ok(rebuilt)
 }
 
-/// A round hole `depth` deep into the surface facing `normal` at `center`.
-fn drill(model: &mut Model, center: DVec3, normal: DVec3, radius: f64, depth: f64) -> Result<(), JoineryError> {
-    draw_and_push(model, &circle_points(center, normal, radius, 24), normal, -depth)
+impl Document {
+    /// Take out the joint at `index` in [`Scene::joints`]: its parts are rebuilt with every
+    /// other joint but this one (a tenon goes, its mortise fills in). One undo step.
+    pub fn remove_joint(&mut self, index: usize) -> Result<(), JoineryError> {
+        let rebuilt = rebuilt_without(self.scene(), index)?;
+        self.edit_scene(|scene, _| {
+            for (def, model) in rebuilt {
+                if let Some(d) = scene.definition_mut(def) {
+                    d.container.model = model;
+                }
+            }
+            scene.joints.remove(index);
+        });
+        Ok(())
+    }
+
+    /// The joints a part has, each with its index in [`Scene::joints`] (for
+    /// [`Document::remove_joint`]) and the other part's name.
+    pub fn joint_list(&self, instance: InstanceId) -> Vec<(usize, Joint, String)> {
+        let Some(def) = self.container().instance(instance).map(|i| i.definition) else { return Vec::new() };
+        let scene = self.scene();
+        let name = |d: DefinitionId| scene.definition(d).map_or_else(|| "a deleted part".to_owned(), |d| d.name.clone());
+        scene
+            .joints
+            .iter()
+            .enumerate()
+            .filter(|(_, j)| j.cut == def || j.into == def)
+            .map(|(i, j)| (i, j.clone(), name(if j.cut == def { j.into } else { j.cut })))
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -1054,7 +1211,7 @@ mod components {
         let left = component(&mut doc, Board { origin: DVec3::new(2.0, 2.75, 29.25), length_dir: DVec3::Y, width_dir: -DVec3::Z, length: 14.5, width: 4.0, thickness: 0.75 });
         let right = place(&mut doc, left, middle, &[(middle, 180.0)])[0];
 
-        let tenon = Tenon { length: 0.75, thickness: 0.25, shoulder: 0.25 };
+        let tenon = Tenon { length: 0.75, thickness: 0.25, shoulder: 0.25, haunch: 0.0 };
         for (apron, leg) in [(front, fl), (front, fr), (back, br), (back, bl), (left, fl), (left, bl), (right, fr), (right, br)] {
             doc.mortise_and_tenon(apron, leg, tenon).unwrap();
         }
@@ -1159,7 +1316,8 @@ impl Document {
     /// Biscuits or loose tenons across a butt joint: matching slots in `part`'s end and
     /// `into`'s face, spread evenly across the part's width.
     pub fn slots(&mut self, part: InstanceId, into: InstanceId, slots: &Slots) -> Result<(), JoineryError> {
-        if slots.count == 0 || slots.length <= EPS || slots.thickness <= EPS || slots.depth <= EPS {
+        let sized = slots.length > EPS || slots.kind == JointKind::Splines;
+        if slots.count == 0 || !sized || slots.thickness <= EPS || slots.depth <= EPS {
             return Err(JoineryError::Size("The slots need a count and a size."));
         }
         self.joint_edit(|scene, path| {
@@ -1181,8 +1339,11 @@ impl Document {
             if end_depth >= r.1[butt.k] - r.0[butt.k] - EPS {
                 return Err(JoineryError::Size("The slots would go right through a part."));
             }
+            // A spline runs the whole joint; the others are spaced across it.
+            let spline = slots.kind == JointKind::Splines;
+            let length = if spline { size[wide] } else { slots.length };
             let spacing = size[wide] / f64::from(slots.count);
-            if spacing < slots.length + 0.25 {
+            if !spline && spacing < length + 0.25 {
                 return Err(JoineryError::Size("Too many for the width: use fewer, or a smaller size."));
             }
             let to_part = p.relative(into, part)?;
@@ -1192,8 +1353,8 @@ impl Document {
                 let narrow = |(mut lo, mut hi): Box3| {
                     lo[thin] = mid - slots.thickness / 2.0;
                     hi[thin] = mid + slots.thickness / 2.0;
-                    lo[wide] = center - slots.length / 2.0;
-                    hi[wide] = center + slots.length / 2.0;
+                    lo[wide] = center - length / 2.0;
+                    hi[wide] = center + length / 2.0;
                     (lo, hi)
                 };
                 cut_box_in(scene, path, into, narrow(extrude(butt, face_depth)))?;
@@ -1204,7 +1365,12 @@ impl Document {
             } else {
                 format!("{} x {}, {} deep in the face, {} in the end", slots.count, slots.piece, format_length(face_depth), format_length(end_depth))
             };
-            let hardware = Hardware { name: slots.piece.clone(), count: slots.count };
+            let name = if spline {
+                format!("{} x {} x {} spline", format_length(slots.thickness), format_length(face_depth + end_depth), format_length(length))
+            } else {
+                slots.piece.clone()
+            };
+            let hardware = Hardware { name, count: slots.count };
             record_with(scene, path, slots.kind, part, into, detail, Some(hardware))
         })
     }
@@ -1217,8 +1383,37 @@ impl Document {
         }
         self.joint_edit(|scene, path| {
             let p = Parts { scene, path };
-            if p.butt(part, into)?.is_none() {
+            let Some(butt) = p.butt(part, into)? else {
                 return repeat(scene, path, part, into, |k| k == JointKind::PocketScrews).map(|_| ());
+            };
+            // The pockets go on the part's face that's hidden: the one facing down, or else back.
+            let (thin, wide) = across(butt);
+            let world = scene.transform(path) * scene.container(path).and_then(|c| c.instance(into)).ok_or(JoineryError::NotParts)?.transform;
+            let facing = |sign: f64| world.transform_vector3(DVec3::AXES[thin] * sign);
+            let hidden = |d: DVec3| if d.z.abs() > 0.5 { -d.z } else { d.y };
+            let sign = if hidden(facing(1.0)) >= hidden(facing(-1.0)) { 1.0 } else { -1.0 };
+            let r = p.part_box(part, into)?;
+            let thick = butt.contact.1[thin] - butt.contact.0[thin];
+            let long = r.1[butt.k] - r.0[butt.k];
+            let to_part = p.relative(into, part)?;
+            if long > 2.0 {
+                let spacing = (butt.contact.1[wide] - butt.contact.0[wide]) / f64::from(count);
+                let c = butt.contact.0[butt.k];
+                let (k0, k1) = (c - butt.side * 0.25, c - butt.side * 1.5);
+                for i in 0..count {
+                    let mid = butt.contact.0[wide] + spacing * (f64::from(i) + 0.5);
+                    let (mut lo, mut hi) = butt.contact;
+                    lo[butt.k] = k0.min(k1);
+                    hi[butt.k] = k0.max(k1);
+                    lo[wide] = mid - 0.1875;
+                    hi[wide] = mid + 0.1875;
+                    if sign > 0.0 {
+                        lo[thin] = hi[thin] - thick / 2.0;
+                    } else {
+                        hi[thin] = lo[thin] + thick / 2.0;
+                    }
+                    cut_box_in(scene, path, part, transform_box(&to_part, (lo, hi)))?;
+                }
             }
             let detail = format!("{count} pocket holes in the hidden face, {} screws", format_length(screw));
             let hardware = Hardware { name: format!("{} pocket screw", format_length(screw)), count };
@@ -1314,8 +1509,253 @@ mod more_joints {
         let rail = board(&mut doc, DVec3::new(3.0, 0.0, 12.5), DVec3::X, -DVec3::Z, [20.0, 2.5, 1.5]);
         let fit = doc.joint_fit(rail, stile).unwrap();
         assert_eq!(fit.depth, 3.0);
-        doc.mortise_and_tenon(rail, stile, Tenon { length: fit.depth, thickness: 0.5, shoulder: 0.25 }).unwrap();
+        doc.mortise_and_tenon(rail, stile, Tenon { length: fit.depth, thickness: 0.5, shoulder: 0.25, haunch: 0.0 }).unwrap();
         assert!(closed(&doc, rail) && closed(&doc, stile));
         assert_eq!(doc.part_size(rail).unwrap()[0], 23.0);
+    }
+}
+
+#[cfg(test)]
+mod removing {
+    use glam::DVec3;
+
+    use super::*;
+    use crate::board::Board;
+
+    fn board(doc: &mut Document, origin: DVec3, length_dir: DVec3, width_dir: DVec3, [l, w, t]: [f64; 3]) -> InstanceId {
+        doc.add_board(&Board { origin, length_dir, width_dir, length: l, width: w, thickness: t }, None).unwrap()
+    }
+
+    fn faces(doc: &Document, part: InstanceId) -> usize {
+        let def = doc.container().instance(part).unwrap().definition;
+        doc.scene().definition(def).unwrap().container.model.faces().count()
+    }
+
+    #[test]
+    fn removing_a_joint_restores_both_parts_and_keeps_the_others() {
+        let mut doc = Document::default();
+        let side = board(&mut doc, DVec3::ZERO, DVec3::Z, DVec3::Y, [30.0, 11.25, 0.75]);
+        let low = board(&mut doc, DVec3::new(0.0, 0.0, 4.0), DVec3::X, DVec3::Y, [20.0, 11.25, 0.75]);
+        let high = board(&mut doc, DVec3::new(0.0, 0.0, 20.0), DVec3::X, DVec3::Y, [20.0, 11.25, 0.75]);
+        doc.let_in(low, side, 0.25).unwrap();
+        doc.let_in(high, side, 0.25).unwrap();
+        assert_eq!(faces(&doc, side), 14);
+        let (index, joint, other) = doc.joint_list(low)[0].clone();
+        assert_eq!((joint.kind, other.as_str()), (JointKind::Dado, "Group#1"));
+        doc.remove_joint(index).unwrap();
+        assert_eq!(faces(&doc, side), 10, "one dado left");
+        assert_eq!(doc.part_size(low).unwrap()[0], 20.0, "the shelf is back to its length");
+        assert_eq!(doc.part_size(high).unwrap()[0], 20.25, "the other shelf still reaches into its dado");
+        assert_eq!(doc.scene().joints.len(), 1);
+        doc.undo();
+        assert_eq!(faces(&doc, side), 14, "one undo step");
+    }
+
+    #[test]
+    fn a_part_changed_by_hand_since_says_to_use_undo() {
+        let mut doc = Document::default();
+        let side = board(&mut doc, DVec3::ZERO, DVec3::Z, DVec3::Y, [30.0, 11.25, 0.75]);
+        let shelf = board(&mut doc, DVec3::new(0.0, 0.0, 12.0), DVec3::X, DVec3::Y, [20.0, 11.25, 0.75]);
+        doc.let_in(shelf, side, 0.25).unwrap();
+        // Lengthen the side by hand.
+        doc.enter(side);
+        let top = doc.model().faces().find(|(_, f)| f.normal.x > 0.999).map(|(id, _)| id).unwrap();
+        doc.push_pull(top, 2.0, false).unwrap();
+        doc.exit();
+        assert!(matches!(doc.remove_joint(0), Err(JoineryError::Size(m)) if m.contains("Undo")));
+    }
+
+    #[test]
+    fn pocket_screws_come_out_cleanly() {
+        let mut doc = Document::default();
+        let side = board(&mut doc, DVec3::ZERO, DVec3::Z, DVec3::Y, [30.0, 11.25, 0.75]);
+        let shelf = board(&mut doc, DVec3::new(0.0, 0.0, 12.0), DVec3::X, DVec3::Y, [20.0, 11.25, 0.75]);
+        doc.pocket_screws(shelf, side, 3, 1.25).unwrap();
+        doc.remove_joint(0).unwrap();
+        assert!(doc.scene().joints.is_empty());
+    }
+}
+
+/// Dovetail sizes: how many tails, and whether the pins board hides them (half-blind, as on a
+/// drawer front) or they show through.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Dovetails {
+    pub tails: u32,
+    pub half_blind: bool,
+}
+
+/// Dovetail slope: 1 in 8, usual for hardwood.
+const DOVETAIL_SLOPE: f64 = 1.0 / 8.0;
+/// Pins are narrow where they show: 1/4" (half pins at the edges 3/8").
+const DOVETAIL_PIN: f64 = 0.25;
+const DOVETAIL_HALF_PIN: f64 = 0.375;
+
+impl Dovetails {
+    /// About one tail per 2 1/2" of width.
+    pub fn suggested(wide: f64) -> u32 {
+        ((wide / 2.5).round() as u32).max(1)
+    }
+}
+
+impl Spline {
+    /// A spline for stock `thick` thick: 1/4" thick (1/8" in thin stock), 3/8" into each part.
+    pub fn for_stock(thick: f64) -> Slots {
+        let t = if thick >= 0.6 { 0.25 } else { 0.125 };
+        Slots { kind: JointKind::Splines, piece: format!("{} spline", format_length(t)), count: 1, length: 0.0, thickness: t, depth: 0.375 }
+    }
+}
+
+/// Splines: one slot along the whole joint, a thin strip glued into both parts.
+pub struct Spline;
+
+impl Document {
+    /// Dovetails at a corner: `tails` (a drawer side) butts the inside of `pins` (the front) at
+    /// its end. The tails board grows into the pins board (all the way through, or short of its
+    /// face for half-blind) and both are cut: sockets in the pins board, waste between the tails.
+    pub fn dovetails(&mut self, tails: InstanceId, pins: InstanceId, style: Dovetails) -> Result<(), JoineryError> {
+        if style.tails == 0 {
+            return Err(JoineryError::Size("Dovetails need at least one tail."));
+        }
+        self.joint_edit(|scene, path| {
+            let p = Parts { scene, path };
+            let Some(butt) = p.butt(tails, pins)? else {
+                return repeat(scene, path, tails, pins, |k| k == JointKind::Dovetails).map(|_| ());
+            };
+            if !p.flush_at_end(tails, pins, &butt)? {
+                return Err(JoineryError::Size(
+                    "Butt the tail board's end against the inside of the other board at its end (a drawer side against its front).",
+                ));
+            }
+            let o = p.part_box(pins, pins)?;
+            let k = butt.k;
+            let (u, w) = across(butt);
+            let pins_thick = o.1[k] - o.0[k];
+            let lap = if style.half_blind { (pins_thick / 3.0).clamp(0.125, 0.25) } else { 0.0 };
+            let depth = pins_thick - lap;
+            // Which of the tail board's faces is flush with the pins board's end.
+            let (u_end, out) = if (butt.contact.1[u] - o.1[u]).abs() < TOUCH {
+                (butt.contact.1[u], 1.0)
+            } else if (butt.contact.0[u] - o.0[u]).abs() < TOUCH {
+                (butt.contact.0[u], -1.0)
+            } else {
+                return Err(JoineryError::NotCorner);
+            };
+            let tail_thick = butt.contact.1[u] - butt.contact.0[u];
+            let (lo_w, hi_w) = (butt.contact.0[w], butt.contact.1[w]);
+            let width = hi_w - lo_w;
+            let n = style.tails;
+            let off = depth * DOVETAIL_SLOPE;
+            let tail = (width - 2.0 * DOVETAIL_HALF_PIN - f64::from(n - 1) * DOVETAIL_PIN) / f64::from(n);
+            if tail < 2.0 * off + 0.25 {
+                return Err(JoineryError::Size("Too many tails for the width: use fewer."));
+            }
+            let v_in = butt.contact.0[k];
+            let v_out = v_in + butt.side * depth;
+            let point = |wv: f64, vv: f64| {
+                let mut p = DVec3::ZERO;
+                p[k] = vv;
+                p[w] = wv;
+                p[u] = u_end;
+                p
+            };
+            // Each tail at the board's end (wide) and at the baseline (narrower by the slope).
+            let tails_at: Vec<(f64, f64)> = (0..n).map(|i| {
+                let x0 = lo_w + DOVETAIL_HALF_PIN + f64::from(i) * (tail + DOVETAIL_PIN);
+                (x0, x0 + tail)
+            })
+            .collect();
+            grow_into(scene, path, tails, pins, butt, extrude(butt, depth))?;
+            let normal = DVec3::AXES[u] * out;
+            // Sockets in the pins board, from its end, as deep as the tail board is thick.
+            for &(x0, x1) in &tails_at {
+                let socket = [point(x0 + off, v_in), point(x1 - off, v_in), point(x1, v_out), point(x0, v_out)];
+                push_polygon_in(scene, path, pins, pins, &socket, normal, tail_thick)?;
+            }
+            // The waste between the tails (the pins' places), through the tail board.
+            let mut waste = vec![[point(lo_w, v_in), point(tails_at[0].0 + off, v_in), point(tails_at[0].0, v_out), point(lo_w, v_out)]];
+            for pair in tails_at.windows(2) {
+                let (a, b) = (pair[0].1, pair[1].0);
+                waste.push([point(a - off, v_in), point(b + off, v_in), point(b, v_out), point(a, v_out)]);
+            }
+            let last = tails_at[tails_at.len() - 1].1;
+            waste.push([point(last - off, v_in), point(hi_w, v_in), point(hi_w, v_out), point(last, v_out)]);
+            for polygon in &waste {
+                push_polygon_in(scene, path, tails, pins, polygon, normal, tail_thick)?;
+            }
+            let detail = format!("{n} tails, {}", if style.half_blind { "half-blind" } else { "through" });
+            record(scene, path, JointKind::Dovetails, tails, pins, detail)
+        })
+    }
+}
+
+#[cfg(test)]
+mod dovetail_tests {
+    use glam::DVec3;
+
+    use super::*;
+    use crate::board::Board;
+
+    fn board(doc: &mut Document, origin: DVec3, length_dir: DVec3, width_dir: DVec3, [l, w, t]: [f64; 3]) -> InstanceId {
+        doc.add_board(&Board { origin, length_dir, width_dir, length: l, width: w, thickness: t }, None).unwrap()
+    }
+
+    fn closed(doc: &Document, part: InstanceId) -> bool {
+        let def = doc.container().instance(part).unwrap().definition;
+        let m = &doc.scene().definition(def).unwrap().container.model;
+        m.edges().all(|(id, _)| m.edge_faces(id).len() == 2)
+    }
+
+    /// A drawer front along X (y in [-3/4, 0]) and a side butting its back at its left end.
+    fn drawer_corner(doc: &mut Document) -> (InstanceId, InstanceId) {
+        let front = board(doc, DVec3::ZERO, DVec3::X, DVec3::Z, [16.0, 6.0, 0.75]);
+        let side = board(doc, DVec3::new(0.0, -0.75, 6.0), -DVec3::Y, -DVec3::Z, [14.0, 6.0, 0.5]);
+        (front, side)
+    }
+
+    #[test]
+    fn through_dovetails_cut_tails_and_pins() {
+        let mut doc = Document::default();
+        let (front, side) = drawer_corner(&mut doc);
+        let tails = Dovetails::suggested(6.0);
+        assert_eq!(tails, 2);
+        doc.dovetails(side, front, Dovetails { tails: 3, half_blind: false }).unwrap();
+        assert!(closed(&doc, side) && closed(&doc, front), "both stay closed solids");
+        assert_eq!(doc.part_size(side).unwrap()[0], 14.75, "the side reaches through the front");
+        assert_eq!(doc.joint_list(front)[0].1.detail, "3 tails, through");
+        // And it comes out again.
+        doc.remove_joint(0).unwrap();
+        assert_eq!(doc.part_size(side).unwrap()[0], 14.0);
+    }
+
+    #[test]
+    fn half_blind_dovetails_stop_short_of_the_front_face() {
+        let mut doc = Document::default();
+        let (front, side) = drawer_corner(&mut doc);
+        doc.dovetails(side, front, Dovetails { tails: 2, half_blind: true }).unwrap();
+        assert!(closed(&doc, side) && closed(&doc, front));
+        assert_eq!(doc.part_size(side).unwrap()[0], 14.5, "into the front, short of its face by 1/4\"");
+    }
+
+    #[test]
+    fn a_spline_runs_the_whole_joint() {
+        let mut doc = Document::default();
+        let side = board(&mut doc, DVec3::ZERO, DVec3::Z, DVec3::Y, [30.0, 11.25, 0.75]);
+        let shelf = board(&mut doc, DVec3::new(0.0, 0.0, 12.0), DVec3::X, DVec3::Y, [20.0, 11.25, 0.75]);
+        doc.slots(shelf, side, &Spline::for_stock(0.75)).unwrap();
+        assert!(closed(&doc, side) && closed(&doc, shelf));
+        let joint = &doc.joint_list(side)[0].1;
+        assert_eq!(joint.kind, JointKind::Splines);
+        assert_eq!(joint.hardware.as_ref().map(|h| h.name.as_str()), Some("1/4\" x 3/4\" x 11 1/4\" spline"));
+    }
+
+    #[test]
+    fn a_haunched_tenon_fills_the_groove_at_the_top() {
+        let mut doc = Document::default();
+        let stile = board(&mut doc, DVec3::ZERO, DVec3::Z, DVec3::X, [30.0, 3.0, 1.5]);
+        // A rail at the top of the stile.
+        let rail = board(&mut doc, DVec3::new(3.0, 0.0, 30.0), DVec3::X, -DVec3::Z, [20.0, 2.5, 1.5]);
+        doc.mortise_and_tenon(rail, stile, Tenon { length: 1.0, thickness: 0.5, shoulder: 0.5, haunch: 0.375 }).unwrap();
+        assert!(closed(&doc, rail) && closed(&doc, stile));
+        assert!(doc.joint_list(rail)[0].1.detail.contains("haunch"));
     }
 }

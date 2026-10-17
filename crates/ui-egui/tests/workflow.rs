@@ -1534,3 +1534,56 @@ fn joinery_panel_cuts_biscuits_and_the_cut_list_counts_them() {
     assert!(harness.query_by_label("#20 biscuit").is_some());
     snapshot(&mut harness, "hardware_list");
 }
+
+#[test]
+fn joinery_panel_dovetails_a_drawer_corner_and_changes_and_removes_it() {
+    use egui_kittest::kittest::Queryable;
+    use glam::DVec3;
+    use woodsketch_doc::board::Board;
+    let mut harness = app();
+    let (front, side) = {
+        let doc = harness.state_mut().document_mut();
+        let maple = doc.add_preset(woodsketch_doc::library::LIBRARY.iter().find(|p| p.name == "Hard Maple").unwrap());
+        // A drawer front and a side butting its back at its left end.
+        let front = doc.add_board(&Board { origin: DVec3::ZERO, length_dir: DVec3::X, width_dir: DVec3::Z, length: 16.0, width: 6.0, thickness: 0.75 }, Some(maple)).unwrap();
+        let side = doc.add_board(&Board { origin: DVec3::new(0.0, -0.75, 6.0), length_dir: -DVec3::Y, width_dir: -DVec3::Z, length: 14.0, width: 6.0, thickness: 0.5 }, Some(maple)).unwrap();
+        doc.rename_instance(front, "Front");
+        doc.rename_instance(side, "Side");
+        doc.selection_mut().extend([woodsketch_doc::Entity::Instance(side), woodsketch_doc::Entity::Instance(front)]);
+        (front, side)
+    };
+    harness.run();
+    type_text(&mut harness, "Z");
+    harness.get(egui_kittest::kittest::by().role(egui::accesskit::Role::ComboBox).value("Dado, groove or rabbet")).click();
+    harness.run();
+    harness.get_by_label("Dovetails").click();
+    harness.run();
+    harness.get_by_label("Half-blind").click();
+    harness.run();
+    harness.get_by_label("Cut the dovetails").click();
+    harness.run();
+    assert!(harness.query_by_label_contains("Dovetails, 2 tails, half-blind").is_some(), "listed as joined");
+    assert_eq!(harness.state().document().part_size(side).unwrap()[0], 14.5);
+    snapshot(&mut harness, "dovetails");
+
+    // Change: it comes out, and the picker is back on dovetails.
+    harness.get_by_label("Change").click();
+    harness.run();
+    assert!(harness.state().document().scene().joints.is_empty());
+    assert_eq!(harness.state().document().part_size(side).unwrap()[0], 14.0, "the tails are gone");
+    harness.get_by_label("Through").click();
+    harness.run();
+    harness.get_by_label("Cut the dovetails").click();
+    harness.run();
+    assert!(harness.query_by_label_contains("2 tails, through").is_some());
+
+    // Remove, from Entity Info with just the front selected.
+    let doc = harness.state_mut().document_mut();
+    doc.selection_mut().clear();
+    doc.selection_mut().extend([woodsketch_doc::Entity::Instance(front)]);
+    harness.run();
+    harness.get_by_label("Remove").click();
+    harness.run();
+    assert!(harness.state().document().scene().joints.is_empty());
+    assert_eq!(harness.state().document().part_size(side).unwrap()[0], 14.0);
+}

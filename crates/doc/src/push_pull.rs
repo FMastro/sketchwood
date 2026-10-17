@@ -215,6 +215,37 @@ impl Model {
             self.add_face(&quad);
             return;
         };
+        // The "side" may be the wall itself: neighbouring walls' edges can close its outline, which
+        // fills it in. Keep it as the wall, facing the right way.
+        let is_wall = self.face(side).is_some_and(|f| {
+            f.outer.len() == 4 && f.holes.is_empty() && f.outer.iter().all(|&v| quad.iter().any(|q| q.distance(self.vertex(v)) <= EPS))
+        });
+        if is_wall {
+            if self.face(side).is_some_and(|f| f.normal.dot(normal) < 0.0) {
+                self.reverse_face(side);
+            }
+            return;
+        }
+        // In the side's plane but beyond it (a deeper pocket below a shallower one): new surface,
+        // not part of the side to cut away.
+        let center = quad.iter().sum::<DVec3>() / 4.0;
+        if removing && self.face(side).is_some_and(|f| !self.face_contains(f, center)) {
+            for i in 0..4 {
+                self.add_line(quad[i], quad[(i + 1) % 4]);
+            }
+            let in_plane = |f: &crate::Face| f.normal.dot(normal).abs() > 1.0 - 1e-9 && (self.vertex(f.outer[0]) - center).dot(normal).abs() <= EPS;
+            let found = self.faces().find(|(_, f)| in_plane(f) && self.face_contains(f, center)).map(|(id, _)| id);
+            let wall = match found {
+                Some(id) => Some(id),
+                None => self.add_face(&quad),
+            };
+            if let Some(wall) = wall
+                && self.face(wall).is_some_and(|f| f.normal.dot(normal) < 0.0)
+            {
+                self.reverse_face(wall);
+            }
+            return;
+        }
         let side_normal = self.face(side).expect("found above").normal;
         // Draw the wall's edges onto the side's plane (the one along the base already exists, and
         // the quad may wind either way); that splits the side (push)
@@ -442,5 +473,40 @@ mod tests {
         let mut model = Model::default();
         let face = two_by_four_profile(&mut model);
         assert_eq!(model.push_pull(face, 0.0), Err(PushPullError::ZeroDistance));
+    }
+}
+
+#[cfg(test)]
+mod notches_through_an_end {
+    use glam::DVec3;
+
+    use crate::Model;
+
+    fn open(m: &Model) -> Vec<[DVec3; 2]> {
+        m.edges().filter(|(id, _)| m.edge_faces(*id).len() != 2).map(|(_, e)| m.edge_points(e)).collect()
+    }
+
+    fn board() -> Model {
+        let mut m = Model::default();
+        let f = m.add_rectangle(DVec3::ZERO, DVec3::X * 10.0, DVec3::Y * 6.0, DVec3::Z).unwrap();
+        m.push_pull(f, 0.5).unwrap();
+        m
+    }
+
+    #[test]
+    fn a_notch_cut_through_at_the_end_keeps_all_its_walls() {
+        // Notches through the board at its end (x 9..10), straight or slanted (dovetail waste),
+        // in the middle or at the corner. The last wall's outline gets closed by its neighbours'
+        // edges before it's added; it must stay a wall, not be taken for the board's side.
+        for (name, pts) in [
+            ("corner trapezoid", vec![DVec3::new(9.0, 6.0, 0.5), DVec3::new(9.0, 5.5, 0.5), DVec3::new(10.0, 5.4, 0.5), DVec3::new(10.0, 6.0, 0.5)]),
+            ("middle trapezoid", vec![DVec3::new(9.0, 3.0, 0.5), DVec3::new(9.0, 2.0, 0.5), DVec3::new(10.0, 1.9, 0.5), DVec3::new(10.0, 3.1, 0.5)]),
+            ("middle rectangle", vec![DVec3::new(9.0, 3.0, 0.5), DVec3::new(9.0, 2.0, 0.5), DVec3::new(10.0, 2.0, 0.5), DVec3::new(10.0, 3.0, 0.5)]),
+        ] {
+            let mut m = board();
+            let face = m.draw_polygon(&pts, DVec3::Z).expect("a face");
+            m.push_pull(face, -0.5).unwrap();
+            assert!(open(&m).is_empty(), "{name}: open edges {:?}", open(&m));
+        }
     }
 }

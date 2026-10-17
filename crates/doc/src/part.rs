@@ -80,10 +80,11 @@ pub enum EdgeJoint {
     Dowels,
     Biscuits,
     LooseTenons,
+    Splines,
 }
 
 impl EdgeJoint {
-    pub const ALL: [Self; 4] = [Self::Glue, Self::Dowels, Self::Biscuits, Self::LooseTenons];
+    pub const ALL: [Self; 5] = [Self::Glue, Self::Dowels, Self::Biscuits, Self::LooseTenons, Self::Splines];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -91,6 +92,7 @@ impl EdgeJoint {
             Self::Dowels => "Dowels",
             Self::Biscuits => "Biscuits",
             Self::LooseTenons => "Loose tenons",
+            Self::Splines => "Splines",
         }
     }
 
@@ -112,12 +114,24 @@ impl EdgeJoint {
                 let size = crate::joinery::Slots::suggested_loose_tenon(thick);
                 Some((crate::joinery::Slots::loose_tenons(size, 1.0).piece, 8.0))
             }
+            // One along the whole seam.
+            Self::Splines => Some((crate::joinery::Spline::for_stock(thick).piece, f64::INFINITY)),
         }
     }
 
     /// How many go in one seam `length` long: one every few inches, at least two.
     pub fn per_seam(spacing: f64, length: f64) -> u32 {
         ((length / spacing).floor() as u32).max(2)
+    }
+
+    /// What goes in each seam of a glue-up `length` long in stock `thick` thick, and how many:
+    /// `None` for glue only. A spline runs the seam's length.
+    pub fn seam(self, thick: f64, length: f64) -> Option<(String, u32)> {
+        let (piece, spacing) = self.piece(thick)?;
+        Some(match self {
+            Self::Splines => (format!("{piece}, {} long", crate::units::format_length(length)), 1),
+            _ => (piece, Self::per_seam(spacing, length)),
+        })
     }
 }
 

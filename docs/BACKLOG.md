@@ -13,12 +13,12 @@ modeling (rooms, jigs, odd shapes) working; the wood features add on and stay op
 2. **Board from stock** (done). Later: choose which side of the line a lumber board's width goes
    (it's always to the left of the drag now), Tab to cycle a board's faces against a surface, and
    picking stock straight from the Materials panel.
-3. **Joinery** (first version done: cut where parts overlap = dado, groove, rabbet, notch;
-   half-lap; mortise and tenon, from the Joinery panel with two parts selected). Still to come:
-   dowels, pocket screws, box joints and dovetails; editing or removing a joint after it's made
-   (joints are listed, not yet parametric); a fit allowance (mortise a hair deeper/wider);
-   through and haunched tenons; parts in different groups (both must be side by side now);
-   parts that aren't square to each other.
+3. **Joinery** (done: dado and rabbet let in from a butt joint, mortise and tenon, dowels, box
+   joint, half-lap, cut where parts overlap). Still to come: pocket screws, dovetails (through
+   and half-blind), splines and biscuits; dowels in the cut list as hardware; editing or removing
+   a joint after it's made (joints are listed, not yet parametric); a fit allowance (mortise a hair
+   bigger); through and haunched tenons; parts in different groups (both must be side by side
+   now); parts that aren't square to each other.
 4. **Edge profiles**: router bits from parameters (roundover, chamfer, cove, ogee, bead) applied
    to chosen edges, stored as an operation (change the bit later); a sweep along edges with
    corners handled.

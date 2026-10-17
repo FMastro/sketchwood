@@ -1263,6 +1263,12 @@ fn joinery_panel_cuts_a_dado_and_makes_a_mortise_and_tenon() {
     snapshot(&mut harness, "joinery_dado");
 
     select(&mut harness, [rail, stile]);
+    // Butted: a dado or rabbet is offered first; pick mortise and tenon instead.
+    assert!(harness.query_by_label("Let Group#4 into Group#3").is_some());
+    harness.get(egui_kittest::kittest::by().role(egui::accesskit::Role::ComboBox).value("Dado or rabbet")).click();
+    harness.run();
+    harness.get_by_label("Mortise and tenon").click();
+    harness.run();
     harness.get_by_label("Tenon on Group#4, mortise in Group#3").click();
     harness.run();
     let doc = harness.state().document();
@@ -1281,4 +1287,41 @@ fn joinery_panel_cuts_a_dado_and_makes_a_mortise_and_tenon() {
     harness.run();
     type_text(&mut harness, "Z");
     snapshot(&mut harness, "joinery_apart");
+}
+
+#[test]
+fn joinery_panel_lets_a_butted_top_into_a_rabbet() {
+    use egui_kittest::kittest::Queryable;
+    use glam::DVec3;
+    use woodsketch_doc::board::Board;
+    let mut harness = app();
+    let (side, top) = {
+        let doc = harness.state_mut().document_mut();
+        let pine = doc.add_preset(woodsketch_doc::library::LIBRARY.iter().find(|p| p.name == "Pine").unwrap());
+        let mut add = |origin: DVec3, length_dir: DVec3, width_dir: DVec3, [length, width, thickness]: [f64; 3]| {
+            doc.add_board(&Board { origin, length_dir, width_dir, length, width, thickness }, Some(pine)).unwrap()
+        };
+        let side = add(DVec3::ZERO, DVec3::Z, DVec3::Y, [30.0, 11.25, 0.75]);
+        // The top butts the side's inner face, flush with its top.
+        let top = add(DVec3::new(0.0, 0.0, 29.25), DVec3::X, DVec3::Y, [20.0, 11.25, 0.75]);
+        let doc = harness.state_mut().document_mut();
+        doc.selection_mut().extend([woodsketch_doc::Entity::Instance(top), woodsketch_doc::Entity::Instance(side)]);
+        (side, top)
+    };
+    harness.run();
+    type_text(&mut harness, "Z");
+    // Every joint is listed; the ones that need the parts placed differently say so.
+    harness.get(egui_kittest::kittest::by().role(egui::accesskit::Role::ComboBox).value("Dado or rabbet")).click();
+    harness.run();
+    assert!(harness.query_by_label("Half-lap (place the parts first)").is_some());
+    assert!(harness.query_by_label("Box joint").is_some(), "a top flush with the side's end is a corner");
+    snapshot(&mut harness, "joinery_picker");
+    harness.get_by_label("Dado or rabbet").click();
+    harness.run();
+    harness.get_by_label("Let Group#2 into Group#1").click();
+    harness.run();
+    let doc = harness.state().document();
+    assert_eq!(doc.joints_of(side)[0].0.kind, woodsketch_doc::joinery::JointKind::Rabbet);
+    assert_eq!(doc.part_size(top).unwrap()[0], 20.25, "the top grew into the rabbet");
+    assert!(harness.query_by_label_contains("Rabbet cut in Group#1").is_some());
 }

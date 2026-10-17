@@ -152,6 +152,10 @@ add it there; when you finish an item, remove it.
    cross-section extruded); `Document::profile_edges` rebuilds a plain board's geometry, one undo
    step, recorded in `Scene::profiles`). Edge profile panel in the tray for one selected part, edges
    named by where they face (Top, Front...).
+25. Build sheets: `doc::buildsheet::to_html` (one sheet per part definition, in cut-list order: name,
+   letter, count, finished size, stock, grain; face / edge / end views as SVG to scale with overall
+   dimensions; steps from `Scene::joints` and `Scene::profiles` in shop order). Cut List window >
+   Print build sheets.
 
 ## Direction
 Specialized for woodworking: SketchUp-familiar modeling where parts know they're wood (species,

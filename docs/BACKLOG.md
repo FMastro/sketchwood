@@ -24,9 +24,10 @@ modeling (rooms, jigs, odd shapes) working; the wood features add on and stay op
    board that already has joints or other cuts (profile first for now); edges around a face and
    along the length on one board; clicking edges in the model to pick them; changing a profile
    later (it's listed, not yet parametric); curved and angled edges.
-5. **Build sheets**: per part, a dimensioned drawing and its operations measured from the
-   reference face and edge, in a sensible order (mill, joinery, profiles, sand). Describe what,
-   not how: no machine setups or orientations we can't be sure of.
+5. **Build sheets** (done: a printable page per part from the Cut List window, with its size,
+   stock, three dimensioned views to scale, and steps in shop order). Still to come: where each
+   joint and profile sits (dimensions to it from the reference face and edge, which aren't picked
+   yet), hidden lines dashed, an exploded assembly view and glue-up order.
 6. **Wood movement checks**: USDA Wood Handbook shrinkage per species (public domain) x width x
    moisture swing, by cut; warn about cross-grain glue-ups (glued tops, breadboard ends, panels
    in frames) with arrows and numbers ("this 18" panel moves about 3/16"").

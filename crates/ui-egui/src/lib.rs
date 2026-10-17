@@ -191,6 +191,12 @@ impl WoodSketchApp {
         }
     }
 
+    /// The build sheets for the drawing, as a web page (what File > Print build sheets saves).
+    pub fn build_sheets_html(&mut self) -> String {
+        let title = format!("{} build sheets", self.files.name());
+        self.cut_list.build_sheets(&self.doc, &title)
+    }
+
     /// Whether there are changes since the drawing was opened or last saved.
     pub fn is_dirty(&self) -> bool {
         self.files.is_dirty(&self.doc)

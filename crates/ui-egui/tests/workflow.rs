@@ -1433,3 +1433,40 @@ fn edge_profile_panel_rounds_over_a_tabletop_and_chamfers_a_leg() {
     type_text(&mut harness, "Z");
     snapshot(&mut harness, "edge_profiles");
 }
+
+#[test]
+fn build_sheets_for_a_small_table() {
+    use egui_kittest::kittest::Queryable;
+    use glam::DVec3;
+    use woodsketch_doc::board::Board;
+    let mut harness = app();
+    {
+        let doc = harness.state_mut().document_mut();
+        let cherry = doc.add_preset(woodsketch_doc::library::LIBRARY.iter().find(|p| p.name == "Cherry").unwrap());
+        let mut add = |name: &str, origin: DVec3, length_dir: DVec3, width_dir: DVec3, [length, width, thickness]: [f64; 3]| {
+            let id = doc.add_board(&Board { origin, length_dir, width_dir, length, width, thickness }, Some(cherry)).unwrap();
+            doc.rename_instance(id, name);
+            id
+        };
+        // A leg and an apron rail butting it, and a top.
+        let leg = add("Leg", DVec3::ZERO, DVec3::Z, DVec3::X, [28.0, 1.75, 1.75]);
+        let apron = add("Apron", DVec3::new(1.75, 0.25, 27.0), DVec3::X, -DVec3::Z, [18.0, 4.0, 0.75]);
+        let top = add("Top", DVec3::new(-1.0, -1.0, 28.0), DVec3::X, DVec3::Y, [24.0, 16.0, 0.75]);
+        doc.profile_edges(leg, woodsketch_doc::profile::Profile::Chamfer, 0.125, woodsketch_doc::profile::Edges::Along { axis: 0, corners: [true; 4] }).unwrap();
+        doc.profile_edges(top, woodsketch_doc::profile::Profile::Roundover, 0.25, woodsketch_doc::profile::Edges::AroundFace { axis: 2, positive: true, sides: [true; 4] }).unwrap();
+        let fit = doc.joint_fit(apron, leg).unwrap();
+        doc.mortise_and_tenon(apron, leg, fit.tenon).unwrap();
+    }
+    harness.run();
+    let html = harness.state_mut().build_sheets_html();
+    assert_eq!(html.matches("<section class=\"sheet\">").count(), 3);
+    assert!(html.contains("Cut the mortise for Apron") && html.contains("Cut the tenon that goes into Leg"));
+    assert!(html.contains("Rout the edges: 1/4\" Roundover, 4 edges."));
+    if let Ok(dir) = std::env::var("WOODSKETCH_SNAPSHOT_DIR") {
+        std::fs::write(std::path::Path::new(&dir).join("build_sheets.html"), &html).unwrap();
+    }
+    // The Cut List window offers it.
+    harness.get_by_label(egui_phosphor::regular::TABLE).click();
+    harness.run();
+    assert!(harness.query_by_label_contains("Print build sheets").is_some());
+}

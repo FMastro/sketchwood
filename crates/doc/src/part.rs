@@ -94,9 +94,15 @@ pub fn extents(definition: &Definition, linear: DMat3) -> Option<DVec3> {
 /// `[length, width, thickness]` from a part's extents: length along the grain (the longest side
 /// unless set), then the wider of the other two.
 pub fn size(extents: DVec3, info: &PartInfo) -> PartSize {
+    axes(extents, info).map(|i| extents[i])
+}
+
+/// Which of a part's own axes is its length (along the grain), width and thickness.
+pub fn axes(extents: DVec3, info: &PartInfo) -> [usize; 3] {
     let grain = info.grain.map_or_else(|| (0..3).max_by(|&a, &b| extents[a].total_cmp(&extents[b])).unwrap_or(0), PartAxis::index);
-    let others: Vec<f64> = (0..3).filter(|&i| i != grain).map(|i| extents[i]).collect();
-    [extents[grain], others[0].max(others[1]), others[0].min(others[1])]
+    let others: Vec<usize> = (0..3).filter(|&i| i != grain).collect();
+    let (a, b) = (others[0], others[1]);
+    if extents[a] >= extents[b] { [grain, a, b] } else { [grain, b, a] }
 }
 
 impl Scene {

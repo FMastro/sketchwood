@@ -72,6 +72,12 @@ impl CutListWindow {
                         if print.clicked() {
                             self.export_sheet(doc);
                         }
+                        let build = ui
+                            .button(format!("{} Print build sheets...", ph::NOTEBOOK))
+                            .on_hover_text("A page per part for the shop: its size, drawings, joints and profiles, in order");
+                        if build.clicked() {
+                            self.export_build_sheets(doc);
+                        }
                         if ui.button(format!("{} Export CSV...", ph::FILE_CSV)).clicked() {
                             self.export_csv(doc);
                         }
@@ -119,6 +125,23 @@ impl CutListWindow {
             Ok(()) => open_with_system(&path).err().map(|e| format!("Saved, but couldn't open it: {e}")),
             Err(e) => Some(format!("Couldn't save {}: {e}", path.display())),
         };
+    }
+
+    fn export_build_sheets(&mut self, doc: &Document) {
+        let html = self.build_sheets(doc, "Build sheets");
+        let Some(path) = rfd::FileDialog::new().add_filter("Web page", &["html"]).set_file_name("build sheets.html").save_file() else {
+            return;
+        };
+        self.message = match std::fs::write(&path, html) {
+            Ok(()) => open_with_system(&path).err().map(|e| format!("Saved, but couldn't open it: {e}")),
+            Err(e) => Some(format!("Couldn't save {}: {e}", path.display())),
+        };
+    }
+
+    /// The build sheets as a web page: one page per part.
+    pub fn build_sheets(&mut self, doc: &Document, title: &str) -> String {
+        let (list, _) = self.refresh(doc);
+        woodsketch_doc::buildsheet::to_html(doc.scene(), list, title)
     }
 
     /// The cut sheet as a web page.

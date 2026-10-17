@@ -220,6 +220,13 @@ impl WoodSketchApp {
 
     fn help_menu(&mut self, ui: &mut egui::Ui) {
         ui.menu_button("Help", |ui| {
+            if ui.button("Check for Updates...").clicked() {
+                ui.close();
+                self.check_for_updates();
+            }
+            ui.checkbox(&mut self.check_updates, "Check for updates at startup")
+                .on_hover_text("A quick look at WoodSketch's releases on GitHub when it opens; new versions download in the background");
+            ui.separator();
             if ui.button("About WoodSketch").clicked() {
                 ui.close();
                 self.show_about = true;
@@ -350,6 +357,17 @@ impl WoodSketchApp {
                     measurements_box(ui, &self.tools);
                     ui.label(self.tools.measurement_label());
                     ui.separator();
+                    // A new version, downloaded in the background: offer the restart, never force it.
+                    if let Some(crate::updates::UpdateState::Ready(version)) = self.update_state() {
+                        let restart = ui
+                            .button(format!("{} Restart to update to {version}", egui_phosphor::regular::ARROW_CIRCLE_UP))
+                            .on_hover_text("Installs the new version and reopens WoodSketch (you'll be asked to save first)");
+                        if restart.clicked() {
+                            let ctx = ui.ctx().clone();
+                            self.restart_to_update(&ctx);
+                        }
+                        ui.separator();
+                    }
                     ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                         ui.label(egui::RichText::new(icons::HELP).color(egui::Color32::from_rgb(0, 102, 204)));
                         ui.add(egui::Label::new(self.tools.status()).truncate());

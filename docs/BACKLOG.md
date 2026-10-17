@@ -4,8 +4,12 @@ Things we deliberately skipped or know are incomplete, to come back to. Newest f
 each section. Remove items when they're done (mention them in the commit).
 
 ## Next up (recommended order, 2026-10-17)
-1. **Downloadable beta with auto-update, on Windows, macOS and Linux.** Today the site says to
-   build from source, which few woodworkers will do.
+1. **Downloadable beta with auto-update, on Windows, macOS and Linux** (started: Velopack installers
+   for Windows x64, macOS arm64/x64, Linux x64 from `release.yml` into a draft release, and the
+   in-app update check, are done). Still to come: signing (below); app icons for the installers
+   and the app; `.woodsketch` file association; Windows ARM64 and Linux ARM64 builds; delta
+   updates (download the previous release before packing); the site's Download button linking
+   each OS's file directly. Details:
    - Installers from a GitHub Actions release workflow on a version tag: Windows (installer,
      x64 and ARM64), macOS (universal app in a DMG), Linux (AppImage, plus .deb/.rpm). Publish
      to GitHub Releases with SHA-256 checksums; a Download button on woodsketch.net that picks the

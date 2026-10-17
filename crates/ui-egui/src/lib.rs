@@ -13,6 +13,7 @@ mod outliner;
 mod part;
 mod profile;
 mod tags;
+pub mod updates;
 mod viewport;
 
 use std::path::{Path, PathBuf};
@@ -24,6 +25,8 @@ use viewport::Viewport;
 
 /// Where the recent-drawings list is kept in eframe's settings.
 const RECENT_KEY: &str = "recent_drawings";
+/// Whether to check for updates at startup, in eframe's settings.
+const UPDATES_KEY: &str = "check_updates";
 
 pub struct WoodSketchApp {
     doc: Document,
@@ -45,6 +48,13 @@ pub struct WoodSketchApp {
     /// Drawings autosaved by a session that crashed, offered back at start.
     leftovers: Vec<autosave::Leftover>,
     /// Autosave failed once (shown once, not every interval).
+    /// The updater the app binary plugs in (none in tests or builds without one).
+    updater: Option<updates::Updater>,
+    /// Check for updates at startup (a setting, kept between runs).
+    check_updates: bool,
+    /// Whether the startup check has run, and whether the user asked for the last one.
+    update_started: bool,
+    update_asked: bool,
     autosave_failed: bool,
 }
 
@@ -76,6 +86,10 @@ impl WoodSketchApp {
             autosave,
             leftovers,
             autosave_failed: false,
+            updater: None,
+            check_updates: cc.storage.and_then(|s| eframe::get_value(s, UPDATES_KEY)).unwrap_or(true),
+            update_started: false,
+            update_asked: false,
         }
     }
 
@@ -206,6 +220,51 @@ impl WoodSketchApp {
         self.files.path.as_deref()
     }
 
+    /// Plug in the updater (the app binary does, with Velopack).
+    pub fn set_updater(&mut self, updater: updates::Updater) {
+        self.updater = Some(updater);
+    }
+
+    /// The quiet check at startup (when it's on), and the result of one the user asked for.
+    fn keep_up_to_date(&mut self) {
+        let Some(updater) = &self.updater else { return };
+        if !self.update_started && self.check_updates {
+            self.update_started = true;
+            (updater.check)();
+        }
+        if self.update_asked {
+            let state = updater.state();
+            if !matches!(state, updates::UpdateState::Checking | updates::UpdateState::Idle) {
+                self.update_asked = false;
+                if !matches!(state, updates::UpdateState::Ready(_)) {
+                    self.files.show_error(updates::describe(&state));
+                }
+            }
+        }
+    }
+
+    /// Help > Check for Updates: check now, and say what happened.
+    pub(crate) fn check_for_updates(&mut self) {
+        match &self.updater {
+            Some(updater) => {
+                self.update_asked = true;
+                self.update_started = true;
+                (updater.check)();
+            }
+            None => self.files.show_error(updates::describe(&updates::UpdateState::NotInstalled)),
+        }
+    }
+
+    /// "Restart to update": after any unsaved changes are dealt with.
+    pub(crate) fn restart_to_update(&mut self, ctx: &egui::Context) {
+        self.request(ctx, files::Discard::RestartToUpdate);
+    }
+
+    /// The update state for the status bar, if there's an updater.
+    pub(crate) fn update_state(&self) -> Option<updates::UpdateState> {
+        self.updater.as_ref().map(updates::Updater::state)
+    }
+
     pub fn show_error(&mut self, error: String) {
         self.files.show_error(error);
     }
@@ -249,6 +308,12 @@ impl WoodSketchApp {
                 }
             }
             files::Discard::Close => self.files.close(ctx),
+            files::Discard::RestartToUpdate => {
+                self.autosave.clear();
+                if let Some(updater) = &self.updater {
+                    (updater.restart)();
+                }
+            }
         }
     }
 
@@ -323,12 +388,14 @@ impl eframe::App for WoodSketchApp {
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, RECENT_KEY, &self.recent);
+        eframe::set_value(storage, UPDATES_KEY, &self.check_updates);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.handle_files(&ctx);
         self.autosave_and_recover(&ctx);
+        self.keep_up_to_date();
         if !self.files.is_asking() && self.leftovers.is_empty() {
             self.keyboard.handle(&ctx, &mut self.doc, &mut self.tools, &mut self.viewport);
         }

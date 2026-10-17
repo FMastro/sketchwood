@@ -1,0 +1,42 @@
+name: CI
+
+# Build, lint and test on every platform WoodSketch ships for. The UI tests need a GPU, so
+# they run locally; here the plain crates' tests run and everything is compiled and linted.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Linux libraries (windowing, file dialogs)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libwayland-dev libxcursor-dev libxrandr-dev libxi-dev libx11-xcb-dev
+      - name: Clippy
+        shell: bash
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Tests (without the GPU)
+        shell: bash
+        run: cargo test --locked -p woodsketch-doc -p woodsketch-tools -p woodsketch-view

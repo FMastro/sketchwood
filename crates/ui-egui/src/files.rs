@@ -15,6 +15,8 @@ pub enum Discard {
     /// Open the drawing at this place in the recent list.
     OpenRecent(usize),
     Close,
+    /// Install the downloaded update and restart.
+    RestartToUpdate,
 }
 
 #[derive(Default)]

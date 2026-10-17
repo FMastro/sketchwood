@@ -4,7 +4,11 @@
 use eframe::egui;
 use woodsketch_ui_egui::WoodSketchApp;
 
+mod update;
+
 fn main() -> eframe::Result {
+    // First: the installer and updater run their setup steps through the app, and exit there.
+    velopack::VelopackApp::build().run();
     env_logger::init();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -28,6 +32,7 @@ fn main() -> eframe::Result {
         options,
         Box::new(move |cc| {
             let mut app = WoodSketchApp::new(cc);
+            app.set_updater(update::updater(cc.egui_ctx.clone()));
             if let Some(path) = open
                 && let Err(error) = app.open_path(&path)
             {

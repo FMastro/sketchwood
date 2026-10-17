@@ -172,6 +172,14 @@ add it there; when you finish an item, remove it.
    `Material::movement`, filled from the library and by name for older drawings; `check` gives each
    solid-wood part's movement across its grain for `Scene::moisture_swing`, default 4%, and
    conflicts where a touching part won't move that way). Cut List window > Wood movement tab.
+27. Releases and updates: a `v*` tag (matching Cargo.toml's version) runs `.github/workflows/release.yml`:
+   Windows x64, macOS arm64 and x64, Linux x64 builds, each packed by Velopack (`vpk`, version
+   pinned to the `velopack` crate) on its own channel, into a DRAFT GitHub release (publish it to
+   ship). The app runs `VelopackApp` first, then checks GitHub Releases in the background at startup
+   (Help > Check for updates at startup; Help > Check for Updates...), downloads quietly, and offers
+   "Restart to update" in the status bar (after "Save changes?"). The UI side (`ui-egui::updates`)
+   has no Velopack dependency; `apps/woodsketch/src/update.rs` plugs it in. CI
+   (`.github/workflows/ci.yml`) lints and runs the non-GPU tests on all three platforms.
 
 ## Direction
 Specialized for woodworking: SketchUp-familiar modeling where parts know they're wood (species,

@@ -4,33 +4,35 @@ Things we deliberately skipped or know are incomplete, to come back to. Newest f
 each section. Remove items when they're done (mention them in the commit).
 
 ## Next up (recommended order, 2026-10-17)
-1. **Downloadable beta with auto-update, on Windows, macOS and Linux** (started: Velopack installers
-   for Windows x64, macOS arm64/x64, Linux x64 from `release.yml` into a draft release, and the
-   in-app update check, are done). Still to come: signing (below); app icons for the installers
-   and the app; `.woodsketch` file association; Windows ARM64 and Linux ARM64 builds; delta
-   updates (download the previous release before packing); the site's Download button linking
-   each OS's file directly. Details:
-   - Installers from a GitHub Actions release workflow on a version tag: Windows (installer,
-     x64 and ARM64), macOS (universal app in a DMG), Linux (AppImage, plus .deb/.rpm). Publish
-     to GitHub Releases with SHA-256 checksums; a Download button on woodsketch.net that picks the
-     visitor's OS.
-   - Auto-update: on startup, a background check of the latest GitHub release; when newer, it
-     downloads quietly and offers "Update ready, restart to update" (never interrupting). Option to
-     turn it off. Velopack (Rust crate + `vpk`) does install and update on all three; its packer
-     needs the .NET SDK on the build machine only (users need nothing). ArtCraft's alternative:
-     MSI (WiX v5), DMG, AppImage/deb/rpm/Flatpak from a shared workflow
-     (storytold/craft-common-actions `release.yml`), with updates done by a separate Launcher app
-     that checks each app's GitHub releases. WiX is also a .NET tool, so neither avoids .NET on CI.
+1. **Shakedown on a real project** (you): design something you'd build (a cabinet from the
+   template with a couple of drawers, a nightstand) start to finish; every place it fights you
+   goes to the top of this list.
+2. **Drawers and doors fitted to an opening**: select a cabinet or face-frame opening, pick
+   Drawer or Door, and get one sized with the usual clearances: the drawer box 1/2" narrower than
+   the opening for side-mount slides (or per the slide chosen), its depth from the slide length;
+   the front overlay (1/2", full) or inset (1/16" gap all round); doors single or a pair, with
+   hinge-side and meeting gaps. Also a frame-and-panel door (rails and stiles with a floating
+   panel in grooves, sized for wood movement).
+3. **Hardware as parts**: drawer slides (side-mount, undermount; lengths 12"-24"), hinges
+   (concealed/European, butt), shelf pins, pulls and knobs, screws. Placed as simple parametric
+   shapes (no licensed models), each counted in the shopping list, and slides set the drawer
+   size in item 2 (their clearance and length).
+4. **Agent-ready** (Woodworking direction, item 8): a project recipe (JSON), a command line
+   (`woodsketch build`, `cutlist`, `cutsheet`, `render`), an MCP server so Claude and other
+   assistants can design with WoodSketch, and docs for agents. Templates (and 2 and 3) are the
+   building blocks a recipe calls.
+5. **.skp import** through Trimble's SketchUp SDK: check its terms allow a free open-source app
+   before any work on it.
+6. **Release polish** (installers, auto-update, icons and the site's download links are done):
    - Signing: Windows with Azure Artifact Signing (~$9.99/month; individuals in the US/Canada; a
      paid Azure subscription; identity validation takes days; CI signs via OIDC, no stored key).
      macOS with an Apple Developer ID ($99/year) plus notarization, or Gatekeeper blocks it.
-     Linux needs none (optionally GPG-signed checksums). Ship unsigned until the accounts are
-     ready (SmartScreen and Gatekeeper warn).
-   - `.woodsketch` file association on all three; Help > About shows the version.
-2. **Shakedown on a real project**: design something you'd build (a nightstand, a small cabinet)
-   start to finish and fix every place it fights you.
-3. **Agent-ready** (below, item 8), then **parametric hardware**, then **.skp import**: check
-   Trimble's SketchUp SDK terms allow a free open-source app before any work on it.
+     Linux needs none (optionally GPG-signed checksums). Until then SmartScreen and Gatekeeper
+     warn. Do it before announcing WoodSketch widely.
+   - `.woodsketch` file association on all three (double-click opens it).
+   - Windows ARM64 and Linux ARM64 builds; a macOS DMG; Linux .deb/.rpm; SHA-256 checksums.
+   - Delta updates (download the previous release before packing, so updates are small).
+   - A Download button on woodsketch.net that picks the visitor's OS.
 
 ## Woodworking direction (in this order)
 SketchUp-familiar modeling, specialized for woodworking: parts know they're wood. Keep general
@@ -65,11 +67,11 @@ modeling (rooms, jigs, odd shapes) working; the wood features add on and stay op
    fastening from a glued one (every touching cross-grain meeting is flagged now); species data
    for custom woods (only names matching a known species get it); movement in thickness and
    along the grain; parts at an angle.
-7. **Templates, more of them** (done: cabinet, drawer, face frame, table; still: a drawer front
-   and runners sized to a cabinet opening, doors, a frame-and-panel; templates keep only their
-   sizes, so Change size loses edits made inside), then **parametric hardware** (hinges, slides, pulls, screws, dowels, shelf pins; counted in
-   the cut list, no licensing), then **.skp import** through Trimble's SDK (the adoption hook;
-   check its redistribution terms early).
+7. **Templates** (done: cabinet, drawer, face frame, table, each changeable in size). Still to
+   come: drawers and doors fitted to an opening, frame-and-panel doors, hardware (Next up, items
+   2 and 3); more templates (bookcase with adjustable shelves, bed, workbench); templates keep
+   only their sizes, so Change size loses edits made inside. Then **.skp import** through
+   Trimble's SDK (the adoption hook; check its redistribution terms early).
 8. **Agent-ready**: let AI agents design with WoodSketch, so a woodworker can ask their assistant
    "build me a nightstand, 24\" tall, from 3/4\" cherry" and get a real drawing, cut list,
    cutting diagrams and shopping list. The engine (`doc`) already runs without the UI. Pieces:
@@ -180,8 +182,6 @@ modeling (rooms, jigs, odd shapes) working; the wood features add on and stay op
 - Toggling a tag's visibility is an undo step (SketchUp does the same).
 
 ## Files
-- No Windows file association (double-
-  clicking a .woodsketch needs an installer or registry entry).
 - File dialogs block the window while open (rfd's synchronous API).
 - Export: OBJ (+ MTL colors) and ASCII STL only; no glTF, DAE or DXF/SVG (2D for CNC), no
   textures, no "export selection only", and each part isn't a separate STL file. No .skp import.

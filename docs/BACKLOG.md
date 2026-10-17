@@ -32,7 +32,19 @@ modeling (rooms, jigs, odd shapes) working; the wood features add on and stay op
    then **parametric hardware** (hinges, slides, pulls, screws, dowels, shelf pins; counted in
    the cut list, no licensing), then **.skp import** through Trimble's SDK (the adoption hook;
    check its redistribution terms early).
-8. Later: a community model library (a separate service: accounts, moderation, licensing;
+8. **Agent-ready**: let AI agents design with WoodSketch, so a woodworker can ask their assistant
+   "build me a nightstand, 24\" tall, from 3/4\" cherry" and get a real drawing, cut list,
+   cutting diagrams and shopping list. The engine (`doc`) already runs without the UI. Pieces:
+   - A project recipe (JSON): parts as boards from stock (material, section or thickness, length,
+     place, orientation), joints between them, tags; validated with clear errors an agent can fix
+     ("Shelf doesn't touch Side"). Builds a `.woodsketch`.
+   - A command line: `woodsketch build recipe.json`, `cutlist`, `cutsheet` (HTML), `export`,
+     `render` (PNG views), headless.
+   - An MCP server (`woodsketch mcp`) so Claude and other agents can call it directly: add boards,
+     make joints, read the cut list and diagrams, render views to check their work.
+   - Docs for agents (an AGENTS.md / llms.txt on woodsketch.net with recipes for common
+     furniture), and the app opening what an agent made for editing by hand.
+9. Later: a community model library (a separate service: accounts, moderation, licensing;
    3D Warehouse's terms forbid aggregating its models), cost estimates (board feet / sheets x
    price), exploded views and assembly order.
 

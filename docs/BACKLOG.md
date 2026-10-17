@@ -4,26 +4,23 @@ Things we deliberately skipped or know are incomplete, to come back to. Newest f
 each section. Remove items when they're done (mention them in the commit).
 
 ## Next up (recommended order, 2026-10-17)
-1. **Shakedown on a real project** (you): design something you'd build (a cabinet from the
-   template with a couple of drawers, a nightstand) start to finish; every place it fights you
-   goes to the top of this list.
-2. **Drawers and doors fitted to an opening**: select a cabinet or face-frame opening, pick
+1. **Drawers and doors fitted to an opening**: select a cabinet or face-frame opening, pick
    Drawer or Door, and get one sized with the usual clearances: the drawer box 1/2" narrower than
    the opening for side-mount slides (or per the slide chosen), its depth from the slide length;
    the front overlay (1/2", full) or inset (1/16" gap all round); doors single or a pair, with
    hinge-side and meeting gaps. Also a frame-and-panel door (rails and stiles with a floating
    panel in grooves, sized for wood movement).
-3. **Hardware as parts**: drawer slides (side-mount, undermount; lengths 12"-24"), hinges
+2. **Hardware as parts**: drawer slides (side-mount, undermount; lengths 12"-24"), hinges
    (concealed/European, butt), shelf pins, pulls and knobs, screws. Placed as simple parametric
    shapes (no licensed models), each counted in the shopping list, and slides set the drawer
-   size in item 2 (their clearance and length).
-4. **Agent-ready** (Woodworking direction, item 8): a project recipe (JSON), a command line
+   size in item 1 (their clearance and length).
+3. **Agent-ready** (Woodworking direction, item 8): a project recipe (JSON), a command line
    (`woodsketch build`, `cutlist`, `cutsheet`, `render`), an MCP server so Claude and other
-   assistants can design with WoodSketch, and docs for agents. Templates (and 2 and 3) are the
+   assistants can design with WoodSketch, and docs for agents. Templates (and 1 and 2) are the
    building blocks a recipe calls.
-5. **.skp import** through Trimble's SketchUp SDK: check its terms allow a free open-source app
+4. **.skp import** through Trimble's SketchUp SDK: check its terms allow a free open-source app
    before any work on it.
-6. **Release polish** (installers, auto-update, icons and the site's download links are done):
+5. **Release polish** (installers, auto-update, icons and the site's download links are done):
    - Signing: Windows with Azure Artifact Signing (~$9.99/month; individuals in the US/Canada; a
      paid Azure subscription; identity validation takes days; CI signs via OIDC, no stored key).
      macOS with an Apple Developer ID ($99/year) plus notarization, or Gatekeeper blocks it.
@@ -69,7 +66,7 @@ modeling (rooms, jigs, odd shapes) working; the wood features add on and stay op
    along the grain; parts at an angle.
 7. **Templates** (done: cabinet, drawer, face frame, table, each changeable in size). Still to
    come: drawers and doors fitted to an opening, frame-and-panel doors, hardware (Next up, items
-   2 and 3); more templates (bookcase with adjustable shelves, bed, workbench); templates keep
+   1 and 2); more templates (bookcase with adjustable shelves, bed, workbench); templates keep
    only their sizes, so Change size loses edits made inside. Then **.skp import** through
    Trimble's SDK (the adoption hook; check its redistribution terms early).
 8. **Agent-ready**: let AI agents design with WoodSketch, so a woodworker can ask their assistant

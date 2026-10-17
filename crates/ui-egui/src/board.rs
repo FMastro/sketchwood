@@ -133,7 +133,7 @@ pub fn show(ui: &mut egui::Ui, doc: &mut Document, tools: &mut Tools) {
         .as_ref()
         .is_some_and(|p| matches!(p.stock, Stock::Section { .. }))
     {
-        ui.weak("Lumber is named by its nominal size; the actual size is in brackets. Draw any length: the cut list picks the board to buy (8', 10'...). For a size not listed, pick Custom size or type it, like 3,6 1/2.");
+        ui.weak("Lumber is named by its nominal size; the actual size is in brackets. Draw any length: the cut list picks the board to buy (8', 10'...). For a one-off size, type it, like 3,6 1/2; to keep a size in the list, use Custom size.");
     } else if board
         .picked
         .as_ref()
@@ -217,6 +217,8 @@ fn custom_size(ui: &mut egui::Ui, doc: &mut Document, material: MaterialId, lumb
 /// A lumber section shows its actual size too: `2x4 (1 1/2" x 3 1/2")`.
 fn label(name: &str, stock: Stock) -> String {
     match stock {
+        // Custom sizes are already named by their actual size.
+        Stock::Section { .. } if name.contains('"') => name.to_owned(),
         Stock::Section { thickness, width } => format!(
             "{name} ({} x {})",
             format_length(thickness),

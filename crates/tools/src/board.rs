@@ -249,7 +249,8 @@ impl BoardTool {
         if let Some(whole) = parse_board(typed) {
             return self.enter_whole(doc, whole);
         }
-        // With lumber, `thickness,width` picks that section (added to the material if it's new).
+        // With lumber, `thickness,width` picks that section (just for drawing: the
+        // material's list of sizes only grows from the Board panel's Custom size).
         if self.is_lumber()
             && let Ok(values) = parse_lengths(typed)
             && let [Some(thickness), Some(width)] = values[..]
@@ -353,8 +354,8 @@ impl BoardTool {
         }
         match stock {
             Stock::Section { .. } => {
-                // The current lumber, else Pine Lumber from the library; a size it doesn't list yet
-                // is added to it, so the cut list knows it.
+                // The current lumber, else Pine Lumber from the library; a size it doesn't list is
+                // used as is, without adding it to the material's sizes.
                 let id = match self.picked.as_ref().filter(|p| matches!(p.stock, Stock::Section { .. })) {
                     Some(p) => p.material,
                     None => {
@@ -366,7 +367,16 @@ impl BoardTool {
                 let found = stock_options(material).into_iter().find(|(_, s)| close(*s, stock));
                 let (name, found) = match found {
                     Some(found) => found,
-                    None => doc.add_stock(id, stock).ok_or("That size has no thickness or width.")?,
+                    None => {
+                        let Stock::Section { thickness, width } = stock else { unreachable!() };
+                        if thickness <= EPS || width <= EPS {
+                            return Err("That size has no thickness or width.".into());
+                        }
+                        // Thinner side first, as sections are listed.
+                        let (t, w) = (thickness.min(width), thickness.max(width));
+                        let name = format!("{} x {} (custom)", format_length(t), format_length(w));
+                        (name, Stock::Section { thickness: t, width: w })
+                    }
                 };
                 self.picked = Some(Picked { material: id, stock: found, name });
                 Ok(())
@@ -377,7 +387,7 @@ impl BoardTool {
                     return Err("Pick a sheet or solid-wood material in the Board panel first.".into());
                 };
                 picked.stock = stock;
-                picked.name = format!("{} (not a standard thickness)", format_length(t));
+                picked.name = format!("{} (custom)", format_length(t));
                 Ok(())
             }
         }
@@ -510,7 +520,7 @@ mod tests {
     }
 
     #[test]
-    fn typing_a_custom_lumber_size_adds_it_to_the_material() {
+    fn typing_a_custom_lumber_size_uses_it_without_listing_it() {
         let mut doc = Document::default();
         let mut tool = with(&mut doc, "Pine Lumber");
         let camera = camera();
@@ -519,7 +529,8 @@ mod tests {
         let custom = Stock::Section { thickness: 3.0, width: 6.5 };
         let picked = tool.picked.clone().unwrap();
         assert_eq!(picked.stock, custom);
-        assert!(stock_options(doc.scene().material(picked.material).unwrap()).iter().any(|(_, s)| *s == custom), "Pine Lumber lists it now");
+        assert_eq!(picked.name, "3\" x 6 1/2\" (custom)");
+        assert!(!stock_options(doc.scene().material(picked.material).unwrap()).iter().any(|(_, s)| *s == custom), "typing doesn't add it to Pine Lumber's sizes");
         assert_eq!(doc.scene().materials().count(), 1, "no new material");
         // A whole custom board, while drawing.
         tool.click(&mut doc, screen, at(screen, 0.0, 0.0)).unwrap();

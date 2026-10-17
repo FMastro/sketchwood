@@ -131,8 +131,8 @@ add it there; when you finish an item, remove it.
 22. Board from stock (done): `doc::board` (`Stock`, `stock_options`, `parse_board` for `2x4x96` /
    `3/4x11 1/4x30`, `Document::add_board`: a group whose own axes are length, width, thickness).
    Board tool (W): lumber drags out its length (flat, Ctrl on edge), sheets and solid wood drag a
-   rectangle at their thickness; Board panel in the tray picks the stock. Custom sizes (panel or typed
-   `3,6 1/2` / `3x6 1/2x96`) join the material's sizes (`Document::add_stock`). Push/Pull on a free face
+   rectangle at their thickness; Board panel in the tray picks the stock. Custom size in the panel adds a
+   size to the material (`Document::add_stock`); typed `3,6 1/2` / `3x6 1/2x96` is a one-off. Push/Pull on a free face
    snaps to the drawing's standard thicknesses.
 
 ## Direction

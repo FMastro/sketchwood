@@ -156,6 +156,10 @@ add it there; when you finish an item, remove it.
    letter, count, finished size, stock, grain; face / edge / end views as SVG to scale with overall
    dimensions; steps from `Scene::joints` and `Scene::profiles` in shop order). Cut List window >
    Print build sheets.
+26. Wood movement: `doc::movement` (`species` coefficients from the USDA Wood Handbook on
+   `Material::movement`, filled from the library and by name for older drawings; `check` gives each
+   solid-wood part's movement across its grain for `Scene::moisture_swing`, default 4%, and
+   conflicts where a touching part won't move that way). Cut List window > Wood movement tab.
 
 ## Direction
 Specialized for woodworking: SketchUp-familiar modeling where parts know they're wood (species,

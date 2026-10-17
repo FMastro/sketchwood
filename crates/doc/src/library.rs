@@ -28,6 +28,9 @@ impl Preset {
         if !self.sheets.is_empty() {
             material.standard.sheets = self.sheets.to_vec();
         }
+        if matches!(self.kind, MaterialKind::SolidWood | MaterialKind::DimensionalLumber) {
+            material.movement = crate::movement::species(self.name);
+        }
         material
     }
 

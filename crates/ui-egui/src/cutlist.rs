@@ -14,6 +14,7 @@ pub enum Tab {
     #[default]
     Parts,
     Diagrams,
+    Movement,
     Settings,
 }
 
@@ -60,7 +61,7 @@ impl CutListWindow {
             .resizable(true)
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    for (tab, label) in [(Tab::Parts, "Parts"), (Tab::Diagrams, "Cutting diagrams"), (Tab::Settings, "Saw kerf")] {
+                    for (tab, label) in [(Tab::Parts, "Parts"), (Tab::Diagrams, "Cutting diagrams"), (Tab::Movement, "Wood movement"), (Tab::Settings, "Saw kerf")] {
                         if ui.selectable_label(self.tab == tab, label).clicked() {
                             self.tab = tab;
                         }
@@ -96,6 +97,7 @@ impl CutListWindow {
                         let (list, plans) = self.refresh(doc);
                         diagrams_tab(ui, list, plans, doc);
                     }
+                    Tab::Movement => movement_tab(ui, doc),
                     Tab::Settings => self.settings_tab(ui, doc),
                 });
             });
@@ -358,4 +360,54 @@ fn draw_stock(ui: &mut egui::Ui, stock: &cutplan::Stock, color: egui::Color32) {
 /// `1 part`, `3 parts`.
 fn plural(count: usize, noun: &str) -> String {
     if count == 1 { format!("1 {noun}") } else { format!("{count} {noun}s") }
+}
+
+/// Seasonal wood movement: the moisture swing to plan for, where parts will fight each other,
+/// and how much each solid-wood part moves across its grain.
+fn movement_tab(ui: &mut egui::Ui, doc: &mut Document) {
+    use woodsketch_doc::movement;
+    ui.label("Solid wood swells and shrinks across its grain as the seasons change. Plywood and MDF don't.");
+    let mut swing = doc.scene().moisture_swing();
+    ui.horizontal(|ui| {
+        ui.label("Moisture swing");
+        let changed = ui
+            .add(egui::DragValue::new(&mut swing).range(1.0..=12.0).speed(0.1).suffix("%"))
+            .on_hover_text("How much the wood's moisture content changes over a year: about 4% indoors (6% in a dry winter to 10% in a humid summer); more in a shed or an unheated room")
+            .changed();
+        if changed {
+            doc.edit_scene_merging("moisture swing", |scene, _| scene.moisture_swing = Some(swing));
+        }
+    });
+    let report = movement::check(doc.scene(), swing);
+    ui.add_space(6.0);
+    if report.parts.is_empty() {
+        ui.weak("No solid-wood parts with a known species yet. Paint parts with a wood from the library, like Cherry or Red Oak.");
+        return;
+    }
+    if report.conflicts.is_empty() {
+        ui.label(format!("{} No parts fight each other's movement.", ph::CHECK_CIRCLE));
+    } else {
+        ui.strong(format!("{} Watch these joints", ph::WARNING));
+        for conflict in &report.conflicts {
+            ui.colored_label(ui.visuals().warn_fg_color, format!("{} {}", ph::DOT_OUTLINE, conflict.describe()));
+        }
+    }
+    ui.add_space(8.0);
+    ui.strong("How much each part moves across its grain");
+    egui::Grid::new("movement_parts").striped(true).num_columns(4).spacing([16.0, 4.0]).show(ui, |ui| {
+        for heading in ["Part", "Wood", "Width", "Moves about"] {
+            ui.strong(heading);
+        }
+        ui.end_row();
+        for part in &report.parts {
+            ui.label(&part.name);
+            ui.label(&part.material);
+            ui.label(format_length(part.width));
+            let moves = ui.label(format_length(part.movement));
+            if part.assumed_flat {
+                moves.on_hover_text("Its cut is \"Not sure\", so it's figured as flat-sawn, which moves the most. Set the cut in Entity Info.");
+            }
+            ui.end_row();
+        }
+    });
 }

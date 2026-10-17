@@ -1470,3 +1470,31 @@ fn build_sheets_for_a_small_table() {
     harness.run();
     assert!(harness.query_by_label_contains("Print build sheets").is_some());
 }
+
+#[test]
+fn wood_movement_tab_warns_about_a_top_fixed_to_its_aprons() {
+    use egui_kittest::kittest::Queryable;
+    use glam::DVec3;
+    use woodsketch_doc::board::Board;
+    let mut harness = app();
+    {
+        let doc = harness.state_mut().document_mut();
+        let cherry = doc.add_preset(woodsketch_doc::library::LIBRARY.iter().find(|p| p.name == "Cherry").unwrap());
+        let mut add = |name: &str, origin: DVec3, length_dir: DVec3, width_dir: DVec3, [length, width, thickness]: [f64; 3]| {
+            let id = doc.add_board(&Board { origin, length_dir, width_dir, length, width, thickness }, Some(cherry)).unwrap();
+            doc.rename_instance(id, name);
+        };
+        // A 30" x 18" top (grain along X) resting on two side aprons running front to back (Y).
+        add("Top", DVec3::new(0.0, 0.0, 28.0), DVec3::X, DVec3::Y, [30.0, 18.0, 0.75]);
+        add("Left apron", DVec3::new(1.0, 1.0, 28.0), DVec3::Y, -DVec3::Z, [16.0, 4.0, 0.75]);
+        add("Right apron", DVec3::new(28.25, 1.0, 28.0), DVec3::Y, -DVec3::Z, [16.0, 4.0, 0.75]);
+    }
+    harness.run();
+    harness.get_by_label(egui_phosphor::regular::TABLE).click();
+    harness.run();
+    harness.get_by_label("Wood movement").click();
+    harness.run();
+    assert_eq!(harness.query_all_by_label_contains("Top moves about").count(), 2, "the top's width runs along both side aprons' grain");
+    assert!(harness.query_all_by_label_contains("Left apron").count() >= 1);
+    snapshot(&mut harness, "wood_movement");
+}

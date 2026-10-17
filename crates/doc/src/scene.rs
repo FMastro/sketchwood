@@ -111,6 +111,10 @@ pub struct Material {
     pub(crate) thickness: Option<f64>,
     #[serde(default, skip_serializing)]
     pub(crate) stock: crate::cutplan::StockOverride,
+    /// Solid wood: how much it moves with moisture (from its species); `None` for stable
+    /// materials and woods we don't have data for.
+    #[serde(default)]
+    pub movement: Option<crate::movement::Movement>,
 }
 
 impl Material {
@@ -124,6 +128,7 @@ impl Material {
             standard: crate::cutplan::Standard::for_kind(kind),
             thickness: None,
             stock: Default::default(),
+            movement: None,
         }
     }
 }
@@ -133,6 +138,10 @@ impl Scene {
     /// the stock thickness and sizes they had set.
     pub(crate) fn upgrade_materials(&mut self) {
         for material in self.materials.iter_mut() {
+            // Older drawings: movement data from the species' name.
+            if material.movement.is_none() && matches!(material.kind, MaterialKind::SolidWood | MaterialKind::DimensionalLumber) {
+                material.movement = crate::movement::species(&material.name);
+            }
             if !material.standard.is_empty() {
                 continue;
             }
@@ -222,6 +231,9 @@ pub struct Scene {
     /// Edge profiles made on parts, for listing them.
     #[serde(default)]
     pub profiles: Vec<crate::profile::ProfileRecord>,
+    /// The seasonal moisture swing wood movement is checked for, percent (`None`: 4%).
+    #[serde(default)]
+    pub moisture_swing: Option<f64>,
     /// Counters for default names, like SketchUp's "Group#1", "Component#1".
     next_group: u32,
     next_component: u32,

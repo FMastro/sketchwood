@@ -13,6 +13,7 @@ pub mod export;
 pub mod file;
 pub mod joinery;
 pub mod library;
+pub mod movement;
 pub mod part;
 pub mod profile;
 mod lines;

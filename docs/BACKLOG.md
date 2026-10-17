@@ -28,9 +28,12 @@ modeling (rooms, jigs, odd shapes) working; the wood features add on and stay op
    stock, three dimensioned views to scale, and steps in shop order). Still to come: where each
    joint and profile sits (dimensions to it from the reference face and edge, which aren't picked
    yet), hidden lines dashed, an exploded assembly view and glue-up order.
-6. **Wood movement checks**: USDA Wood Handbook shrinkage per species (public domain) x width x
-   moisture swing, by cut; warn about cross-grain glue-ups (glued tops, breadboard ends, panels
-   in frames) with arrows and numbers ("this 18" panel moves about 3/16"").
+6. **Wood movement checks** (done: Wood Handbook coefficients per species and cut, a moisture swing
+   setting, how much each part moves, and warnings where touching parts fight it, in the Cut List
+   window). Still to come: arrows and numbers on the model; telling a floating panel or slotted
+   fastening from a glued one (every touching cross-grain meeting is flagged now); species data
+   for custom woods (only names matching a known species get it); movement in thickness and
+   along the grain; parts at an angle.
 7. **Templates** (carcass, drawer, face frame, shelf unit from dimensions, editable after),
    then **parametric hardware** (hinges, slides, pulls, screws, dowels, shelf pins; counted in
    the cut list, no licensing), then **.skp import** through Trimble's SDK (the adoption hook;

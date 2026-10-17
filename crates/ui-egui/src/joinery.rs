@@ -63,7 +63,6 @@ impl Choice {
 }
 
 pub fn show(ui: &mut egui::Ui, doc: &mut Document, (a, b): (InstanceId, InstanceId)) {
-    let name = |doc: &Document, id: InstanceId| doc.instance_name(id).unwrap_or("Part").to_owned();
     let fit = match doc.joint_fit(a, b) {
         Ok(fit) => fit,
         Err(e) => {
@@ -71,6 +70,24 @@ pub fn show(ui: &mut egui::Ui, doc: &mut Document, (a, b): (InstanceId, Instance
             return;
         }
     };
+    // Already joined (here, or on other copies of the same components): say so, and keep the
+    // picker for adding another joint out of the way.
+    if fit.joined.is_empty() {
+        picker(ui, doc, (a, b), &fit);
+    } else {
+        ui.label("Already joined:");
+        for (kind, detail) in &fit.joined {
+            ui.label(format!("  {} {}, {detail}", egui_phosphor::regular::CHECK, kind.name()));
+        }
+        egui::CollapsingHeader::new("Add another joint").id_salt(("another_joint", a, b)).default_open(false).show(ui, |ui| picker(ui, doc, (a, b), &fit));
+    }
+    show_message(ui, (a, b));
+}
+
+/// The joint picker: a joint, its sizes and the button that makes it.
+fn picker(ui: &mut egui::Ui, doc: &mut Document, (a, b): (InstanceId, InstanceId), fit: &Fit) {
+    let name = |doc: &Document, id: InstanceId| doc.instance_name(id).unwrap_or("Part").to_owned();
+    let fit = fit.clone();
     let choice_id = egui::Id::new(("joint_choice", a, b));
     let suggested = Choice::ALL.into_iter().find(|c| c.fits(&fit)).unwrap_or(Choice::LetIn);
     let mut choice = ui.data(|d| d.get_temp::<Choice>(choice_id)).unwrap_or(suggested);
@@ -166,11 +183,14 @@ pub fn show(ui: &mut egui::Ui, doc: &mut Document, (a, b): (InstanceId, Instance
         }
     }
 
-    let message_id = egui::Id::new("joinery_message");
     if let Some(m) = message {
-        ui.data_mut(|d| d.insert_temp(message_id, (a, b, m)));
+        ui.data_mut(|d| d.insert_temp(egui::Id::new("joinery_message"), (a, b, m)));
     }
-    if let Some((ma, mb, m)) = ui.data(|d| d.get_temp::<(InstanceId, InstanceId, String)>(message_id))
+}
+
+/// What the last joint made (or why not), for this pair.
+fn show_message(ui: &mut egui::Ui, (a, b): (InstanceId, InstanceId)) {
+    if let Some((ma, mb, m)) = ui.data(|d| d.get_temp::<(InstanceId, InstanceId, String)>(egui::Id::new("joinery_message")))
         && (ma, mb) == (a, b)
     {
         ui.weak(m);

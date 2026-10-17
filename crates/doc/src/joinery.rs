@@ -111,7 +111,7 @@ pub struct Dowels {
 }
 
 /// How two parts sit, and suggested sizes for the joints that fit.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Fit {
     /// They overlap: one's overlap can be cut out of the other.
     pub overlap: bool,
@@ -125,6 +125,9 @@ pub struct Fit {
     pub tenon: Tenon,
     pub dowels: Dowels,
     pub finger: f64,
+    /// The joints these two designs already have (made on these parts, or on other copies of
+    /// the same components), as `(kind, detail)`.
+    pub joined: Vec<(JointKind, String)>,
 }
 
 /// An axis-aligned box, `lo` to `hi`.
@@ -255,6 +258,7 @@ impl Document {
             tenon: Tenon { length: 1.0, thickness: 0.25, shoulder: 0.25 },
             dowels: Dowels { count: 2, diameter: 0.375, depth: 1.0 },
             finger: 0.5,
+            joined: Vec::new(),
         };
         // The thinner part's thickness sets the finger size.
         let mut thick = (ab.1 - ab.0)[thinnest(ab)].min((bb.1 - bb.0)[thinnest(bb)]);
@@ -294,6 +298,15 @@ impl Document {
             break;
         }
         fit.finger = sixteenth(thick.min(0.75)).max(0.125);
+        let (da, db) = (p.definition(a)?, p.definition(b)?);
+        fit.joined = self
+            .scene()
+            .joints
+            .iter()
+            .filter(|j| (j.cut, j.into) == (da, db) || (j.cut, j.into) == (db, da))
+            .map(|j| (j.kind, j.detail.clone()))
+            .collect();
+        fit.joined.dedup();
         Ok(fit)
     }
 
@@ -1016,6 +1029,9 @@ mod components {
         assert!([fl, front, left].iter().all(|&p| closed(&doc, p)));
         assert_eq!(doc.part_size(front).unwrap()[0], 32.0, "30 1/2\" between the legs plus two 3/4\" tenons");
         assert_eq!(doc.scene().joints.len(), 8, "every joint is listed");
+        // The back apron and a back leg (copies) read as already joined, not as a cut to make.
+        let fit = doc.joint_fit(back, br).unwrap();
+        assert_eq!(fit.joined.first().map(|j| j.0), Some(JointKind::MortiseAndTenon));
         assert_eq!(crate::cutlist::cut_list(doc.scene()).materials[0].parts.iter().map(|p| p.count).sum::<usize>(), 8);
     }
 }

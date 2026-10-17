@@ -1261,6 +1261,11 @@ fn joinery_panel_cuts_a_dado_and_makes_a_mortise_and_tenon() {
     harness.run();
     assert_eq!(harness.state().document().joints_of(side).len(), 1);
     assert!(harness.query_by_label("Dado cut in Group#1.").is_some());
+    // Joined now: the panel says so, and tucks the picker away.
+    assert!(harness.query_by_label("Already joined:").is_some());
+    assert!(harness.query_by_label_contains("Dado, 1/4\" deep").is_some());
+    assert!(harness.query_by_label("Cut Group#2 into Group#1").is_none(), "no second cut offered");
+    assert!(harness.query_by_label("Add another joint").is_some());
     snapshot(&mut harness, "joinery_dado");
 
     select(&mut harness, [rail, stile]);

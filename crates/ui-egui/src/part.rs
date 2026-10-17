@@ -72,7 +72,12 @@ pub fn show(ui: &mut egui::Ui, doc: &mut Document, instance: InstanceId) {
             let mut picked = None;
             egui::ComboBox::from_id_salt(("part_cut", instance)).selected_text(info.cut.name()).show_ui(ui, |ui| {
                 for cut in Cut::ALL {
-                    if ui.selectable_label(info.cut == cut, cut.name()).clicked() {
+                    let hint = match cut {
+                        Cut::Unknown => "Movement checks will assume flat-sawn, which moves the most",
+                        Cut::FlatSawn => "Plain-sawn: growth rings run across the end grain; moves the most",
+                        Cut::QuarterSawn => "Growth rings run up and down the end grain; moves about half as much",
+                    };
+                    if ui.selectable_label(info.cut == cut, cut.name()).on_hover_text(hint).clicked() {
                         picked = Some(cut);
                     }
                 }

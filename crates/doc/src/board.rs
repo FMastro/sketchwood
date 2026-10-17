@@ -138,6 +138,43 @@ fn board_model(length: f64, width: f64, thickness: f64) -> Model {
 }
 
 impl Document {
+    /// Add `stock` to the sizes `material` comes in (a lumber section, or a thickness), so
+    /// boards drawn from it list as that stock in the cut list. Lumber needs a section; other
+    /// materials take its thickness. Returns the stock as listed, or `None` if it doesn't fit
+    /// the material or has no size.
+    pub fn add_stock(&mut self, material: MaterialId, stock: Stock) -> Option<(String, Stock)> {
+        let kind = self.scene().material(material)?.kind;
+        let fits = match (kind, stock) {
+            (MaterialKind::DimensionalLumber, Stock::Section { thickness, width }) => thickness > crate::EPS && width > crate::EPS,
+            (MaterialKind::SheetGood | MaterialKind::SolidWood, Stock::Thickness(t)) => t > crate::EPS,
+            _ => false,
+        };
+        if !fits {
+            return None;
+        }
+        self.edit_material(material, |m| match stock {
+            Stock::Section { thickness, width } => {
+                // Thinner side first, as sections are listed.
+                let section = (thickness.min(width), thickness.max(width));
+                if !m.standard.sections.iter().any(|s| (s.0 - section.0).abs() < 1e-9 && (s.1 - section.1).abs() < 1e-9) {
+                    m.standard.sections.push(section);
+                    m.standard.sections.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+                }
+            }
+            Stock::Thickness(t) => {
+                if !m.standard.thicknesses.iter().any(|x| (x - t).abs() < 1e-9) {
+                    m.standard.thicknesses.push(t);
+                    m.standard.thicknesses.sort_by(f64::total_cmp);
+                }
+            }
+        });
+        let wanted = match stock {
+            Stock::Section { thickness, width } => Stock::Section { thickness: thickness.min(width), width: thickness.max(width) },
+            other => other,
+        };
+        stock_options(self.scene().material(material)?).into_iter().find(|(_, s)| *s == wanted)
+    }
+
     /// Add a board as a new group in the container being edited, painted with `material`, as
     /// one undo step. Its grain runs along its length.
     pub fn add_board(&mut self, board: &Board, material: Option<MaterialId>) -> Option<InstanceId> {
@@ -179,6 +216,19 @@ mod tests {
         assert!(stock_options(&birch).iter().any(|(name, s)| name == "3/4\" sheet" && *s == Stock::Thickness(0.75)));
         assert_eq!(default_stock(&pine).unwrap().0, "2x4");
         assert_eq!(default_stock(&birch).unwrap().0, "3/4\" sheet");
+    }
+
+    #[test]
+    fn custom_stock_joins_the_materials_sizes() {
+        let mut doc = Document::default();
+        let pine = doc.add_preset(LIBRARY.iter().find(|p| p.name == "Pine Lumber").unwrap());
+        let (name, stock) = doc.add_stock(pine, Stock::Section { thickness: 2.5, width: 1.25 }).unwrap();
+        assert_eq!(stock, Stock::Section { thickness: 1.25, width: 2.5 });
+        assert_eq!(name, "1 1/4\" x 2 1/2\"", "not a standard size: named by its actual size");
+        assert!(stock_options(doc.scene().material(pine).unwrap()).iter().any(|(_, s)| *s == stock));
+        assert_eq!(doc.add_stock(pine, Stock::Thickness(0.5)), None, "lumber needs a section");
+        let oak = doc.add_preset(LIBRARY.iter().find(|p| p.name == "Red Oak").unwrap());
+        assert_eq!(doc.add_stock(oak, Stock::Thickness(0.625)).unwrap().0, "5/8\" board");
     }
 
     #[test]

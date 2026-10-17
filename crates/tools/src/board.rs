@@ -249,6 +249,13 @@ impl BoardTool {
         if let Some(whole) = parse_board(typed) {
             return self.enter_whole(doc, whole);
         }
+        // With lumber, `thickness,width` picks that section (added to the material if it's new).
+        if self.is_lumber()
+            && let Ok(values) = parse_lengths(typed)
+            && let [Some(thickness), Some(width)] = values[..]
+        {
+            return self.pick_matching(doc, Stock::Section { thickness, width });
+        }
         let stock = self.picked.as_ref().map(|p| p.stock).ok_or("Pick stock in the Board panel first.")?;
         // The board being drawn, else the one just drawn (redrawn in place, one undo step).
         let (start, dir, extents, redo) = match (self.start, self.last.as_ref()) {
@@ -292,7 +299,13 @@ impl BoardTool {
     /// section if none does) and draw it from the start point, or place it at the start of the
     /// next click.
     fn enter_whole(&mut self, doc: &mut Document, typed: TypedBoard) -> Result<(), String> {
-        self.pick_matching(doc, typed.stock)?;
+        // Not a nominal size, with lumber picked (or nothing yet): a custom lumber section.
+        let lumber = self.picked.as_ref().is_none_or(|p| matches!(p.stock, Stock::Section { .. }));
+        let stock = match typed.stock {
+            Stock::Thickness(thickness) if lumber => Stock::Section { thickness, width: typed.width },
+            stock => stock,
+        };
+        self.pick_matching(doc, stock)?;
         let Some(picked) = self.picked.clone() else { return Ok(()) };
         let start = match (self.start, self.last.as_ref()) {
             (Some(start), _) => start,
@@ -340,13 +353,21 @@ impl BoardTool {
         }
         match stock {
             Stock::Section { .. } => {
-                let pine = woodsketch_doc::library::LIBRARY.iter().find(|p| p.name == "Pine Lumber").expect("in the library");
-                let id = doc.add_preset(pine);
-                let material = doc.scene().material(id).expect("just added");
-                let (name, found) = stock_options(material)
-                    .into_iter()
-                    .find(|(_, s)| close(*s, stock))
-                    .ok_or("Pine Lumber doesn't come in that size.")?;
+                // The current lumber, else Pine Lumber from the library; a size it doesn't list yet
+                // is added to it, so the cut list knows it.
+                let id = match self.picked.as_ref().filter(|p| matches!(p.stock, Stock::Section { .. })) {
+                    Some(p) => p.material,
+                    None => {
+                        let pine = woodsketch_doc::library::LIBRARY.iter().find(|p| p.name == "Pine Lumber").expect("in the library");
+                        doc.add_preset(pine)
+                    }
+                };
+                let material = doc.scene().material(id).expect("a material in the drawing");
+                let found = stock_options(material).into_iter().find(|(_, s)| close(*s, stock));
+                let (name, found) = match found {
+                    Some(found) => found,
+                    None => doc.add_stock(id, stock).ok_or("That size has no thickness or width.")?,
+                };
                 self.picked = Some(Picked { material: id, stock: found, name });
                 Ok(())
             }
@@ -368,7 +389,7 @@ impl BoardTool {
         };
         match (self.start, picked.stock) {
             (None, Stock::Section { .. }) => {
-                format!("{}: click where the board starts, or type 2x4x96. Ctrl stands it on edge.", picked.name)
+                format!("{}: click where the board starts. Type 2x4x96, or 3,6 1/2 for a custom size. Ctrl stands it on edge.", picked.name)
             }
             (None, Stock::Thickness(_)) => format!("{}: click a corner of the board.", picked.name),
             (Some(_), Stock::Section { .. }) => "Click where it ends, or type the length. Arrows lock an axis.".into(),
@@ -486,6 +507,26 @@ mod tests {
         assert!(hi.abs_diff_eq(DVec3::new(11.25, 30.0, 0.75), 1e-9), "{hi}");
         let part = doc.container().instances().next().unwrap().0;
         assert_eq!(doc.part_size(part), Some([30.0, 11.25, 0.75]), "length along the longer side");
+    }
+
+    #[test]
+    fn typing_a_custom_lumber_size_adds_it_to_the_material() {
+        let mut doc = Document::default();
+        let mut tool = with(&mut doc, "Pine Lumber");
+        let camera = camera();
+        let screen = Screen::new(&camera, SIZE);
+        tool.enter(&mut doc, "3,6 1/2").unwrap();
+        let custom = Stock::Section { thickness: 3.0, width: 6.5 };
+        let picked = tool.picked.clone().unwrap();
+        assert_eq!(picked.stock, custom);
+        assert!(stock_options(doc.scene().material(picked.material).unwrap()).iter().any(|(_, s)| *s == custom), "Pine Lumber lists it now");
+        assert_eq!(doc.scene().materials().count(), 1, "no new material");
+        // A whole custom board, while drawing.
+        tool.click(&mut doc, screen, at(screen, 0.0, 0.0)).unwrap();
+        tool.hover(&doc, screen, at(screen, 40.0, 0.0));
+        tool.enter(&mut doc, "1 1/4x2 1/2x30").unwrap();
+        let (lo, hi) = doc.bounds().unwrap();
+        assert!((hi - lo).abs_diff_eq(DVec3::new(30.0, 2.5, 1.25), 1e-9), "{:?}", hi - lo);
     }
 
     #[test]

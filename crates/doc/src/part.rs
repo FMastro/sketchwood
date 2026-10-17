@@ -36,18 +36,26 @@ impl PartAxis {
 /// How a board was sawn from the log: it sets how much it moves across its width.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Cut {
-    /// Plain-sawn: the most common, and moves most (tangential shrinkage).
+    /// Not known (most store-bought lumber). Movement checks assume flat-sawn, the worst case.
     #[default]
+    Unknown,
+    /// Plain-sawn: the most common, and moves most (tangential shrinkage).
     FlatSawn,
     /// Quartersawn (or rift): about half the movement (radial shrinkage).
     QuarterSawn,
 }
 
 impl Cut {
-    pub const ALL: [Self; 2] = [Self::FlatSawn, Self::QuarterSawn];
+    pub const ALL: [Self; 3] = [Self::Unknown, Self::FlatSawn, Self::QuarterSawn];
+
+    /// What a movement check should assume: flat-sawn when not known.
+    pub fn assumed(self) -> Self {
+        if self == Self::Unknown { Self::FlatSawn } else { self }
+    }
 
     pub fn name(self) -> &'static str {
         match self {
+            Self::Unknown => "Not sure",
             Self::FlatSawn => "Flat-sawn",
             Self::QuarterSawn => "Quartersawn",
         }
@@ -103,6 +111,13 @@ impl Scene {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_unknown_cut_is_checked_as_flat_sawn() {
+        assert_eq!(PartInfo::default().cut, Cut::Unknown);
+        assert_eq!(Cut::Unknown.assumed(), Cut::FlatSawn);
+        assert_eq!(Cut::QuarterSawn.assumed(), Cut::QuarterSawn);
+    }
 
     #[test]
     fn length_follows_the_grain() {

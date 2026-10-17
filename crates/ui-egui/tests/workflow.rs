@@ -1198,3 +1198,31 @@ fn board_panel_switches_material() {
     let name = harness.state().document().scene().material(picked.material).unwrap().name.clone();
     assert_eq!(name, "Walnut");
 }
+
+#[test]
+fn board_panel_adds_a_custom_lumber_size() {
+    use egui_kittest::kittest::Queryable;
+    let mut harness = app();
+    type_text(&mut harness, "w");
+    harness.get(egui_kittest::kittest::by().role(egui::accesskit::Role::ComboBox).value("Pick a material")).click();
+    harness.run();
+    harness.get_by_label("Pine Lumber").click();
+    harness.run();
+    harness.get(egui_kittest::kittest::by().role(egui::accesskit::Role::ComboBox).value("2x4 (1 1/2\" x 3 1/2\")")).click();
+    harness.run();
+    harness.get_by_label("Custom size...").click();
+    harness.run();
+    let count = harness.get_all_by_role(egui::accesskit::Role::TextInput).count();
+    assert!(count >= 2, "thickness and width fields");
+    for (index, text) in [(count - 2, "1 1/4"), (count - 1, "2 1/2")] {
+        harness.get_all_by_role(egui::accesskit::Role::TextInput).nth(index).unwrap().click();
+        harness.run();
+        type_text(&mut harness, text);
+    }
+    snapshot(&mut harness, "board_custom_size");
+    harness.get_by_label("Add to Pine Lumber").click();
+    harness.run();
+    let picked = harness.state().tools().board().picked.clone().unwrap();
+    assert_eq!(picked.stock, woodsketch_doc::board::Stock::Section { thickness: 1.25, width: 2.5 });
+    assert!(harness.query_by_label("Add to Pine Lumber").is_none(), "the form closes");
+}

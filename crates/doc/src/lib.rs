@@ -16,6 +16,7 @@ pub mod library;
 pub mod movement;
 pub mod part;
 pub mod profile;
+pub mod template;
 mod lines;
 mod model;
 mod offset;

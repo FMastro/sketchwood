@@ -13,6 +13,7 @@ mod outliner;
 mod part;
 mod profile;
 mod tags;
+mod template;
 pub mod updates;
 mod viewport;
 

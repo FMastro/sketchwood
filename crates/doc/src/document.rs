@@ -293,6 +293,28 @@ impl Document {
         result
     }
 
+    /// Run `change`, however many edits it makes, as one undo step; on an error the drawing is
+    /// left as it was.
+    pub fn as_one_step<R, E>(&mut self, change: impl FnOnce(&mut Self) -> Result<R, E>) -> Result<R, E> {
+        let before = self.state.clone();
+        let undo = std::mem::take(&mut self.undo);
+        let redo = std::mem::take(&mut self.redo);
+        let result = change(self);
+        self.undo = undo;
+        self.coalescing = None;
+        if result.is_ok() {
+            self.undo.push(before);
+            if self.undo.len() > MAX_UNDO {
+                self.undo.remove(0);
+            }
+        } else {
+            self.state = before;
+            self.redo = redo;
+        }
+        self.changed();
+        result
+    }
+
     fn push_undo(&mut self) {
         self.undo.push(self.state.clone());
         if self.undo.len() > MAX_UNDO {

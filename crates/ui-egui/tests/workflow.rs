@@ -1587,3 +1587,31 @@ fn joinery_panel_dovetails_a_drawer_corner_and_changes_and_removes_it() {
     assert!(harness.state().document().scene().joints.is_empty());
     assert_eq!(harness.state().document().part_size(side).unwrap()[0], 14.0);
 }
+
+#[test]
+fn templates_panel_adds_a_drawer_and_changes_its_size() {
+    use egui_kittest::kittest::Queryable;
+    let mut harness = app();
+    harness.get_by_label("Templates").click();
+    harness.run();
+    harness.get_by_label("Drawer").click();
+    harness.run();
+    snapshot(&mut harness, "templates_drawer");
+    harness.get_by_label("Add the drawer").click();
+    harness.run();
+    let doc = harness.state().document();
+    let (group, _) = doc.container().instances().next().expect("a drawer");
+    assert_eq!(doc.instance_name(group), Some("Drawer"));
+    assert!(doc.selection().contains(woodsketch_doc::Entity::Instance(group)), "the new drawer is selected");
+    // Selected, its sizes show in their own panel: make it 6" tall.
+    assert!(harness.query_by_label("Drawer sizes").is_some());
+    let height = harness.get_all_by_role(egui::accesskit::Role::TextInput).find(|n| n.value().as_deref() == Some("5\"")).expect("the drawer's height (its own panel comes first)");
+    height.click();
+    harness.run();
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    type_text(&mut harness, "6");
+    harness.get_by_label("Change size").click();
+    harness.run();
+    let (lo, hi) = harness.state().document().bounds().unwrap();
+    assert!((hi.z - lo.z - 6.0).abs() < 1e-9, "6\" tall now: {}", hi.z - lo.z);
+}

@@ -41,6 +41,9 @@ pub struct Definition {
     /// Its woodworking properties as a part (grain, cut); older files have the defaults.
     #[serde(default)]
     pub part: crate::part::PartInfo,
+    /// The template it was made from, so its sizes can be changed (see [`crate::template`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub template: Option<crate::template::Made>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -380,6 +383,7 @@ impl Scene {
             kind: DefinitionKind::Group,
             container: contents,
             part: Default::default(),
+            template: None,
         }));
         Some(self.container_mut(path)?.add_instance(Instance { definition, transform, tag: None, material }))
     }
@@ -440,7 +444,7 @@ impl Scene {
                 format!("Component#{}", self.next_component)
             }
         };
-        let definition = DefinitionId(self.definitions.insert(Definition { name, kind, container: inside, part: Default::default() }));
+        let definition = DefinitionId(self.definitions.insert(Definition { name, kind, container: inside, part: Default::default(), template: None }));
 
         // Take the originals out: faces, then edges no remaining face needs.
         let container = self.container_mut(path)?;

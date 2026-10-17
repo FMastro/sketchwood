@@ -341,8 +341,20 @@ impl WoodSketchApp {
                     tray_section(ui, "Joinery", |ui| crate::joinery::show(ui, &mut self.doc, pair));
                 }
                 if let [woodsketch_doc::Entity::Instance(part)] = self.doc.selection().iter().collect::<Vec<_>>()[..] {
+                    if let Some(made) = self.doc.template_of(part) {
+                        tray_section(ui, &format!("{} sizes", made.template.name()), |ui| crate::template::change(ui, &mut self.doc, part, made));
+                    }
                     tray_section(ui, "Edge profile", |ui| crate::profile::show(ui, &mut self.doc, part));
                 }
+                // Folded until wanted: making a new cabinet, drawer, face frame or table.
+                egui::CollapsingHeader::new(egui::RichText::new("Templates").strong())
+                    .id_salt("Templates")
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        if crate::template::new(ui, &mut self.doc) {
+                            self.viewport.request_zoom_extents();
+                        }
+                    });
                 tray_section(ui, "Materials", |ui| self.materials.show(ui, &mut self.doc, &mut self.tools));
                 tray_section(ui, "Tags", |ui| self.tags.show(ui, &mut self.doc));
                 tray_section(ui, "Outliner", |ui| outliner::show(ui, &mut self.doc, &mut self.tools));

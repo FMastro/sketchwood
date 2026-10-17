@@ -111,8 +111,7 @@ modeling (rooms, jigs, odd shapes) working; the wood features add on and stay op
 ## Cut list
 - One sheet size per material (OpenCutList keeps a list of sheet sizes to choose from), and
   no offcuts inventory. Defaults are US sizes.
-- Grain always runs along a part's longest side; no per-part grain override, no edge banding,
-  no veneer or hardware counts beyond listing.
+- No edge banding, no veneer, and no hardware counts beyond listing.
 - Packing is heuristic (several orders and rules, best kept), not provably optimal; no
   offcut reuse across materials, no "use my leftover pieces first".
 - Solid wood assumes one board width per material (the narrowest standard width holding the
@@ -122,8 +121,7 @@ modeling (rooms, jigs, odd shapes) working; the wood features add on and stay op
   written directly; no labels/stickers per part.
 
 ## Materials
-- No textures (color only), so no visible grain direction; parts' grain is assumed along their
-  longest side for now (as OpenCutList does by default).
+- No textures (color only): grain shows as an arrow on the selected part, not in the wood.
 - **Material collections** (like SketchUp's): save materials into named collections, browse
   them across drawings, and import/export them. Today the library is built in and fixed.
 - No veneer or edge-banding material types (OpenCutList has both), no density or price for
@@ -142,7 +140,7 @@ modeling (rooms, jigs, odd shapes) working; the wood features add on and stay op
 - Toggling a tag's visibility is an undo step (SketchUp does the same).
 
 ## Files
-- No autosave or crash recovery, no recent-files list, no Windows file association (double-
+- No autosave or crash recovery, no Windows file association (double-
   clicking a .woodsketch needs an installer or registry entry).
 - Saving writes the file in place; a crash mid-write could truncate it (write to a temp file and
   rename instead).

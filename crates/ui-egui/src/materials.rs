@@ -4,12 +4,12 @@
 
 use eframe::egui;
 use egui_phosphor::regular as ph;
-use sketchcraft_doc::cutplan::lumber_sizes;
-use sketchcraft_doc::library::LIBRARY;
-use sketchcraft_doc::cutplan::Standard;
-use sketchcraft_doc::units::{format_length, parse_length, parse_lengths};
-use sketchcraft_doc::{Document, Entity, MaterialId, MaterialKind};
-use sketchcraft_tools::{ToolId, Tools};
+use woodsketch_doc::cutplan::lumber_sizes;
+use woodsketch_doc::library::LIBRARY;
+use woodsketch_doc::cutplan::Standard;
+use woodsketch_doc::units::{format_length, parse_length, parse_lengths};
+use woodsketch_doc::{Document, Entity, MaterialId, MaterialKind};
+use woodsketch_tools::{ToolId, Tools};
 
 
 #[derive(Default)]

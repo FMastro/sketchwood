@@ -1,13 +1,13 @@
 [package]
-name = "sketchcraft"
-description = "SketchCraft: a SketchUp-style 3D modeler in pure Rust"
+name = "woodsketch"
+description = "WoodSketch: a SketchUp-style 3D modeler in pure Rust"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-sketchcraft-ui-egui.workspace = true
+woodsketch-ui-egui.workspace = true
 eframe.workspace = true
 env_logger.workspace = true
 

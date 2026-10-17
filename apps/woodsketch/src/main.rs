@@ -2,13 +2,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use eframe::egui;
-use sketchcraft_ui_egui::SketchCraftApp;
+use woodsketch_ui_egui::WoodSketchApp;
 
 fn main() -> eframe::Result {
     env_logger::init();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("SketchCraft")
+            .with_title("WoodSketch")
             .with_inner_size([1280.0, 800.0])
             .with_min_inner_size([640.0, 400.0])
             .with_maximized(true),
@@ -18,13 +18,13 @@ fn main() -> eframe::Result {
         centered: true,
         ..Default::default()
     };
-    // `sketchcraft drawing.scraft` opens that drawing.
+    // `woodsketch drawing.woodsketch` opens that drawing.
     let open = std::env::args_os().nth(1).map(std::path::PathBuf::from);
     eframe::run_native(
-        "SketchCraft",
+        "WoodSketch",
         options,
         Box::new(move |cc| {
-            let mut app = SketchCraftApp::new(cc);
+            let mut app = WoodSketchApp::new(cc);
             if let Some(path) = open
                 && let Err(error) = app.open_path(&path)
             {

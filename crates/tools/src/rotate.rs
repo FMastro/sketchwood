@@ -12,7 +12,7 @@
 use std::collections::BTreeSet;
 
 use glam::{DAffine3, DVec3, Vec2};
-use sketchcraft_doc::{Document, EPS, Entity, Model, VertexId, rotation};
+use woodsketch_doc::{Document, EPS, Entity, Model, VertexId, rotation};
 
 use crate::pick::{Screen, Snap, hit_face, snap, snap_feature};
 use crate::{Array, Axis, Overlay, Protractor, highlight_entity, parse_array, pick_resolved};
@@ -361,7 +361,7 @@ fn format_degrees(degrees: f64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use sketchcraft_view::{OrbitCamera, StandardView};
+    use woodsketch_view::{OrbitCamera, StandardView};
 
     use super::*;
 

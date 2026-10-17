@@ -18,8 +18,8 @@ mod select;
 mod tape;
 
 use glam::{DAffine3, DVec3, Vec2};
-use sketchcraft_doc::Document;
-use sketchcraft_view::OrbitCamera;
+use woodsketch_doc::Document;
+use woodsketch_view::OrbitCamera;
 
 pub use pick::{Snap, SnapKind};
 use arc::ArcTool;
@@ -183,7 +183,7 @@ pub struct Overlay {
     pub dashed: Vec<[DVec3; 2]>,
     /// Guides to preview or highlight (the drawing's own guides are drawn by the renderer), and
     /// whether each is highlighted.
-    pub guides: Vec<(sketchcraft_doc::Guide, bool)>,
+    pub guides: Vec<(woodsketch_doc::Guide, bool)>,
     pub window: Option<SelectionWindow>,
 }
 
@@ -248,15 +248,15 @@ pub(crate) fn parse_array(typed: &str) -> Option<Array> {
 /// What's under the cursor, as an entity of the container being edited: an edge or face of
 /// its own, or the group or component the picked geometry belongs to. `None` for nothing, or
 /// for geometry outside the group being edited.
-pub(crate) fn pick_resolved(doc: &Document, screen: pick::Screen<'_>, cursor: Vec2) -> Option<sketchcraft_doc::Entity> {
+pub(crate) fn pick_resolved(doc: &Document, screen: pick::Screen<'_>, cursor: Vec2) -> Option<woodsketch_doc::Entity> {
     let view = doc.view();
     pick::pick_entity(view.model(), screen, cursor).and_then(|e| view.resolve(e))
 }
 
 /// Outline an entity of the container being edited, e.g. what a tool would pick up. Groups and
 /// components get all their edges outlined.
-pub(crate) fn highlight_entity(view: &sketchcraft_doc::View, entity: sketchcraft_doc::Entity, overlay: &mut Overlay) {
-    use sketchcraft_doc::{Entity, Owner};
+pub(crate) fn highlight_entity(view: &woodsketch_doc::View, entity: woodsketch_doc::Entity, overlay: &mut Overlay) {
+    use woodsketch_doc::{Entity, Owner};
     let model = view.model();
     match entity {
         Entity::Edge(id) => {
@@ -312,8 +312,8 @@ impl Overlay {
         }
         for (guide, _) in &mut self.guides {
             *guide = match *guide {
-                sketchcraft_doc::Guide::Line { point, dir } => sketchcraft_doc::Guide::Line { point: p(point), dir: n(dir) },
-                sketchcraft_doc::Guide::Point(point) => sketchcraft_doc::Guide::Point(p(point)),
+                woodsketch_doc::Guide::Line { point, dir } => woodsketch_doc::Guide::Line { point: p(point), dir: n(dir) },
+                woodsketch_doc::Guide::Point(point) => woodsketch_doc::Guide::Point(p(point)),
             };
         }
         self
@@ -355,7 +355,7 @@ pub struct Tools {
     rotate: RotateTool,
     paint: PaintTool,
     /// The material the Paint Bucket applies; `None` is the default material.
-    pub active_material: Option<sketchcraft_doc::MaterialId>,
+    pub active_material: Option<woodsketch_doc::MaterialId>,
     /// A grip rotation started by press-and-drag; finishes on release.
     grip_dragging: bool,
     /// Move just rotated with a grip, so typed angles and arrays go to that rotation.
@@ -645,7 +645,7 @@ impl Tools {
         // Offset works on a selected face where one is selected.
         let offsetting_selection = self.active == ToolId::Offset
             && doc.selection().len() == 1
-            && doc.selection().iter().all(|e| matches!(e, sketchcraft_doc::Entity::Face(_)));
+            && doc.selection().iter().all(|e| matches!(e, woodsketch_doc::Entity::Face(_)));
         let drawing = matches!(
             self.active,
             ToolId::Line | ToolId::Rectangle | ToolId::Circle | ToolId::Arc | ToolId::PushPull | ToolId::Offset
@@ -664,7 +664,7 @@ impl Tools {
             let screen = Screen::in_context(camera, size, doc.context_transform());
             let view = doc.view();
             let Some((face, _)) = pick::hit_face(view.model(), &screen.ray(cursor)) else { return };
-            let sketchcraft_doc::Owner::Instance(instance) = view.owner(sketchcraft_doc::Entity::Face(face)) else { return };
+            let woodsketch_doc::Owner::Instance(instance) = view.owner(woodsketch_doc::Entity::Face(face)) else { return };
             let name = doc.instance_name(instance).unwrap_or("the group").to_owned();
             if !doc.enter(instance) {
                 return;
@@ -784,11 +784,11 @@ impl Tools {
     }
 
     /// Make the selection a group or component (Ctrl+G / G).
-    pub fn make_group(&mut self, doc: &mut Document, kind: sketchcraft_doc::DefinitionKind) {
+    pub fn make_group(&mut self, doc: &mut Document, kind: woodsketch_doc::DefinitionKind) {
         self.cancel();
         let noun = match kind {
-            sketchcraft_doc::DefinitionKind::Group => "group",
-            sketchcraft_doc::DefinitionKind::Component => "component",
+            woodsketch_doc::DefinitionKind::Group => "group",
+            woodsketch_doc::DefinitionKind::Component => "component",
         };
         if doc.group_selection(kind).is_none() {
             self.message = Some(format!("Select something to make a {noun}."));
@@ -879,8 +879,8 @@ impl Tools {
     pub fn overlay(&self, doc: &Document) -> Overlay {
         let mut overlay = Overlay::default();
         // One part selected: show which way its grain runs.
-        let selected: Vec<sketchcraft_doc::Entity> = doc.selection().iter().collect();
-        if let [sketchcraft_doc::Entity::Instance(part)] = selected[..] {
+        let selected: Vec<woodsketch_doc::Entity> = doc.selection().iter().collect();
+        if let [woodsketch_doc::Entity::Instance(part)] = selected[..] {
             overlay.grain = doc.grain_line(part);
         }
         if let Some((lo, hi)) = doc.editing_box() {
@@ -946,7 +946,7 @@ mod tests {
 
     #[test]
     fn move_rotation_grip_turns_a_board_in_place() {
-        use sketchcraft_view::StandardView;
+        use woodsketch_view::StandardView;
         let mut doc = Document::default();
         doc.edit(|m| {
             let face = m.add_rectangle(DVec3::new(10.0, 0.0, 0.0), DVec3::X * 1.5, DVec3::Y * 3.5, DVec3::Z).unwrap();
@@ -998,7 +998,7 @@ mod tests {
 
     #[test]
     fn select_click_picks_a_group_and_double_click_opens_it() {
-        use sketchcraft_view::StandardView;
+        use woodsketch_view::StandardView;
         let mut doc = Document::default();
         let face = doc.edit(|m| m.add_rectangle(DVec3::ZERO, DVec3::X * 1.5, DVec3::Y * 3.5, DVec3::Z)).unwrap();
         let group = doc.push_pull(face, 10.0, true).unwrap().unwrap();
@@ -1009,12 +1009,12 @@ mod tests {
         let mut tools = Tools::default();
         let mods = Modifiers::default();
         tools.pointer(PointerEvent::Click { pos: side, count: 1, mods }, &mut doc, &mut camera, size);
-        assert!(doc.selection().contains(sketchcraft_doc::Entity::Instance(group)));
+        assert!(doc.selection().contains(woodsketch_doc::Entity::Instance(group)));
         tools.pointer(PointerEvent::Click { pos: side, count: 2, mods }, &mut doc, &mut camera, size);
         assert_eq!(doc.path(), &[group]);
         // Inside, the same spot is the board's own face.
         tools.pointer(PointerEvent::Click { pos: side, count: 1, mods }, &mut doc, &mut camera, size);
-        assert!(matches!(doc.selection().iter().next(), Some(sketchcraft_doc::Entity::Face(_))));
+        assert!(matches!(doc.selection().iter().next(), Some(woodsketch_doc::Entity::Face(_))));
         // Clicking empty space closes the group.
         tools.pointer(PointerEvent::Click { pos: Vec2::new(5.0, 5.0), count: 1, mods }, &mut doc, &mut camera, size);
         assert!(doc.path().is_empty());

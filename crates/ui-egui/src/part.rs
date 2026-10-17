@@ -4,11 +4,11 @@
 
 use eframe::egui;
 use egui_phosphor::regular as ph;
-use sketchcraft_doc::cutlist::Part;
-use sketchcraft_doc::cutplan::match_stock;
-use sketchcraft_doc::part::{Cut, PartAxis};
-use sketchcraft_doc::units::format_length;
-use sketchcraft_doc::{Document, Entity, InstanceId, MaterialKind};
+use woodsketch_doc::cutlist::Part;
+use woodsketch_doc::cutplan::match_stock;
+use woodsketch_doc::part::{Cut, PartAxis};
+use woodsketch_doc::units::format_length;
+use woodsketch_doc::{Document, Entity, InstanceId, MaterialKind};
 
 pub fn show(ui: &mut egui::Ui, doc: &mut Document, instance: InstanceId) {
     let (Some(size), Some(extents), Some(info)) = (doc.part_size(instance), doc.part_extents(instance), doc.part_info(instance)) else {

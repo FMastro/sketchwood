@@ -6,7 +6,7 @@
 use std::collections::BTreeSet;
 
 use glam::Vec2;
-use sketchcraft_doc::{Document, Entity};
+use woodsketch_doc::{Document, Entity};
 
 use crate::pick::Screen;
 use crate::{Overlay, highlight_entity, pick_resolved};
@@ -92,7 +92,7 @@ fn erasable(doc: &Document, screen: Screen<'_>, cursor: Vec2) -> Option<Entity> 
 #[cfg(test)]
 mod tests {
     use glam::DVec3;
-    use sketchcraft_view::{OrbitCamera, StandardView};
+    use woodsketch_view::{OrbitCamera, StandardView};
 
     use super::*;
 
@@ -151,7 +151,7 @@ mod tests {
     #[test]
     fn guides_and_groups_erase_too() {
         let mut doc = Document::default();
-        doc.edit(|m| m.add_guide(sketchcraft_doc::Guide::Line { point: DVec3::new(0.0, 8.0, 0.0), dir: DVec3::X }));
+        doc.edit(|m| m.add_guide(woodsketch_doc::Guide::Line { point: DVec3::new(0.0, 8.0, 0.0), dir: DVec3::X }));
         let face = doc.edit(|m| m.add_rectangle(DVec3::ZERO, DVec3::X * 3.0, DVec3::Y * 3.0, DVec3::Z)).unwrap();
         doc.push_pull(face, 1.0, true).unwrap();
         let camera = camera();

@@ -3,8 +3,8 @@
 //! Arrow keys lock an axis; tapping Ctrl on its own toggles copy in Move.
 
 use eframe::egui;
-use sketchcraft_doc::{DefinitionKind, Document};
-use sketchcraft_tools::{Axis, ToolId, Tools};
+use woodsketch_doc::{DefinitionKind, Document};
+use woodsketch_tools::{Axis, ToolId, Tools};
 
 use crate::viewport::Viewport;
 

@@ -2,8 +2,8 @@
 //! While sizing, or right after finishing, type `width,height` and Enter, as in SketchUp.
 
 use glam::{DVec3, Vec2};
-use sketchcraft_doc::units::{format_length, parse_lengths};
-use sketchcraft_doc::{Document, EPS};
+use woodsketch_doc::units::{format_length, parse_lengths};
+use woodsketch_doc::{Document, EPS};
 
 use crate::Overlay;
 use crate::pick::{Screen, Snap, snap};
@@ -196,8 +196,8 @@ pub fn plane_axes(normal: DVec3) -> (DVec3, DVec3) {
 
 #[cfg(test)]
 mod tests {
-    use sketchcraft_doc::Entity;
-    use sketchcraft_view::{OrbitCamera, StandardView};
+    use woodsketch_doc::Entity;
+    use woodsketch_view::{OrbitCamera, StandardView};
 
     use super::*;
 

@@ -1,11 +1,11 @@
 //! End-to-end tests: drive the real app headlessly with simulated input, as a user would.
 //!
-//! Set `SKETCHCRAFT_SNAPSHOT_DIR` to also save rendered PNGs of each scenario.
+//! Set `WOODSKETCH_SNAPSHOT_DIR` to also save rendered PNGs of each scenario.
 
 use eframe::egui::{self, Event, Key, Modifiers, PointerButton, pos2};
 use egui_kittest::Harness;
-use sketchcraft_tools::ToolId;
-use sketchcraft_ui_egui::SketchCraftApp;
+use woodsketch_tools::ToolId;
+use woodsketch_ui_egui::WoodSketchApp;
 
 /// Tests take turns on the GPU. Two full-suite runs died without an assertion failure, which
 /// looked like a driver crash while several tests created wgpu devices at once.
@@ -13,12 +13,12 @@ static GPU: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// The app under test, holding the GPU turn until dropped (fields drop in order: harness first).
 struct App {
-    harness: Harness<'static, SketchCraftApp>,
+    harness: Harness<'static, WoodSketchApp>,
     _gpu: std::sync::MutexGuard<'static, ()>,
 }
 
 impl std::ops::Deref for App {
-    type Target = Harness<'static, SketchCraftApp>;
+    type Target = Harness<'static, WoodSketchApp>;
     fn deref(&self) -> &Self::Target {
         &self.harness
     }
@@ -38,12 +38,12 @@ fn app() -> App {
         // Real frame timing, so quick successive clicks count as double-clicks.
         .with_step_dt(1.0 / 60.0)
         .wgpu()
-        .build_eframe(|cc| SketchCraftApp::new(cc));
+        .build_eframe(|cc| WoodSketchApp::new(cc));
     harness.run();
     App { harness, _gpu: gpu }
 }
 
-fn click(harness: &mut Harness<'_, SketchCraftApp>, pos: egui::Pos2) {
+fn click(harness: &mut Harness<'_, WoodSketchApp>, pos: egui::Pos2) {
     harness.hover_at(pos);
     harness.run();
     for pressed in [true, false] {
@@ -52,19 +52,19 @@ fn click(harness: &mut Harness<'_, SketchCraftApp>, pos: egui::Pos2) {
     }
 }
 
-fn type_text(harness: &mut Harness<'_, SketchCraftApp>, text: &str) {
+fn type_text(harness: &mut Harness<'_, WoodSketchApp>, text: &str) {
     harness.event(Event::Text(text.into()));
     harness.run();
 }
 
-fn snapshot(harness: &mut Harness<'_, SketchCraftApp>, name: &str) {
-    if let Ok(dir) = std::env::var("SKETCHCRAFT_SNAPSHOT_DIR") {
+fn snapshot(harness: &mut Harness<'_, WoodSketchApp>, name: &str) {
+    if let Ok(dir) = std::env::var("WOODSKETCH_SNAPSHOT_DIR") {
         let image = harness.render().expect("render the frame");
         image.save(std::path::Path::new(&dir).join(format!("{name}.png"))).expect("save snapshot");
     }
 }
 
-fn size(harness: &Harness<'_, SketchCraftApp>) -> (f64, f64) {
+fn size(harness: &Harness<'_, WoodSketchApp>) -> (f64, f64) {
     let (lo, hi) = harness.state().document().bounds().expect("geometry exists");
     ((hi - lo).x, (hi - lo).y)
 }
@@ -137,7 +137,7 @@ fn clicking_a_face_selects_it() {
     click(&mut harness, corner.lerp(far, 0.5));
     let selection = harness.state().document().selection();
     assert_eq!(selection.len(), 1);
-    assert!(matches!(selection.iter().next(), Some(sketchcraft_doc::Entity::Face(_))));
+    assert!(matches!(selection.iter().next(), Some(woodsketch_doc::Entity::Face(_))));
 }
 
 #[test]
@@ -303,7 +303,7 @@ fn new_boards_are_groups_you_open_by_double_clicking() {
     let side = harness.state().to_window(glam::DVec3::new((lo.x + hi.x) * 0.5, lo.y, (lo.z + hi.z) * 0.5)).unwrap();
     click(&mut harness, side);
     let selection = harness.state().document().selection();
-    assert!(matches!(selection.iter().next(), Some(sketchcraft_doc::Entity::Instance(_))));
+    assert!(matches!(selection.iter().next(), Some(woodsketch_doc::Entity::Instance(_))));
     snapshot(&mut harness, "group_selected");
 
     // Double-click opens it: now its faces are editable. One button event per frame, well
@@ -421,16 +421,16 @@ fn paint_a_board_with_a_new_plywood_material() {
     click(&mut harness, side);
     let doc = harness.state().document();
     let (board, _) = doc.container().instances().next().unwrap();
-    assert_eq!(doc.material_of(sketchcraft_doc::Entity::Instance(board)), Some(plywood));
+    assert_eq!(doc.material_of(woodsketch_doc::Entity::Instance(board)), Some(plywood));
     type_text(&mut harness, "Z");
     snapshot(&mut harness, "painted");
 }
 
 #[test]
 fn save_new_and_reopen_a_drawing() {
-    let dir = std::env::temp_dir().join(format!("sketchcraft-test-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("woodsketch-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("bench.scraft");
+    let path = dir.join("bench.woodsketch");
 
     let mut harness = app();
     board(&mut harness);
@@ -460,10 +460,10 @@ fn save_new_and_reopen_a_drawing() {
     assert!(harness.state().is_dirty());
 
     // Opening something that isn't a drawing fails cleanly and keeps the current one.
-    let junk = dir.join("junk.scraft");
+    let junk = dir.join("junk.woodsketch");
     std::fs::write(&junk, "hello").unwrap();
     let error = harness.state_mut().open_path(&junk).unwrap_err();
-    assert!(error.contains("isn't a SketchCraft drawing"), "{error}");
+    assert!(error.contains("isn't a WoodSketch drawing"), "{error}");
     assert_eq!(harness.state().file_path(), Some(path.as_path()));
     std::fs::remove_dir_all(&dir).ok();
 }
@@ -494,10 +494,10 @@ fn new_asks_before_discarding_unsaved_work() {
 }
 
 /// A board `l` long, `w` wide, `t` thick standing at `at`, auto-grouped.
-fn add_board(doc: &mut sketchcraft_doc::Document, at: glam::DVec3, l: f64, w: f64, t: f64) -> sketchcraft_doc::Entity {
+fn add_board(doc: &mut woodsketch_doc::Document, at: glam::DVec3, l: f64, w: f64, t: f64) -> woodsketch_doc::Entity {
     use glam::DVec3;
     let face = doc.edit(|m| m.add_rectangle(at, DVec3::X * w, DVec3::Y * t, DVec3::Z)).unwrap();
-    sketchcraft_doc::Entity::Instance(doc.push_pull(face, l, true).unwrap().unwrap())
+    woodsketch_doc::Entity::Instance(doc.push_pull(face, l, true).unwrap().unwrap())
 }
 
 #[test]
@@ -505,7 +505,7 @@ fn cut_list_shows_parts_and_cutting_diagrams() {
     use egui_kittest::kittest::Queryable;
     use egui_phosphor::regular as ph;
     use glam::DVec3;
-    use sketchcraft_doc::MaterialKind;
+    use woodsketch_doc::MaterialKind;
 
     let mut harness = app();
     {
@@ -593,7 +593,7 @@ fn draw_a_line_across_a_boards_top_and_push_down_a_rabbet() {
 fn tape_a_guide_off_an_edge_then_draw_from_where_it_crosses() {
     use egui_kittest::kittest::Queryable;
     use glam::DVec3;
-    use sketchcraft_doc::Guide;
+    use woodsketch_doc::Guide;
     let mut harness = app();
     harness
         .state_mut()
@@ -746,8 +746,8 @@ fn drill_a_dowel_hole_with_circle_and_push_pull() {
 #[test]
 fn export_obj_with_materials_and_stl() {
     use egui_kittest::kittest::Queryable;
-    use sketchcraft_ui_egui::files::ExportFormat;
-    let dir = std::env::temp_dir().join(format!("sketchcraft-export-{}", std::process::id()));
+    use woodsketch_ui_egui::files::ExportFormat;
+    let dir = std::env::temp_dir().join(format!("woodsketch-export-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let mut harness = app();
     board(&mut harness);
@@ -785,7 +785,7 @@ fn rename_a_board_in_entity_info_for_the_cut_list() {
     let doc = harness.state().document();
     let (board, _) = doc.container().instances().next().unwrap();
     assert_eq!(doc.instance_name(board), Some("Left side"));
-    let list = sketchcraft_doc::cutlist::cut_list(doc.scene());
+    let list = woodsketch_doc::cutlist::cut_list(doc.scene());
     assert_eq!(list.materials[0].parts[0].names, vec!["Left side".to_owned()]);
     // One undo step undoes the whole name.
     harness.key_press(Key::Escape);
@@ -963,8 +963,8 @@ fn boards_hide_the_guides_behind_them() {
         let face = doc.edit(|m| m.add_rectangle(DVec3::ZERO, DVec3::X * 12.0, DVec3::Y * 4.0, DVec3::Z)).unwrap();
         doc.push_pull(face, 12.0, true).unwrap();
         // A guide running behind the block (it's in front of the camera only past the block).
-        doc.edit(|m| m.add_guide(sketchcraft_doc::Guide::Line { point: DVec3::new(0.0, 7.0, 3.0), dir: DVec3::X }));
-        doc.edit(|m| m.add_guide(sketchcraft_doc::Guide::Line { point: DVec3::new(6.0, 0.0, 0.0), dir: DVec3::Z }));
+        doc.edit(|m| m.add_guide(woodsketch_doc::Guide::Line { point: DVec3::new(0.0, 7.0, 3.0), dir: DVec3::X }));
+        doc.edit(|m| m.add_guide(woodsketch_doc::Guide::Line { point: DVec3::new(6.0, 0.0, 0.0), dir: DVec3::Z }));
     }
     harness.run();
     type_text(&mut harness, "Z");
@@ -993,7 +993,7 @@ fn line_infers_parallel_to_a_hovered_edge() {
     harness.hover_at(near);
     harness.run();
     let overlay = harness.state().tools().overlay(harness.state().document());
-    assert_eq!(overlay.guide.and_then(|g| g.along), Some(sketchcraft_tools::infer::Along::Parallel));
+    assert_eq!(overlay.guide.and_then(|g| g.along), Some(woodsketch_tools::infer::Along::Parallel));
     snapshot(&mut harness, "parallel_inference");
 }
 
@@ -1083,7 +1083,7 @@ fn the_cut_list_calls_out_parts_needing_a_material() {
     let mut harness = app();
     {
         let doc = harness.state_mut().document_mut();
-        let oak = doc.add_preset(sketchcraft_doc::library::LIBRARY.iter().find(|p| p.name == "Red Oak").unwrap());
+        let oak = doc.add_preset(woodsketch_doc::library::LIBRARY.iter().find(|p| p.name == "Red Oak").unwrap());
         let top = add_board(doc, DVec3::ZERO, 30.0, 12.0, 0.75);
         doc.paint(&[top], Some(oak));
         add_board(doc, DVec3::X * 20.0, 28.0, 3.5, 0.75);
@@ -1108,12 +1108,12 @@ fn entity_info_shows_a_parts_grain_and_lets_you_turn_it() {
     let mut harness = app();
     let door = {
         let doc = harness.state_mut().document_mut();
-        let oak = doc.add_preset(sketchcraft_doc::library::LIBRARY.iter().find(|p| p.name == "Red Oak").unwrap());
+        let oak = doc.add_preset(woodsketch_doc::library::LIBRARY.iter().find(|p| p.name == "Red Oak").unwrap());
         // A 30" wide, 12" tall door standing up.
         let face = doc.edit(|m| m.add_rectangle(DVec3::ZERO, DVec3::X * 30.0, DVec3::Y * 0.75, DVec3::Z)).unwrap();
         let door = doc.push_pull(face, 12.0, true).unwrap().unwrap();
-        doc.paint(&[sketchcraft_doc::Entity::Instance(door)], Some(oak));
-        doc.selection_mut().extend([sketchcraft_doc::Entity::Instance(door)]);
+        doc.paint(&[woodsketch_doc::Entity::Instance(door)], Some(oak));
+        doc.selection_mut().extend([woodsketch_doc::Entity::Instance(door)]);
         door
     };
     harness.run();

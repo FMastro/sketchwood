@@ -1,14 +1,14 @@
 [package]
-name = "sketchcraft-tools"
-description = "SketchCraft tools (Select, Rectangle, navigation), picking and snapping"
+name = "woodsketch-tools"
+description = "WoodSketch tools (Select, Rectangle, navigation), picking and snapping"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-sketchcraft-doc.workspace = true
-sketchcraft-view.workspace = true
+woodsketch-doc.workspace = true
+woodsketch-view.workspace = true
 glam.workspace = true
 
 [lints]

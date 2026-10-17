@@ -13,7 +13,7 @@
 //! passed over ("From Point"): along an axis through that point, shown dotted.
 
 use glam::{DVec3, Vec2};
-use sketchcraft_doc::{EPS, Model, VertexId};
+use woodsketch_doc::{EPS, Model, VertexId};
 
 use crate::Axis;
 use crate::pick::{AXIS_RADIUS, Ray, Screen, Snap, SnapKind, closest_on_line, snap_feature};
@@ -231,7 +231,7 @@ pub fn infer_direction(
 
 #[cfg(test)]
 mod tests {
-    use sketchcraft_view::{OrbitCamera, StandardView};
+    use woodsketch_view::{OrbitCamera, StandardView};
 
     use super::*;
 

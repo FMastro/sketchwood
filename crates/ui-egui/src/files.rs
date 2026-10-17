@@ -3,9 +3,9 @@
 use std::path::{Path, PathBuf};
 
 use eframe::egui;
-use sketchcraft_doc::Document;
-use sketchcraft_doc::export::{self, ExportUnits};
-use sketchcraft_doc::file::{self, EXTENSION};
+use woodsketch_doc::Document;
+use woodsketch_doc::export::{self, ExportUnits};
+use woodsketch_doc::file::{self, EXTENSION, OLD_EXTENSION};
 
 /// Something that would discard the drawing, waiting on the "save changes?" answer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -82,10 +82,10 @@ impl Files {
         }
     }
 
-    /// Keep the window title as "Name* - SketchCraft".
+    /// Keep the window title as "Name* - WoodSketch".
     pub fn update_title(&mut self, ctx: &egui::Context, doc: &Document) {
         let dirty = if self.is_dirty(doc) { "*" } else { "" };
-        let title = format!("{}{dirty} - SketchCraft", self.name());
+        let title = format!("{}{dirty} - WoodSketch", self.name());
         if title != self.title {
             ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
             self.title = title;
@@ -150,7 +150,7 @@ pub enum FileAction {
 /// The native dialog for choosing where to save.
 pub fn save_dialog(current: Option<&Path>) -> Option<PathBuf> {
     let name = current.and_then(Path::file_name).map_or_else(|| format!("Untitled.{EXTENSION}"), |n| n.to_string_lossy().into_owned());
-    let mut dialog = rfd::FileDialog::new().add_filter("SketchCraft drawing", &[EXTENSION]).set_file_name(name);
+    let mut dialog = rfd::FileDialog::new().add_filter("WoodSketch drawing", &[EXTENSION]).set_file_name(name);
     if let Some(dir) = current.and_then(Path::parent) {
         dialog = dialog.set_directory(dir);
     }
@@ -159,7 +159,7 @@ pub fn save_dialog(current: Option<&Path>) -> Option<PathBuf> {
 
 /// The native dialog for choosing a drawing to open.
 pub fn open_dialog(current: Option<&Path>) -> Option<PathBuf> {
-    let mut dialog = rfd::FileDialog::new().add_filter("SketchCraft drawing", &[EXTENSION]);
+    let mut dialog = rfd::FileDialog::new().add_filter("WoodSketch drawing", &[EXTENSION, OLD_EXTENSION]);
     if let Some(dir) = current.and_then(Path::parent) {
         dialog = dialog.set_directory(dir);
     }

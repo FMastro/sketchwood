@@ -2,8 +2,8 @@
 
 use eframe::egui;
 use egui_phosphor::regular as ph;
-use sketchcraft_doc::{Document, TagId};
-use sketchcraft_tools::Tools;
+use woodsketch_doc::{Document, TagId};
+use woodsketch_tools::Tools;
 
 #[derive(Default)]
 pub struct TagsPanel {
@@ -88,8 +88,8 @@ pub fn entity_info(ui: &mut egui::Ui, doc: &mut Document, tools: &mut Tools) {
         ui.weak("Nothing selected.");
         return;
     }
-    let instances = doc.selection().iter().filter(|e| matches!(e, sketchcraft_doc::Entity::Instance(_))).count();
-    let single = doc.selection().iter().find_map(|e| if let sketchcraft_doc::Entity::Instance(i) = e { Some(i) } else { None });
+    let instances = doc.selection().iter().filter(|e| matches!(e, woodsketch_doc::Entity::Instance(_))).count();
+    let single = doc.selection().iter().find_map(|e| if let woodsketch_doc::Entity::Instance(i) = e { Some(i) } else { None });
     match (count, instances, single) {
         (1, 1, Some(instance)) => name_field(ui, doc, instance),
         (n, 0, _) => {
@@ -139,7 +139,7 @@ pub fn entity_info(ui: &mut egui::Ui, doc: &mut Document, tools: &mut Tools) {
 }
 
 /// The selected group's or component's name, editable: it names the part in the cut list.
-fn name_field(ui: &mut egui::Ui, doc: &mut Document, instance: sketchcraft_doc::InstanceId) {
+fn name_field(ui: &mut egui::Ui, doc: &mut Document, instance: woodsketch_doc::InstanceId) {
     let key = egui::Id::new(("entity_info_name", instance));
     let current = doc.instance_name(instance).unwrap_or_default().to_owned();
     // While typing, keep what's typed (even blank); otherwise show the drawing's name.

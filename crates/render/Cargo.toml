@@ -1,19 +1,19 @@
 [package]
-name = "sketchcraft-render"
-description = "wgpu viewport renderer for SketchCraft"
+name = "woodsketch-render"
+description = "wgpu viewport renderer for WoodSketch"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-sketchcraft-doc.workspace = true
+woodsketch-doc.workspace = true
 wgpu.workspace = true
 glam.workspace = true
 bytemuck.workspace = true
 
 [dev-dependencies]
-sketchcraft-view.workspace = true
+woodsketch-view.workspace = true
 
 [lints]
 workspace = true

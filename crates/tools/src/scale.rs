@@ -9,8 +9,8 @@
 //! else along the red, green and blue axes.
 
 use glam::{DVec3, Vec2};
-use sketchcraft_doc::units::parse_lengths;
-use sketchcraft_doc::{Document, EPS, Entity, scaling};
+use woodsketch_doc::units::parse_lengths;
+use woodsketch_doc::{Document, EPS, Entity, scaling};
 
 use crate::pick::{Screen, Snap, closest_on_line, snap_feature};
 use crate::{Overlay, pick_resolved};
@@ -348,14 +348,14 @@ fn grip_at(target: &Target, screen: Screen<'_>, cursor: Vec2) -> Option<[usize; 
 
 #[cfg(test)]
 mod tests {
-    use sketchcraft_view::{OrbitCamera, StandardView};
+    use woodsketch_view::{OrbitCamera, StandardView};
 
     use super::*;
 
     const SIZE: Vec2 = Vec2::new(1000.0, 800.0);
 
     /// A 30" x 2 x 4 board standing up, as a group, seen from the front-left.
-    fn setup() -> (Document, OrbitCamera, sketchcraft_doc::InstanceId) {
+    fn setup() -> (Document, OrbitCamera, woodsketch_doc::InstanceId) {
         let mut doc = Document::default();
         let face = doc.edit(|m| m.add_rectangle(DVec3::ZERO, DVec3::X * 3.5, DVec3::Y * 1.5, DVec3::Z)).unwrap();
         let board = doc.push_pull(face, 30.0, true).unwrap().unwrap();
@@ -386,7 +386,7 @@ mod tests {
         assert!((hi - lo).abs_diff_eq(DVec3::new(3.5, 1.5, 36.0), 1e-9), "{}", hi - lo);
         assert!(lo.abs_diff_eq(DVec3::ZERO, 1e-9), "the bottom stays put");
         // The cut list reads the stretched size.
-        let list = sketchcraft_doc::cutlist::cut_list(doc.scene());
+        let list = woodsketch_doc::cutlist::cut_list(doc.scene());
         let part = &list.materials[0].parts[0];
         assert!(((part.length, part.width, part.thickness) == (36.0, 3.5, 1.5)), "{part:?}");
         // Typing again changes it, as one undo step.

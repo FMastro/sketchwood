@@ -98,7 +98,7 @@ pub fn to_obj(scene: &Scene, units: ExportUnits, mtl_file: &str) -> (String, Str
     };
 
     let mut obj = String::new();
-    let _ = writeln!(obj, "# Exported from SketchCraft; units: {}", units.name());
+    let _ = writeln!(obj, "# Exported from WoodSketch; units: {}", units.name());
     let _ = writeln!(obj, "mtllib {mtl_file}");
     let mut used = std::collections::BTreeSet::new();
     let mut next_vertex = 1usize;
@@ -128,7 +128,7 @@ pub fn to_obj(scene: &Scene, units: ExportUnits, mtl_file: &str) -> (String, Str
         obj.push_str(&faces);
     }
 
-    let mut mtl = String::from("# Exported from SketchCraft\n");
+    let mut mtl = String::from("# Exported from WoodSketch\n");
     for name in used {
         let color = scene
             .materials()
@@ -143,7 +143,7 @@ pub fn to_obj(scene: &Scene, units: ExportUnits, mtl_file: &str) -> (String, Str
 /// The drawing as an ASCII STL file: one solid of triangles with their normals.
 pub fn to_stl(scene: &Scene, units: ExportUnits) -> String {
     let scale = units.scale();
-    let mut stl = String::from("solid sketchcraft\n");
+    let mut stl = String::from("solid woodsketch\n");
     for mesh in meshes(scene) {
         for t in &mesh.triangles {
             let n = t.normal;
@@ -155,7 +155,7 @@ pub fn to_stl(scene: &Scene, units: ExportUnits) -> String {
             let _ = writeln!(stl, "    endloop\n  endfacet");
         }
     }
-    stl.push_str("endsolid sketchcraft\n");
+    stl.push_str("endsolid woodsketch\n");
     stl
 }
 
@@ -179,7 +179,7 @@ mod tests {
     fn stl_has_every_triangle_facing_out_in_millimeters() {
         let doc = drawing();
         let stl = to_stl(doc.scene(), ExportUnits::Millimeters);
-        assert!(stl.starts_with("solid sketchcraft") && stl.trim_end().ends_with("endsolid sketchcraft"));
+        assert!(stl.starts_with("solid woodsketch") && stl.trim_end().ends_with("endsolid woodsketch"));
         // The board's 6 faces and the square: 7 rectangles, 14 triangles.
         assert_eq!(stl.matches("facet normal").count(), 14);
         // Every triangle winds counter-clockwise around its stated normal.

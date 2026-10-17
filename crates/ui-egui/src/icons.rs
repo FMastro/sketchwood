@@ -2,7 +2,7 @@
 
 use eframe::egui;
 use egui_phosphor::regular as ph;
-use sketchcraft_tools::ToolId;
+use woodsketch_tools::ToolId;
 
 /// Register the icon font as a fallback for egui's default fonts.
 pub fn install(ctx: &egui::Context) {

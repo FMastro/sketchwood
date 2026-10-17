@@ -11,8 +11,8 @@
 use std::collections::BTreeSet;
 
 use glam::{DAffine3, DVec3, Vec2};
-use sketchcraft_doc::units::{format_length, parse_length, parse_lengths};
-use sketchcraft_doc::{Document, EPS, Entity, Model, VertexId};
+use woodsketch_doc::units::{format_length, parse_length, parse_lengths};
+use woodsketch_doc::{Document, EPS, Entity, Model, VertexId};
 
 use crate::infer::{self, Direction, Hints, Query, Target};
 use crate::pick::{Screen, Snap};
@@ -491,7 +491,7 @@ pub(crate) fn parse_offset(typed: &str, current: DVec3, base: DVec3) -> Result<D
 
 #[cfg(test)]
 mod tests {
-    use sketchcraft_view::{OrbitCamera, StandardView};
+    use woodsketch_view::{OrbitCamera, StandardView};
 
     use super::*;
 

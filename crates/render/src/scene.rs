@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use glam::{DAffine3, DVec3, Mat4, Vec3};
-use sketchcraft_doc::{Entity, Guide, Owner, Scene as SceneData, Selection, VertexId, View};
+use woodsketch_doc::{Entity, Guide, Owner, Scene as SceneData, Selection, VertexId, View};
 
 /// Linear-space RGBA. The render target is sRGB, so colors are converted from sRGB on creation.
 pub type Color = [f32; 4];
@@ -38,7 +38,7 @@ pub struct Scene {
     pub selected_guides: Vec<SceneGuide>,
     /// Edges hidden between a curve's facets (found by [`Self::add_geometry`]); a selected
     /// group's highlight skips them too.
-    pub soft_edges: std::collections::HashSet<sketchcraft_doc::EdgeId>,
+    pub soft_edges: std::collections::HashSet<woodsketch_doc::EdgeId>,
 }
 
 fn line_vertex(p: Vec3, color: Color) -> LineVertex {
@@ -174,7 +174,7 @@ impl Scene {
         }
     }
 
-    fn push_face(&mut self, model: &sketchcraft_doc::Model, face: &sketchcraft_doc::Face, to_world: &DAffine3, front: Color, back: Color, selected: bool) {
+    fn push_face(&mut self, model: &woodsketch_doc::Model, face: &woodsketch_doc::Face, to_world: &DAffine3, front: Color, back: Color, selected: bool) {
         let n = to_world.transform_vector3(face.normal).normalize().as_vec3();
         let target = if selected { &mut self.selected_faces } else { &mut self.faces };
         for triangle in model.triangulate(face) {
@@ -271,7 +271,7 @@ fn closest_to_ray(a: DVec3, b: DVec3, origin: DVec3, dir: DVec3) -> DVec3 {
 
 /// A face's front and back colors: SketchUp's default material (warm white front, blue-grey
 /// back), or its paint (its own, else its group's) on both sides.
-fn face_colors(view: &View, id: sketchcraft_doc::FaceId, scene: &SceneData) -> (Color, Color) {
+fn face_colors(view: &View, id: woodsketch_doc::FaceId, scene: &SceneData) -> (Color, Color) {
     match view.face_material(id).and_then(|m| scene.material(m)) {
         Some(m) => {
             let c = srgb(m.color[0], m.color[1], m.color[2]);
@@ -301,11 +301,11 @@ fn is_soft(n: DVec3, m: DVec3) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use sketchcraft_doc::Document;
+    use woodsketch_doc::Document;
 
     use super::*;
 
-    fn two_boards() -> (Document, sketchcraft_doc::InstanceId) {
+    fn two_boards() -> (Document, woodsketch_doc::InstanceId) {
         let mut doc = Document::default();
         let face = doc.edit(|m| m.add_rectangle(DVec3::ZERO, DVec3::X * 1.5, DVec3::Y * 3.5, DVec3::Z)).unwrap();
         let group = doc.push_pull(face, 10.0, true).unwrap().unwrap();
@@ -332,8 +332,8 @@ mod tests {
     #[test]
     fn guide_lines_start_in_front_of_the_eye() {
         let guides = [SceneGuide { guide: Guide::Line { point: DVec3::ZERO, dir: DVec3::X }, color: srgb(0, 0, 0) }];
-        let mut camera = sketchcraft_view::OrbitCamera { target: glam::Vec3::ZERO, distance: 50.0, ..Default::default() };
-        camera.set_view(sketchcraft_view::StandardView::Iso);
+        let mut camera = woodsketch_view::OrbitCamera { target: glam::Vec3::ZERO, distance: 50.0, ..Default::default() };
+        camera.set_view(woodsketch_view::StandardView::Iso);
         let size = glam::Vec2::new(1000.0, 800.0);
         let vp = camera.view_proj(size);
         let vertices = guide_vertices(&guides, vp, camera.eye());

@@ -1,8 +1,8 @@
 //! Turning cursor positions into model entities and snapped points.
 
 use glam::{DAffine3, DVec3, Vec2};
-use sketchcraft_doc::{EdgeId, Entity, FaceId, Guide, GuideId, Model, VertexId};
-use sketchcraft_view::OrbitCamera;
+use woodsketch_doc::{EdgeId, Entity, FaceId, Guide, GuideId, Model, VertexId};
+use woodsketch_view::OrbitCamera;
 
 use crate::Axis;
 
@@ -274,7 +274,7 @@ pub fn snap_feature(
     }
 
     let edges: Vec<_> = model.edges().filter(|(_, e)| !exclude(e.a) && !exclude(e.b)).map(|(_, e)| e).collect();
-    let visible = |point: DVec3, edge: &sketchcraft_doc::Edge| {
+    let visible = |point: DVec3, edge: &woodsketch_doc::Edge| {
         !occluded(model, eye, point, |f| model.face(f).is_some_and(|face| face.uses_edge(edge)))
     };
 
@@ -414,8 +414,8 @@ pub fn segment_distance(p: Vec2, a: Vec2, b: Vec2) -> (f32, f32) {
 
 #[cfg(test)]
 mod tests {
-    use sketchcraft_doc::Model;
-    use sketchcraft_view::StandardView;
+    use woodsketch_doc::Model;
+    use woodsketch_view::StandardView;
 
     use super::*;
 

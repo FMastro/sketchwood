@@ -3,11 +3,11 @@
 
 use eframe::egui;
 use glam::{DVec3, Vec2};
-use sketchcraft_doc::Document;
-use sketchcraft_render::{Scene, ViewportRenderer};
-use sketchcraft_tools::infer::Along;
-use sketchcraft_tools::{Axis, Modifiers, Overlay, PointerEvent, SnapKind, Tools};
-use sketchcraft_view::OrbitCamera;
+use woodsketch_doc::Document;
+use woodsketch_render::{Scene, ViewportRenderer};
+use woodsketch_tools::infer::Along;
+use woodsketch_tools::{Axis, Modifiers, Overlay, PointerEvent, SnapKind, Tools};
+use woodsketch_view::OrbitCamera;
 
 /// Scroll distance, in points, that counts as one zoom step (about one mouse-wheel notch).
 const POINTS_PER_ZOOM_STEP: f32 = 50.0;
@@ -17,11 +17,11 @@ pub struct Viewport {
     renderer: ViewportRenderer,
     texture: Option<egui::TextureId>,
     /// The document version and grid setting the renderer's scene was built from.
-    scene_version: Option<(u64, Vec<sketchcraft_doc::InstanceId>, bool)>,
+    scene_version: Option<(u64, Vec<woodsketch_doc::InstanceId>, bool)>,
     /// The document version the selection highlight was built from.
     selection_version: Option<u64>,
     /// The drawing's soft edges, kept for rebuilding the selection highlight alone.
-    soft_edges: std::collections::HashSet<sketchcraft_doc::EdgeId>,
+    soft_edges: std::collections::HashSet<woodsketch_doc::EdgeId>,
     /// The ground grid (View > Grid). SketchUp has none, so it starts off.
     pub show_grid: bool,
     zoom_extents_pending: bool,
@@ -161,9 +161,9 @@ impl Viewport {
     /// the ground. `None` when the cursor points at the sky.
     fn depth_under(&self, cursor: Vec2, size: Vec2, doc: &Document) -> Option<f32> {
         let to_world = doc.context_transform();
-        let screen = sketchcraft_tools::pick::Screen::in_context(&self.camera, size, to_world);
+        let screen = woodsketch_tools::pick::Screen::in_context(&self.camera, size, to_world);
         let ray = screen.ray(cursor);
-        let hit = sketchcraft_tools::pick::hit_face(doc.view().model(), &ray)
+        let hit = woodsketch_tools::pick::hit_face(doc.view().model(), &ray)
             .map(|(_, p)| to_world.transform_point3(p))
             .or_else(|| {
                 let (origin, dir) = self.camera.ray(cursor, size);
@@ -246,7 +246,7 @@ fn draw_protractor(
     camera: &OrbitCamera,
     size: Vec2,
     screen: &dyn Fn(DVec3) -> Option<egui::Pos2>,
-    protractor: &sketchcraft_tools::Protractor,
+    protractor: &woodsketch_tools::Protractor,
 ) {
     let (center, n) = (protractor.center, protractor.normal.normalize());
     // Keep the protractor a constant size on screen.
@@ -307,7 +307,7 @@ fn draw_guides(
         let color = if selected { egui::Color32::from_rgb(0, 90, 255) } else { egui::Color32::from_gray(60) };
         let stroke = egui::Stroke::new(if selected { 1.5 } else { 1.0 }, color);
         match guide {
-            sketchcraft_doc::Guide::Line { point, dir } => {
+            woodsketch_doc::Guide::Line { point, dir } => {
                 // The stretch of the line nearest the eye, cut where it passes behind the camera.
                 let middle = point + dir * (eye - point).dot(dir);
                 let (mut a, mut b) = (middle - dir * REACH, middle + dir * REACH);
@@ -324,7 +324,7 @@ fn draw_guides(
                     painter.extend(egui::Shape::dashed_line(&[a, b], stroke, 6.0, 4.0));
                 }
             }
-            sketchcraft_doc::Guide::Point(p) => {
+            woodsketch_doc::Guide::Point(p) => {
                 if let Some(p) = screen(p) {
                     let r = 4.0;
                     painter.line_segment([p - egui::vec2(r, r), p + egui::vec2(r, r)], stroke);

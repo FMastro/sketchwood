@@ -2798,70 +2798,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33f4fe9184a62d842c9ef383018f3306d8ba224fd9d836f56d7288308847c256"
 
 [[package]]
-name = "sketchcraft"
-version = "0.1.0"
-dependencies = [
- "eframe",
- "env_logger",
- "sketchcraft-ui-egui",
-]
-
-[[package]]
-name = "sketchcraft-doc"
-version = "0.1.0"
-dependencies = [
- "earcut",
- "glam",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "sketchcraft-render"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "glam",
- "sketchcraft-doc",
- "sketchcraft-view",
- "wgpu",
-]
-
-[[package]]
-name = "sketchcraft-tools"
-version = "0.1.0"
-dependencies = [
- "glam",
- "sketchcraft-doc",
- "sketchcraft-view",
-]
-
-[[package]]
-name = "sketchcraft-ui-egui"
-version = "0.1.0"
-dependencies = [
- "eframe",
- "egui",
- "egui-phosphor",
- "egui-wgpu",
- "egui_kittest",
- "glam",
- "image",
- "rfd",
- "sketchcraft-doc",
- "sketchcraft-render",
- "sketchcraft-tools",
- "sketchcraft-view",
-]
-
-[[package]]
-name = "sketchcraft-view"
-version = "0.1.0"
-dependencies = [
- "glam",
-]
-
-[[package]]
 name = "skrifa"
 version = "0.44.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4023,6 +3959,70 @@ name = "wit-bindgen"
 version = "0.57.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
+
+[[package]]
+name = "woodsketch"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "env_logger",
+ "woodsketch-ui-egui",
+]
+
+[[package]]
+name = "woodsketch-doc"
+version = "0.1.0"
+dependencies = [
+ "earcut",
+ "glam",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "woodsketch-render"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "glam",
+ "wgpu",
+ "woodsketch-doc",
+ "woodsketch-view",
+]
+
+[[package]]
+name = "woodsketch-tools"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "woodsketch-doc",
+ "woodsketch-view",
+]
+
+[[package]]
+name = "woodsketch-ui-egui"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "egui",
+ "egui-phosphor",
+ "egui-wgpu",
+ "egui_kittest",
+ "glam",
+ "image",
+ "rfd",
+ "woodsketch-doc",
+ "woodsketch-render",
+ "woodsketch-tools",
+ "woodsketch-view",
+]
+
+[[package]]
+name = "woodsketch-view"
+version = "0.1.0"
+dependencies = [
+ "glam",
+]
 
 [[package]]
 name = "x11-dl"

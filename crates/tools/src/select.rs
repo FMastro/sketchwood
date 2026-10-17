@@ -5,7 +5,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use glam::{DVec3, Vec2};
-use sketchcraft_doc::{Document, Entity, Model, Owner, View};
+use woodsketch_doc::{Document, Entity, Model, Owner, View};
 
 use crate::pick::{Screen, pick_entity, segment_distance};
 use crate::{Modifiers, Overlay, SelectionWindow};
@@ -176,7 +176,7 @@ fn contains(p: Vec2, polygon: &[Vec2]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use sketchcraft_view::{OrbitCamera, StandardView};
+    use woodsketch_view::{OrbitCamera, StandardView};
 
     use super::*;
 

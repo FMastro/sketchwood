@@ -3,8 +3,8 @@
 
 use eframe::egui;
 use egui_phosphor::regular as ph;
-use sketchcraft_doc::{DefinitionKind, Document, Entity};
-use sketchcraft_tools::Tools;
+use woodsketch_doc::{DefinitionKind, Document, Entity};
+use woodsketch_tools::Tools;
 
 pub fn show(ui: &mut egui::Ui, doc: &mut Document, tools: &mut Tools) {
     breadcrumb(ui, doc, tools);

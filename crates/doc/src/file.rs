@@ -1,7 +1,8 @@
-//! The `.scraft` file format: JSON, so it's readable, diffable and easy to recover by hand.
+//! The `.woodsketch` file format: JSON, so it's readable, diffable and easy to recover by hand.
+//! Drawings saved before the rename (`.scraft`, format "sketchcraft") still open.
 //!
 //! ```json
-//! { "format": "sketchcraft", "version": 1, "units": "inches", "scene": { ... } }
+//! { "format": "woodsketch", "version": 1, "units": "inches", "scene": { ... } }
 //! ```
 //!
 //! Ids inside the scene are kept as-is (arena slots), so a saved drawing reloads with the same
@@ -14,8 +15,12 @@ use serde::{Deserialize, Serialize};
 use crate::Scene;
 
 /// The file extension, without the dot.
-pub const EXTENSION: &str = "scraft";
-const FORMAT: &str = "sketchcraft";
+pub const EXTENSION: &str = "woodsketch";
+/// The extension drawings had before the app was renamed WoodSketch; still opened.
+pub const OLD_EXTENSION: &str = "scraft";
+const FORMAT: &str = "woodsketch";
+/// The format name before the rename; still read.
+const OLD_FORMAT: &str = "sketchcraft";
 const VERSION: u32 = 1;
 
 #[derive(Serialize, Deserialize)]
@@ -29,8 +34,8 @@ struct File {
 
 #[derive(Debug)]
 pub enum FileError {
-    NotSketchCraft,
-    /// Written by a newer SketchCraft.
+    NotWoodSketch,
+    /// Written by a newer WoodSketch.
     TooNew(u32),
     Corrupt(String),
 }
@@ -38,8 +43,8 @@ pub enum FileError {
 impl fmt::Display for FileError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NotSketchCraft => f.write_str("That isn't a SketchCraft drawing."),
-            Self::TooNew(v) => write!(f, "That drawing was saved by a newer SketchCraft (file version {v})."),
+            Self::NotWoodSketch => f.write_str("That isn't a WoodSketch drawing."),
+            Self::TooNew(v) => write!(f, "That drawing was saved by a newer WoodSketch (file version {v})."),
             Self::Corrupt(e) => write!(f, "That drawing couldn't be read: {e}"),
         }
     }
@@ -59,9 +64,9 @@ pub fn from_str(text: &str) -> Result<Scene, FileError> {
         format: String,
         version: u32,
     }
-    let header: Header = serde_json::from_str(text).map_err(|_| FileError::NotSketchCraft)?;
-    if header.format != FORMAT {
-        return Err(FileError::NotSketchCraft);
+    let header: Header = serde_json::from_str(text).map_err(|_| FileError::NotWoodSketch)?;
+    if header.format != FORMAT && header.format != OLD_FORMAT {
+        return Err(FileError::NotWoodSketch);
     }
     if header.version > VERSION {
         return Err(FileError::TooNew(header.version));
@@ -140,21 +145,21 @@ mod tests {
     #[test]
     fn the_file_is_readable_json_with_a_header() {
         let text = to_string(Document::default().scene());
-        assert!(text.contains("\"format\": \"sketchcraft\""));
+        assert!(text.contains("\"format\": \"woodsketch\""));
         assert!(text.contains("\"version\": 1"));
         assert!(text.contains("\"units\": \"inches\""));
     }
 
     #[test]
     fn other_files_are_rejected_clearly() {
-        assert!(matches!(from_str("not json"), Err(FileError::NotSketchCraft)));
-        assert!(matches!(from_str(r#"{"format":"other","version":1}"#), Err(FileError::NotSketchCraft)));
+        assert!(matches!(from_str("not json"), Err(FileError::NotWoodSketch)));
+        assert!(matches!(from_str(r#"{"format":"other","version":1}"#), Err(FileError::NotWoodSketch)));
         assert!(matches!(
-            from_str(r#"{"format":"sketchcraft","version":99,"units":"inches","scene":{}}"#),
+            from_str(r#"{"format":"woodsketch","version":99,"units":"inches","scene":{}}"#),
             Err(FileError::TooNew(99))
         ));
         assert!(matches!(
-            from_str(r#"{"format":"sketchcraft","version":1,"units":"inches","scene":42}"#),
+            from_str(r#"{"format":"woodsketch","version":1,"units":"inches","scene":42}"#),
             Err(FileError::Corrupt(_))
         ));
     }

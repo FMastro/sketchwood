@@ -1,17 +1,17 @@
 [package]
-name = "sketchcraft-ui-egui"
-description = "egui user interface for SketchCraft"
+name = "woodsketch-ui-egui"
+description = "egui user interface for WoodSketch"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-sketchcraft-doc.workspace = true
+woodsketch-doc.workspace = true
 rfd.workspace = true
-sketchcraft-tools.workspace = true
-sketchcraft-view.workspace = true
-sketchcraft-render.workspace = true
+woodsketch-tools.workspace = true
+woodsketch-view.workspace = true
+woodsketch-render.workspace = true
 eframe.workspace = true
 egui.workspace = true
 egui-wgpu.workspace = true

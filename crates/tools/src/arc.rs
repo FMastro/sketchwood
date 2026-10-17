@@ -4,9 +4,9 @@
 //! arc just drawn. An arc across a face's corner splits off the corner, ready to push away.
 
 use glam::{DVec3, Vec2};
-use sketchcraft_doc::curves::{ARC_SEGMENTS, arc_points};
-use sketchcraft_doc::units::{format_length, parse_length};
-use sketchcraft_doc::{Document, EPS};
+use woodsketch_doc::curves::{ARC_SEGMENTS, arc_points};
+use woodsketch_doc::units::{format_length, parse_length};
+use woodsketch_doc::{Document, EPS};
 
 use crate::circle::parse_segments;
 use crate::move_tool::parse_offset;
@@ -203,7 +203,7 @@ impl ArcTool {
 
 #[cfg(test)]
 mod tests {
-    use sketchcraft_view::{OrbitCamera, StandardView};
+    use woodsketch_view::{OrbitCamera, StandardView};
 
     use super::*;
 

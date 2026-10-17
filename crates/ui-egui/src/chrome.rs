@@ -4,12 +4,12 @@
 //! Measurements box at the bottom right.
 
 use eframe::egui;
-use sketchcraft_doc::DefinitionKind;
-use sketchcraft_doc::export::ExportUnits;
-use sketchcraft_tools::{ToolId, Tools};
-use sketchcraft_view::StandardView;
+use woodsketch_doc::DefinitionKind;
+use woodsketch_doc::export::ExportUnits;
+use woodsketch_tools::{ToolId, Tools};
+use woodsketch_view::StandardView;
 
-use crate::{SketchCraftApp, files, icons, outliner, tags};
+use crate::{WoodSketchApp, files, icons, outliner, tags};
 
 const BUTTON_SIZE: f32 = 32.0;
 
@@ -43,7 +43,7 @@ pub fn visuals() -> egui::Visuals {
     v
 }
 
-impl SketchCraftApp {
+impl WoodSketchApp {
     pub(crate) fn menu_bar(&mut self, ui: &mut egui::Ui) {
         egui::Panel::top("menu bar").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
@@ -205,7 +205,7 @@ impl SketchCraftApp {
 
     fn help_menu(&mut self, ui: &mut egui::Ui) {
         ui.menu_button("Help", |ui| {
-            if ui.button("About SketchCraft").clicked() {
+            if ui.button("About WoodSketch").clicked() {
                 ui.close();
                 self.show_about = true;
             }
@@ -213,12 +213,12 @@ impl SketchCraftApp {
     }
 
     pub(crate) fn about_window(&mut self, ctx: &egui::Context) {
-        egui::Window::new("About SketchCraft")
+        egui::Window::new("About WoodSketch")
             .open(&mut self.show_about)
             .collapsible(false)
             .resizable(false)
             .show(ctx, |ui| {
-                ui.label(format!("SketchCraft {}", env!("CARGO_PKG_VERSION")));
+                ui.label(format!("WoodSketch {}", env!("CARGO_PKG_VERSION")));
                 ui.label("A lightweight 3D modeler for woodworking, in the spirit of SketchUp.");
                 ui.label("Not affiliated with or endorsed by Trimble.");
             });

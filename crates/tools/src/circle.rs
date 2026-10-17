@@ -3,9 +3,9 @@
 //! typing a radius right after drawing resizes the circle just drawn.
 
 use glam::{DVec3, Vec2};
-use sketchcraft_doc::curves::{CIRCLE_SEGMENTS, circle_points};
-use sketchcraft_doc::units::{format_length, parse_length};
-use sketchcraft_doc::{Document, EPS};
+use woodsketch_doc::curves::{CIRCLE_SEGMENTS, circle_points};
+use woodsketch_doc::units::{format_length, parse_length};
+use woodsketch_doc::{Document, EPS};
 
 use crate::Overlay;
 use crate::pick::{Screen, Snap, snap};
@@ -145,7 +145,7 @@ impl CircleTool {
 
 #[cfg(test)]
 mod tests {
-    use sketchcraft_view::{OrbitCamera, StandardView};
+    use woodsketch_view::{OrbitCamera, StandardView};
 
     use super::*;
 

@@ -3,8 +3,8 @@
 //! changes the last push/pull. Double-click a face to repeat the last distance.
 
 use glam::{DVec3, Vec2};
-use sketchcraft_doc::units::{format_length, parse_length};
-use sketchcraft_doc::{Document, Entity, FaceId, Model, Owner};
+use woodsketch_doc::units::{format_length, parse_length};
+use woodsketch_doc::{Document, Entity, FaceId, Model, Owner};
 
 use crate::Overlay;
 use crate::pick::{Screen, Snap, closest_on_line, hit_face, snap_feature};
@@ -222,7 +222,7 @@ fn active_face(doc: &Document, screen: Screen<'_>, cursor: Vec2) -> Result<Optio
 
 #[cfg(test)]
 mod tests {
-    use sketchcraft_view::{OrbitCamera, StandardView};
+    use woodsketch_view::{OrbitCamera, StandardView};
 
     use super::*;
 

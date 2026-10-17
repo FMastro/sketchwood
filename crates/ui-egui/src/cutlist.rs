@@ -4,10 +4,10 @@
 
 use eframe::egui;
 use egui_phosphor::regular as ph;
-use sketchcraft_doc::cutlist::{self, CutList, MaterialParts};
-use sketchcraft_doc::cutplan::{self, Plan, Settings, match_stock};
-use sketchcraft_doc::units::{format_length, parse_length};
-use sketchcraft_doc::{Document, MaterialKind, cutsheet};
+use woodsketch_doc::cutlist::{self, CutList, MaterialParts};
+use woodsketch_doc::cutplan::{self, Plan, Settings, match_stock};
+use woodsketch_doc::units::{format_length, parse_length};
+use woodsketch_doc::{Document, MaterialKind, cutsheet};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Tab {
@@ -47,7 +47,7 @@ impl CutListWindow {
     }
 
     /// Show the window. Returns a material to open in the Materials panel ("Edit material").
-    pub fn show(&mut self, ctx: &egui::Context, doc: &mut Document) -> Option<sketchcraft_doc::MaterialId> {
+    pub fn show(&mut self, ctx: &egui::Context, doc: &mut Document) -> Option<woodsketch_doc::MaterialId> {
         if !self.open {
             return None;
         }
@@ -201,7 +201,7 @@ fn color32(doc: &Document, material: &MaterialParts) -> egui::Color32 {
     egui::Color32::from_rgb(rgb[0], rgb[1], rgb[2])
 }
 
-fn parts_tab(ui: &mut egui::Ui, list: &CutList, doc: &Document, edit: &mut Option<sketchcraft_doc::MaterialId>) {
+fn parts_tab(ui: &mut egui::Ui, list: &CutList, doc: &Document, edit: &mut Option<woodsketch_doc::MaterialId>) {
     if list.materials.is_empty() {
         ui.label("No parts yet. Each group or component is a part: boards made with Push/Pull count automatically.");
     }

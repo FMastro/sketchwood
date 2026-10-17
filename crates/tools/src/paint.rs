@@ -4,7 +4,7 @@
 //! in SketchUp.
 
 use glam::Vec2;
-use sketchcraft_doc::{Document, Entity, MaterialId};
+use woodsketch_doc::{Document, Entity, MaterialId};
 
 use crate::pick::Screen;
 use crate::{Modifiers, Overlay, highlight_entity, pick_resolved};
@@ -66,8 +66,8 @@ impl PaintTool {
 #[cfg(test)]
 mod tests {
     use glam::DVec3;
-    use sketchcraft_doc::MaterialKind;
-    use sketchcraft_view::{OrbitCamera, StandardView};
+    use woodsketch_doc::MaterialKind;
+    use woodsketch_view::{OrbitCamera, StandardView};
 
     use super::*;
 
@@ -104,14 +104,14 @@ mod tests {
 #[cfg(test)]
 mod whole_object {
     use glam::DVec3;
-    use sketchcraft_doc::MaterialKind;
-    use sketchcraft_view::{OrbitCamera, StandardView};
+    use woodsketch_doc::MaterialKind;
+    use woodsketch_view::{OrbitCamera, StandardView};
 
     use super::*;
 
     const SIZE: Vec2 = Vec2::new(1000.0, 800.0);
 
-    fn setup(group: bool) -> (Document, OrbitCamera, Option<sketchcraft_doc::InstanceId>) {
+    fn setup(group: bool) -> (Document, OrbitCamera, Option<woodsketch_doc::InstanceId>) {
         let mut doc = Document::default();
         let face = doc.edit(|m| m.add_rectangle(DVec3::ZERO, DVec3::X * 1.5, DVec3::Y * 3.5, DVec3::Z)).unwrap();
         let board = doc.push_pull(face, 10.0, group).unwrap();

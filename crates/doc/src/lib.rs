@@ -1,4 +1,4 @@
-//! The SketchCraft document: geometry, groups and components, selection and undo history.
+//! The WoodSketch document: geometry, groups and components, selection and undo history.
 //! No UI or GPU dependencies.
 
 mod arena;

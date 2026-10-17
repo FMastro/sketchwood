@@ -1,4 +1,4 @@
-//! The SketchCraft window: a 3D viewport inside SketchUp-style chrome (`chrome.rs`).
+//! The WoodSketch window: a 3D viewport inside SketchUp-style chrome (`chrome.rs`).
 
 mod chrome;
 mod cutlist;
@@ -14,11 +14,11 @@ mod viewport;
 use std::path::{Path, PathBuf};
 
 use eframe::egui;
-use sketchcraft_doc::Document;
-use sketchcraft_tools::Tools;
+use woodsketch_doc::Document;
+use woodsketch_tools::Tools;
 use viewport::Viewport;
 
-pub struct SketchCraftApp {
+pub struct WoodSketchApp {
     doc: Document,
     tools: Tools,
     keyboard: keys::Keyboard,
@@ -30,15 +30,15 @@ pub struct SketchCraftApp {
     show_tray: bool,
     show_about: bool,
     /// Units for File > Export.
-    export_units: sketchcraft_doc::export::ExportUnits,
+    export_units: woodsketch_doc::export::ExportUnits,
 }
 
-impl SketchCraftApp {
+impl WoodSketchApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let render_state = cc
             .wgpu_render_state
             .as_ref()
-            .expect("SketchCraft needs eframe's wgpu renderer");
+            .expect("WoodSketch needs eframe's wgpu renderer");
         icons::install(&cc.egui_ctx);
         cc.egui_ctx.set_visuals(chrome::visuals());
         Self {
@@ -52,7 +52,7 @@ impl SketchCraftApp {
             cut_list: cutlist::CutListWindow::default(),
             show_tray: true,
             show_about: false,
-            export_units: sketchcraft_doc::export::ExportUnits::Inches,
+            export_units: woodsketch_doc::export::ExportUnits::Inches,
         }
     }
 
@@ -199,7 +199,7 @@ impl SketchCraftApp {
     }
 }
 
-impl eframe::App for SketchCraftApp {
+impl eframe::App for WoodSketchApp {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.handle_files(&ctx);

@@ -10,8 +10,8 @@
 //!   `[x,y,z]` to place the next point exactly.
 
 use glam::{DVec3, Vec2};
-use sketchcraft_doc::units::format_length;
-use sketchcraft_doc::{Document, EPS};
+use woodsketch_doc::units::format_length;
+use woodsketch_doc::{Document, EPS};
 
 use crate::infer::{self, Direction, Hints, Query, Target};
 use crate::move_tool::parse_offset;
@@ -211,7 +211,7 @@ impl LineTool {
 
 #[cfg(test)]
 mod tests {
-    use sketchcraft_view::{OrbitCamera, StandardView};
+    use woodsketch_view::{OrbitCamera, StandardView};
 
     use super::*;
 

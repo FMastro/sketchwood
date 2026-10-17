@@ -3,8 +3,8 @@
 //! distance on the face. Typing right after changes the offset just made.
 
 use glam::{DVec3, Vec2};
-use sketchcraft_doc::units::{format_length, parse_length};
-use sketchcraft_doc::{Document, EPS, Entity, FaceId};
+use woodsketch_doc::units::{format_length, parse_length};
+use woodsketch_doc::{Document, EPS, Entity, FaceId};
 
 use crate::pick::Screen;
 use crate::{Overlay, highlight_entity, pick_resolved};
@@ -48,7 +48,7 @@ impl OffsetTool {
             self.hover = target(doc, screen, cursor).or_else(|| {
                 crate::pick::hit_face(view.model(), &screen.ray(cursor))
                     .map(|(id, _)| id)
-                    .filter(|&id| view.owner(Entity::Face(id)) != sketchcraft_doc::Owner::Outside)
+                    .filter(|&id| view.owner(Entity::Face(id)) != woodsketch_doc::Owner::Outside)
             });
             return;
         };
@@ -159,7 +159,7 @@ fn target(doc: &Document, screen: Screen<'_>, cursor: Vec2) -> Option<FaceId> {
 
 #[cfg(test)]
 mod tests {
-    use sketchcraft_view::{OrbitCamera, StandardView};
+    use woodsketch_view::{OrbitCamera, StandardView};
 
     use super::*;
 

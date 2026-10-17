@@ -10,11 +10,11 @@ rust-version = "1.95"
 
 [workspace.dependencies]
 # internal
-sketchcraft-doc = { path = "crates/doc" }
-sketchcraft-tools = { path = "crates/tools" }
-sketchcraft-view = { path = "crates/view" }
-sketchcraft-render = { path = "crates/render" }
-sketchcraft-ui-egui = { path = "crates/ui-egui" }
+woodsketch-doc = { path = "crates/doc" }
+woodsketch-tools = { path = "crates/tools" }
+woodsketch-view = { path = "crates/view" }
+woodsketch-render = { path = "crates/render" }
+woodsketch-ui-egui = { path = "crates/ui-egui" }
 
 # external
 eframe = { version = "0.36", default-features = false, features = ["default_fonts", "wgpu", "accesskit"] }

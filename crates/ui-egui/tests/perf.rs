@@ -1,13 +1,13 @@
 //! Timing a big shop drawing: how long editing, hovering and redrawing take. Not run by default;
-//! run with `cargo test --release -p sketchcraft-ui-egui --test perf -- --ignored --nocapture`.
+//! run with `cargo test --release -p woodsketch-ui-egui --test perf -- --ignored --nocapture`.
 
 use std::time::{Duration, Instant};
 
 use glam::{DVec3, Vec2};
-use sketchcraft_doc::Document;
-use sketchcraft_render::Scene;
-use sketchcraft_tools::{PointerEvent, ToolId, Tools};
-use sketchcraft_view::{OrbitCamera, StandardView};
+use woodsketch_doc::Document;
+use woodsketch_render::Scene;
+use woodsketch_tools::{PointerEvent, ToolId, Tools};
+use woodsketch_view::{OrbitCamera, StandardView};
 
 /// `boards` boards (2x4s and panels, each its own group), every tenth one drilled with a
 /// 24-sided hole.
@@ -64,7 +64,7 @@ fn big_shop_drawing() {
             doc.undo();
         });
         time("  clone the scene (an undo snapshot)", 5, || doc.scene().clone());
-        time("  flatten the view", 5, || sketchcraft_doc::View::build(doc.scene(), doc.path()));
+        time("  flatten the view", 5, || woodsketch_doc::View::build(doc.scene(), doc.path()));
         time("select something (version bump)", 20, || {
             doc.selection_mut().clear();
         });
@@ -75,7 +75,7 @@ fn big_shop_drawing() {
         });
 
         let (first, _) = doc.container().instances().next().unwrap();
-        doc.selection_mut().extend([sketchcraft_doc::Entity::Instance(first)]);
+        doc.selection_mut().extend([woodsketch_doc::Entity::Instance(first)]);
         time("rebuild selection highlight only", 5, || {
             let mut scene = Scene::default();
             scene.add_selection(doc.view(), doc.selection(), &doc.context_transform(), doc.scene());
@@ -94,12 +94,12 @@ fn big_shop_drawing() {
         }
         tools.activate(ToolId::Select);
         time("click to select", 10, || {
-            let mods = sketchcraft_tools::Modifiers::default();
+            let mods = woodsketch_tools::Modifiers::default();
             tools.pointer(PointerEvent::Click { pos: Vec2::new(700.0, 450.0), count: 1, mods }, &mut doc, &mut camera, size);
         });
         time("cut list + plans", 3, || {
-            let list = sketchcraft_doc::cutlist::cut_list(doc.scene());
-            sketchcraft_doc::cutplan::plan_all(doc.scene(), &list).len()
+            let list = woodsketch_doc::cutlist::cut_list(doc.scene());
+            woodsketch_doc::cutplan::plan_all(doc.scene(), &list).len()
         });
     }
 }

@@ -11,8 +11,8 @@
 //! Click, or type the distance; typing right after placing a guide moves it.
 
 use glam::{DVec3, Vec2};
-use sketchcraft_doc::units::format_length;
-use sketchcraft_doc::{Document, EPS, Guide};
+use woodsketch_doc::units::format_length;
+use woodsketch_doc::{Document, EPS, Guide};
 
 use crate::infer::{self, Direction, Hints, Query, Target};
 use crate::move_tool::parse_offset;
@@ -317,7 +317,7 @@ impl TapeTool {
 
 #[cfg(test)]
 mod tests {
-    use sketchcraft_view::{OrbitCamera, StandardView};
+    use woodsketch_view::{OrbitCamera, StandardView};
 
     use super::*;
 

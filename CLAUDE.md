@@ -1,4 +1,4 @@
-# SketchCraft
+# WoodSketch
 
 A SketchUp-style 3D modeler in pure Rust (egui/eframe 0.36 + wgpu 30), structured like the
 ArtCraft "Craft" apps (github.com/storytold). Primary use: woodworking/furniture design.
@@ -26,8 +26,8 @@ goes through Trimble's official SketchUp C SDK.
   Measurements box; light theme) so it reads as SketchUp's spiritual successor, without its
   branding or artwork. Keyboard routing (`keys.rs`), viewport input and overlays
   (`viewport.rs`). `tests/workflow.rs` drives the real app headlessly with `egui_kittest` (set
-  `SKETCHCRAFT_SNAPSHOT_DIR` to save rendered PNGs).
-- `apps/sketchcraft`: the binary.
+  `WOODSKETCH_SNAPSHOT_DIR` to save rendered PNGs).
+- `apps/woodsketch`: the binary.
 
 Keep logic out of `ui-egui`: anything testable belongs in a plain crate.
 
@@ -46,7 +46,7 @@ to the box too (so `38mm` isn't Move). Otherwise letters are tool shortcuts, Spa
   (wgpu clip space), `Option`-wrapped pipeline fields, `immediate_size`, `multiview_mask`.
 
 ## Commands
-- `cargo run -p sketchcraft`
+- `cargo run -p woodsketch`
 - `cargo test --workspace`
 - `cargo clippy --workspace --all-targets` (keep it warning-free)
 
@@ -78,9 +78,9 @@ add it there; when you finish an item, remove it.
    faces show their own paint, else the nearest painted group's (`View::face_material`). Paint
    Bucket (B, Alt samples), Materials panel (clicking one activates the Paint Bucket), Entity
    Info material picker. Material edits merge into one undo step (`edit_scene_merging`).
-10. Save/open (done): `.scraft` JSON (`doc::file`, versioned header, serde derives on the scene),
+10. Save/open (done): `.woodsketch` JSON (`.scraft` before the rename, still opened) (`doc::file`, versioned header, serde derives on the scene),
    File menu + Ctrl+N/O/S/Shift+S, native dialogs (`rfd`), title shows `*` when unsaved,
-   "Save changes?" before New/Open/Close, `sketchcraft file.scraft` opens a file.
+   "Save changes?" before New/Open/Close, `woodsketch drawing.woodsketch` opens a file.
    Later: `.skp` import via the C SDK.
 11. Cut list (done): `doc::cutlist` (parts = visible groups/components with faces, grouped by
    material + size, labeled A, B...; CSV) and `doc::cutplan` (sheet goods + solid wood: 2D

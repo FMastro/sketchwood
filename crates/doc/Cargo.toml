@@ -1,6 +1,6 @@
 [package]
-name = "sketchcraft-doc"
-description = "SketchCraft document: geometry model, selection, undo, units"
+name = "woodsketch-doc"
+description = "WoodSketch document: geometry model, selection, undo, units"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

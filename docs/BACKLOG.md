@@ -126,7 +126,7 @@ modeling (rooms, jigs, odd shapes) working; the wood features add on and stay op
 
 ## Files
 - No autosave or crash recovery, no recent-files list, no Windows file association (double-
-  clicking a .scraft needs an installer or registry entry).
+  clicking a .woodsketch needs an installer or registry entry).
 - Saving writes the file in place; a crash mid-write could truncate it (write to a temp file and
   rename instead).
 - File dialogs block the window while open (rfd's synchronous API).
@@ -166,7 +166,7 @@ modeling (rooms, jigs, odd shapes) working; the wood features add on and stay op
 - Faces drawn on the ground face up, where SketchUp shows the blue back face (deliberate).
 
 ## Performance
-Measured with `tests/perf.rs` (`cargo test --release -p sketchcraft-ui-egui --test perf --
+Measured with `tests/perf.rs` (`cargo test --release -p woodsketch-ui-egui --test perf --
 --ignored --nocapture`, `PERF_BOARDS=1500` for a big drawing). At 1500 boards (12,900 faces):
 hover 1-3 ms, click 9 ms, selection highlight 2 ms, an edit 14-17 ms, full redraw rebuild 40 ms.
 - Picking tests every face's plane and box (cached per model), but has no spatial index; a

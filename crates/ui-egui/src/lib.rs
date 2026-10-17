@@ -103,6 +103,7 @@ impl WoodSketchApp {
         self.materials = materials::MaterialsPanel::default();
         self.viewport.document_replaced(&self.doc);
         self.files.path = path;
+        self.files.name_hint = None;
         self.files.mark_saved(&self.doc);
         self.autosave.clear();
     }
@@ -114,9 +115,35 @@ impl WoodSketchApp {
 
     /// Open the drawing at `path` (without asking about unsaved changes).
     pub fn open_path(&mut self, path: &Path) -> Result<(), String> {
+        if files::is_sketchup(path) {
+            // A new, unsaved drawing named after the model; saving asks where.
+            let (doc, skipped) = files::Files::read_sketchup(path)?;
+            self.replace_document(doc, None);
+            self.files.name_hint = path.file_stem().map(|s| s.to_string_lossy().into_owned());
+            self.files.mark_unsaved();
+            self.viewport.request_zoom_extents();
+            files::remember(&mut self.recent, path);
+            if skipped > 0 {
+                self.files.show_error(format!("Opened, but {skipped} faces couldn't be read and were left out."));
+            }
+            return Ok(());
+        }
         let doc = files::Files::read(path)?;
         self.replace_document(doc, Some(path.to_owned()));
         files::remember(&mut self.recent, path);
+        Ok(())
+    }
+
+    /// Add a SketchUp model to the drawing, where it was in its own file, selected; one undo step.
+    pub fn import_sketchup(&mut self, path: &Path) -> Result<(), String> {
+        let (imported, skipped) = files::Files::read_sketchup(path)?;
+        let clip = woodsketch_doc::clipboard::Clip::from_scene(imported.scene().clone()).ok_or("That SketchUp model is empty.")?;
+        self.tools.cancel();
+        self.doc.paste(&clip, glam::DVec3::ZERO);
+        self.viewport.request_zoom_extents();
+        if skipped > 0 {
+            self.files.show_error(format!("Imported, but {skipped} faces couldn't be read and were left out."));
+        }
         Ok(())
     }
 

@@ -5,8 +5,9 @@ ArtCraft "Craft" apps (github.com/storytold). Primary use: woodworking/furniture
 
 ## Clean-room rule
 Reimplement SketchUp's *behavior* from using the app, its manual and public docs. Never
-decompile, disassemble or copy code from SketchUp's binaries. `.skp` interop, when added,
-goes through Trimble's official SketchUp C SDK.
+decompile, disassemble or copy code from SketchUp's binaries or SDK (no REA on them). `.skp`
+reading (`doc::skp`) was worked out from `.skp` files only, without the SDK; keep it that way
+(published notes from others who worked from files are fine for ideas, never their code).
 
 ## Layout
 - `crates/view`: camera/view math. Pure `glam`, no GPU/UI deps, unit-tested.
@@ -88,7 +89,6 @@ add it there; when you finish an item, remove it.
    (last 10, kept with eframe's persistence; the window itself isn't restored). Saves write a temp file
    and swap it in; unsaved changes autosave every 2 minutes to the settings folder
    (`ui-egui::autosave`), offered back at start after a crash.
-   Later: `.skp` import via the C SDK.
 11. Cut list (done): `doc::cutlist` (parts = visible groups/components with faces, grouped by
    material + size, labeled A, B...; CSV) and `doc::cutplan` (sheet goods + solid wood: 2D
    guillotine packing, grain-aware; lumber: smallest standard section, 1D packing over each
@@ -195,3 +195,11 @@ top of `docs/BACKLOG.md` ("Woodworking direction"); keep general modeling workin
    paste_in_place / duplicate`; Paste is carried by Move (`MoveTool::carry`) until a click, joined
    into one undo step, Esc takes it out. Ctrl+C/X/V arrive as egui `Copy`/`Cut`/`Paste` events (a
    note goes on the system clipboard so Ctrl+V is reported); Ctrl+D duplicates.
+30. SketchUp files: `doc::skp::read` opens `.skp` from SketchUp 2021+ (a UTF-16 header, then a ZIP:
+   `model.dat` is nested records, 2-byte tag + 4-byte length; materials' colors in
+   `materials/*/material.xml`). Reads component definitions, top-level geometry, vertices, edges,
+   faces with holes and materials, instances (placement = rotation rows, translation, divisor),
+   materials (matched to the library by name) and layers as tags. File > Open opens one as a new
+   unsaved drawing; File > Import SketchUp Model... pastes one in place (`Clip::from_scene`). Set
+   `WOODSKETCH_SKP=<file>` to run the real-file tests in `skp` and `workflow.rs`. Flat things
+   (thinner than 1/64") aren't cut-list parts.

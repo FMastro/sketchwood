@@ -11,6 +11,7 @@ glam.workspace = true
 earcut.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+zip = { version = "9.0.4", default-features = false, features = ["deflate"] }
 
 [lints]
 workspace = true

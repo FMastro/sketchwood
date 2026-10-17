@@ -1673,3 +1673,24 @@ fn escape_takes_a_carried_paste_back_out_and_duplicate_places_beside() {
     let (lo, hi) = doc.bounds().unwrap();
     assert!((hi.x - lo.x - 9.0).abs() < 1e-9, "3.5\" wide, 2\" apart: {}", hi.x - lo.x);
 }
+
+/// A real SketchUp model, when one is given: `WOODSKETCH_SKP=path` (with
+/// `WOODSKETCH_SNAPSHOT_DIR` to see it).
+#[test]
+fn opens_a_sketchup_model() {
+    let Ok(path) = std::env::var("WOODSKETCH_SKP") else { return };
+    let mut harness = app();
+    harness.state_mut().open_path(std::path::Path::new(&path)).unwrap();
+    for _ in 0..3 {
+        harness.run();
+    }
+    snapshot(&mut harness, "sketchup_model");
+    let doc = harness.state().document();
+    assert!(doc.container().instances().count() > 0);
+    let list = woodsketch_doc::cutlist::cut_list(doc.scene());
+    for m in &list.materials {
+        for p in &m.parts {
+            println!("{} {:?} x{} {:.3} x {:.3} x {:.3}", p.label, p.names, p.count, p.length, p.width, p.thickness);
+        }
+    }
+}

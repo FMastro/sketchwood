@@ -22,6 +22,13 @@ pub struct Clip {
 }
 
 impl Clip {
+    /// Everything at the top level of `scene` (a model read from another format), to paste.
+    pub fn from_scene(scene: Scene) -> Option<Self> {
+        let bounds = scene.bounds()?;
+        // No drawing has this number, so pasting brings the definitions over.
+        Some(Self { scene, drawing: 0, bounds })
+    }
+
     /// The copied things' bounding box, in world coordinates when copied.
     pub fn bounds(&self) -> (DVec3, DVec3) {
         self.bounds

@@ -95,6 +95,14 @@ impl WoodSketchApp {
                 self.save(true);
             }
             ui.separator();
+            if ui.button("Import SketchUp Model...").on_hover_text("Adds a .skp (SketchUp 2021 or later) to this drawing").clicked() {
+                ui.close();
+                if let Some(path) = files::import_dialog(self.files.path.as_deref())
+                    && let Err(e) = self.import_sketchup(&path)
+                {
+                    self.files.show_error(e);
+                }
+            }
             ui.menu_button("Export", |ui| {
                 for (label, format) in [("OBJ...", files::ExportFormat::Obj), ("STL...", files::ExportFormat::Stl)] {
                     if ui.button(label).clicked() {

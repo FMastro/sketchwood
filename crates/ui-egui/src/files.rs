@@ -32,6 +32,8 @@ pub struct Files {
     /// Set once the user has agreed to close, so the next close request goes through.
     closing: bool,
     title: String,
+    /// The name for an unsaved drawing opened from another format (a SketchUp model).
+    pub name_hint: Option<String>,
 }
 
 impl Files {
@@ -52,7 +54,9 @@ impl Files {
         self.path
             .as_deref()
             .and_then(Path::file_stem)
-            .map_or_else(|| "Untitled".to_owned(), |s| s.to_string_lossy().into_owned())
+            .map(|s| s.to_string_lossy().into_owned())
+            .or_else(|| self.name_hint.clone())
+            .unwrap_or_else(|| "Untitled".to_owned())
     }
 
     /// Write the drawing to `path` and remember it as the drawing's file.
@@ -61,6 +65,13 @@ impl Files {
         self.path = Some(path.to_owned());
         self.mark_saved(doc);
         Ok(())
+    }
+
+    /// Read a SketchUp model (`.skp`) as a new drawing; also says how many faces were left out.
+    pub fn read_sketchup(path: &Path) -> Result<(Document, usize), String> {
+        let bytes = std::fs::read(path).map_err(|e| format!("Couldn't open {}: {e}", path.display()))?;
+        let imported = woodsketch_doc::skp::read(&bytes).map_err(|e| e.to_string())?;
+        Ok((Document::from_scene(imported.scene), imported.skipped_faces))
     }
 
     /// Read a drawing from `path`.
@@ -168,7 +179,10 @@ pub fn save_dialog(current: Option<&Path>) -> Option<PathBuf> {
 
 /// The native dialog for choosing a drawing to open.
 pub fn open_dialog(current: Option<&Path>) -> Option<PathBuf> {
-    let mut dialog = rfd::FileDialog::new().add_filter("WoodSketch drawing", &[EXTENSION, OLD_EXTENSION]);
+    let mut dialog = rfd::FileDialog::new()
+        .add_filter("Drawings and SketchUp models", &[EXTENSION, OLD_EXTENSION, SKETCHUP])
+        .add_filter("WoodSketch drawing", &[EXTENSION, OLD_EXTENSION])
+        .add_filter("SketchUp model (2021 and later)", &[SKETCHUP]);
     if let Some(dir) = current.and_then(Path::parent) {
         dialog = dialog.set_directory(dir);
     }
@@ -231,6 +245,24 @@ pub fn remember(recent: &mut Vec<PathBuf>, path: &Path) {
     recent.insert(0, path);
     recent.truncate(RECENT_COUNT);
 }
+
+/// SketchUp's file extension.
+pub const SKETCHUP: &str = "skp";
+
+/// Whether `path` is a SketchUp model.
+pub fn is_sketchup(path: &Path) -> bool {
+    path.extension().is_some_and(|e| e.eq_ignore_ascii_case(SKETCHUP))
+}
+
+/// The native dialog for choosing a SketchUp model to import.
+pub fn import_dialog(current: Option<&Path>) -> Option<PathBuf> {
+    let mut dialog = rfd::FileDialog::new().add_filter("SketchUp model (2021 and later)", &[SKETCHUP]);
+    if let Some(dir) = current.and_then(Path::parent) {
+        dialog = dialog.set_directory(dir);
+    }
+    dialog.pick_file()
+}
+
 
 #[cfg(test)]
 mod tests {

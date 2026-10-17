@@ -156,7 +156,9 @@ pub fn cut_list(scene: &Scene) -> CutList {
     }
     CutList { materials, loose_faces: scene.root.model.faces().count() }
 }
-/// Walk instances, inheriting materials from enclosing groups.
+/// Thinner than this (1/64") is flat, not a part.
+const FLAT: f64 = 1.0 / 64.0;
+
 /// Walk instances, inheriting materials from enclosing groups. `linear` is the enclosing
 /// groups' combined rotation and scale: a scaled group's part is measured at its scaled size.
 fn collect(scene: &Scene, container: &Container, inherited: Option<MaterialId>, linear: glam::DMat3, found: &mut Vec<Found>) {
@@ -169,8 +171,11 @@ fn collect(scene: &Scene, container: &Container, inherited: Option<MaterialId>, 
         let linear = linear * instance.transform.matrix3;
         let model = &definition.container.model;
         // A part: its own faces, measured along its grain (the longest side unless set).
-        if let Some(extents) = crate::part::extents(definition, linear) {
-            let [length, width, thickness] = crate::part::size(extents, &definition.part);
+        if let Some(extents) = crate::part::extents(definition, linear)
+            && let [length, width, thickness] = crate::part::size(extents, &definition.part)
+            // Flat things (a 2D person or tree, an outline) aren't parts.
+            && thickness >= FLAT
+        {
             found.push(Found {
                 name: definition.name.clone(),
                 // Unpainted parts can still have painted faces: use the most common one.
@@ -238,6 +243,18 @@ mod tests {
     pub(crate) fn board(doc: &mut Document, at: DVec3, l: f64, w: f64, t: f64) -> crate::InstanceId {
         let face = doc.edit(|m| m.add_rectangle(at, DVec3::X * w, DVec3::Y * t, DVec3::Z)).unwrap();
         doc.push_pull(face, l, true).unwrap().unwrap()
+    }
+
+    #[test]
+    fn flat_things_are_not_parts() {
+        let mut doc = Document::default();
+        // A flat cut-out (like SketchUp's 2D people): one face, grouped.
+        let face = doc.edit(|m| m.add_rectangle(DVec3::ZERO, DVec3::X * 20.0, DVec3::Z * 60.0, DVec3::NEG_Y)).unwrap();
+        doc.selection_mut().extend([Entity::Face(face)]);
+        doc.group_selection(DefinitionKind::Component).unwrap();
+        board(&mut doc, DVec3::X * 40.0, 30.0, 4.0, 0.75);
+        let list = cut_list(doc.scene());
+        assert_eq!(list.materials.iter().map(MaterialParts::part_count).sum::<usize>(), 1, "only the board");
     }
 
     #[test]

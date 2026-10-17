@@ -18,9 +18,9 @@ each section. Remove items when they're done (mention them in the commit).
    (`woodsketch build`, `cutlist`, `cutsheet`, `render`), an MCP server so Claude and other
    assistants can design with WoodSketch, and docs for agents. Templates (and 1 and 2) are the
    building blocks a recipe calls.
-4. **.skp import** through Trimble's SketchUp SDK: check its terms allow a free open-source app
-   before any work on it.
-5. **Release polish** (installers, auto-update, icons and the site's download links are done):
+4. **SketchUp import, more of it** (started: SketchUp 2021+ files open and import; see SketchUp
+   files below for what's missing). Next: more sample files from different versions, then groups,
+   hidden edges and SketchUp 2020 and older.5. **Release polish** (installers, auto-update, icons and the site's download links are done):
    - Signing: Windows with Azure Artifact Signing (~$9.99/month; individuals in the US/Canada; a
      paid Azure subscription; identity validation takes days; CI signs via OIDC, no stored key).
      macOS with an Apple Developer ID ($99/year) plus notarization, or Gatekeeper blocks it.
@@ -104,6 +104,20 @@ modeling (rooms, jigs, odd shapes) working; the wood features add on and stay op
 - Paste is carried by its box's lowest corner; no picking a different grab point.
 - Pasted loose geometry doesn't merge with geometry it lands on (see Auto-joining below).
 - Duplicate always places 2" to the right; no repeat (Move with Ctrl and `3x` does arrays).
+
+## SketchUp files
+- SketchUp 2020 and older files use a different format and are refused with a message (open and
+  save them in SketchUp 2021+ first).
+- Groups come in as components (the flag that tells them apart isn't worked out yet).
+- Not read: textures, hidden and soft edges (edges between faces under 30° still draw soft),
+  guides, scenes and cameras, dimensions and text, images, layer visibility and folders, back-face
+  materials, transparency.
+- Imported materials are solid wood unless the name matches a library wood or a sheet good, so
+  their stock may need setting in the Materials panel.
+- No saving back to `.skp`.
+- Tested on SketchUp 2026 files only so far; more sample files from other versions will turn up
+  records that aren't read yet.
+- Big models load slowly (vertices are matched by a linear search).
 
 ## Geometry
 - **Auto-joining**: moved or copied geometry doesn't merge with geometry it lands on (shared
